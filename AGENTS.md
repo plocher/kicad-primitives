@@ -6,7 +6,7 @@ A general Python package for reading, editing and writing KiCad 10 projects and 
 
 The larger project's aspiration is to replace the need for kicad-cli, KiCad's own incomplete and limited API and to consolidate the KiCad handling that today lives in six of the owner's repos, each with its own parser and its own idea of writing. 
 
-This last part, the consolidation, that is this session's focus.  The various per-project services become an independent project: none of those repos is blocked on this work, and each becomes a consumer when the package is better than what it has.
+The consolidation is this project's job. The various per-project services become an independent package; none of those repos is blocked on this work. Each becomes a consumer when the package is better than what it has—**migration is decoupled** (see Operating model).
 
 Read `docs/kicad-services-survey-2026-10-12.md` first. It is the brief: the inventory of what each source repo can do, the overlaps, the gaps, the two options considered, and the owner's pending decisions (its section 6). Nothing in this file overrides it.
 
@@ -55,6 +55,75 @@ contract; older versions are supported read-only when possible.
 11. `checks`: ERC and DRC report interpretation.
 
 Non-goals until a consumer asks: PCB editing, 3D models.
+
+
+## Operating model (map + agents)
+
+Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/plocher/kicad-primitives/issues/1). Charting is done; work the frontier one ticket at a time.
+
+### Session charter
+
+> Advance **one** map ticket or **one** small PR under existing ADRs; use donor tests as the net when lifting; no CI/test-framework epic before foundation; check with the owner before any new policy.
+
+### Human vs agent
+
+| Role | Who | Job |
+| --- | --- | --- |
+| Design authority | Owner | Lock grilling tickets; merge PRs to `main`; kill scope creep; decide when a slice is good enough to *offer* to a consumer |
+| Map lead | One primary agent per session | Claims **one** wayfinder ticket first; does not parallel-resolve map tickets |
+| Lift / port | Same or child session after locks | Mechanical harvest under ADRs; bring donor tests with the code |
+| Adversary | Separate short session | Attacks a closed decision or PR; does not implement the same ticket |
+
+### Owner loop
+
+- **Early** on weighty decisions (TOC, write philosophy, first slice, distribution, seams).
+- **Later** when axioms and ADRs are clear—agents execute under them.
+- **Always** before an agent would "decide alone and implement something large."
+
+### Grilling and wayfinder
+
+- `wayfinder:grilling` is HITL: one question at a time, recommended answer, **owner locks**, then write ADR/code.
+- Never resolve more than one map ticket per session.
+- Resolution: comment + close + one line on the map's Decisions so far.
+
+### Git
+
+- Feature branches + PRs only. `main` is protected (require PR; no force-push; enforce for admins).
+- No direct pushes to `main`.
+
+### Package vs consumer migration
+
+- Building and ratifying this package **does not wait** on cutting over jBOM, kproj, kDoctor, Subdivision, or others.
+- When a slice is good enough for consumer X, **open an issue on X's tracker**: list frozen local modules, require remove-and-replace with `kicad-primitives`, and give a concrete recipe. That migration is X's work and does not gate this map.
+- Optional early cutovers are **validation probes** (find gaps), not milestones that block package progress.
+
+### Tests until foundation
+
+- Do **not** build a CI matrix or a greenfield behave cathedral before a working foundation.
+- When a service **moves into** this repo, **move its existing functional scenarios and unit tests with it**. Do not leave nets behind in the donor.
+- Prefer donor test runs during thin re-export periods.
+- Package-side gates: AGENTS functional gates (byte round-trip; netlist connectivity)—not full fixture worship.
+- Behave step style when scenarios land here: **jBOM-like, table-driven, explicit; no hidden magic templates**. Lock details in a small testing ADR on first scenario port—not before.
+
+### Parallelism
+
+- **Serial** on the decision spine (grilling tickets that block each other).
+- **Parallel AFK** only for research/tasks that do not invent policy (e.g. lift inventory, filing donor bugs).
+- **Docs / tutorials / examples**: follower of a real public surface—not a co-equal MVP track before TOC + write model + one shipped capability.
+- Sub-agents: research catalogue, donor-side fixes, adversarial review. Not parallel unbound implementation swarms.
+
+### Defer
+
+- Homegrown CI and coverage theater before 1.0 foundation.
+- Full new behave suite unrelated to lifted donor scenarios.
+- Docs factory and multi-agent ports of unbound modules.
+- kDoctor product UX, jBOM fab CLI, Eagle conversion product, PCB edit / 3D.
+
+### Next-session default
+
+1. Read map #1 Decisions + this file + survey + ADR index.
+2. Claim the first frontier ticket (default: [#3 Public module TOC](https://github.com/plocher/kicad-primitives/issues/3)) unless the owner names another.
+3. Optional parallel AFK: [#9 lift inventory](https://github.com/plocher/kicad-primitives/issues/9), [#13 sheet-walk filing](https://github.com/plocher/kicad-primitives/issues/13).
 
 ## Working agreements
 
