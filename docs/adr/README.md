@@ -1,9 +1,7 @@
 # Architecture Decision Records
 
-Index of ADRs for `kicad-primitives`. Each entry paraphrases the problem and selected solution (or notes if not yet approved).
-
 | ADR | Status | One-line |
 | --- | --- | --- |
-| _(none yet)_ | | |
+| [0001-package-identity.md](0001-package-identity.md) | Accepted | Distribution `kicad-primitives`, import `kicad_primitives`, MIT, Python 3.10+, KiCad 10 write target |
 
 Form and process: see root `AGENTS.md` (Proposals are ADRs).
