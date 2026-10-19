@@ -2,13 +2,13 @@
 
 ## What this project is
 
-A general Python package for reading, editing and writing KiCad 10 projects and libraries: schematics, symbol libraries, footprints, library tables, netlists, and the `kicad-cli` facade. 
+A general Python package for reading, editing and writing KiCad 10 projects and libraries: schematics, PCBs, symbol libraries, footprint libraries, library resolution, and connectivity.
 
 The larger project's aspiration is to replace the need for kicad-cli, KiCad's own incomplete and limited API and to consolidate the KiCad handling that today lives in six of the owner's repos, each with its own parser and its own idea of writing. 
 
 The consolidation is this project's job. The various per-project services become an independent package; none of those repos is blocked on this work. Each becomes a consumer when the package is better than what it has—**migration is decoupled** (see Operating model).
 
-Read `docs/kicad-services-survey-2026-10-12.md` first. It is the brief: the inventory of what each source repo can do, the overlaps, the gaps, the two options considered, and the owner's pending decisions (its section 6). Nothing in this file overrides it.
+Read `docs/kicad-services-survey-2026-10-12.md` first. It is the founding inventory, not the current decision record. Accepted ADRs record later owner decisions and supersede conflicting survey proposals.
 
 ## Package identity (locked)
 
@@ -40,21 +40,25 @@ Canonical record: `docs/PACKAGE_IDENTITY.md` and ADR 0001. Do not invent alterna
 KiCad 10 is the target. The format version in the files (`(version 20251024)` today) is the
 contract; older versions are supported read-only when possible.
 
-## Scope: the API areas (survey section 5, Option A's table of contents)
+## Scope: public functional areas
 
-1. `sexp`: read a file to a data structure; typed accessors; version probe.
-2. `text`: byte-preserving edits; node-level helpers (set, delete, rename a property; rename a symbol or pin; add a pin; split units; copy a symbol between libraries); a formatter for inserted nodes; a round-trip gate.
-3. `symbols`: the library model: symbols, units (unit 0 is common to all), pins per unit with numbers and positions, properties, `extends`, `ki_locked`; write in KiCad's sorted order.
-4. `netlist`: the `kicadsexpr` netlist model and the connectivity diff.
-5. `schematic`: placed objects: symbol instances with fields, uuid, transform, unit, instance paths; wires, labels, junctions, sheets; the embedded `lib_symbols`.
-6. `project`: `.kicad_pro`, sheet tree with instance paths, project libraries and settings.
-7. `cli`: find `kicad-cli` (env `KICAD_CLI`, then PATH, then the app bundle), run netlist, ERC, DRC, symbol SVG and upgrade exports, filter the Fontconfig noise.
-8. `tables`: sym, fp and design-block library tables, global and project scope, `${VAR}` resolution.
-9. `footprints`: a read model for `.pretty` libraries.
-10. `runtime`: lock files, running-KiCad detection, plugin mode.
-11. `checks`: ERC and DRC report interpretation.
+Canonical TOC, responsibilities, donor basis, and exclusions: [ADR 0002](docs/adr/0002-functional-service-toc.md).
+Terms: [CONTEXT.md](CONTEXT.md).
 
-Non-goals until a consumer asks: PCB editing, 3D models.
+The seven areas are Projects, Schematics, PCBs, Symbol libraries, Footprint libraries, Library tables and resolution, and Connectivity.
+They are not seven independent entry points or final Python namespace names.
+Projects own schematic and PCB context. Checks belong to the project or document being checked.
+Library resolution can work without a project. Project context adds lookup locations and variables.
+
+Parsing, text editing, and runtime safeguards are internal details.
+KiCad integration is provisional internal machinery, not a committed public CLI module.
+PCB editing belongs to intended scope and follows schematic and library editing patterns.
+Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
+3D models remain out of scope until requested.
+
+Inventory used, unused, and unimplemented capabilities separately from defects and exclusions.
+Parity equals used capabilities. Consumer usability also needs migration recipes and documentation.
+Consumer usability is not package completeness. The owner locks the 1.0 release bar.
 
 
 ## Operating model (map + agents)
@@ -117,12 +121,12 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 - Homegrown CI and coverage theater before 1.0 foundation.
 - Full new behave suite unrelated to lifted donor scenarios.
 - Docs factory and multi-agent ports of unbound modules.
-- kDoctor product UX, jBOM fab CLI, Eagle conversion product, PCB edit / 3D.
+- kDoctor product UX, jBOM fab CLI, Eagle conversion product, 3D models.
 
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first frontier ticket (default: [#3 Public module TOC](https://github.com/plocher/kicad-primitives/issues/3)) unless the owner names another.
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. The public TOC decision is recorded in ADR 0002.
 3. Optional parallel AFK: [#9 lift inventory](https://github.com/plocher/kicad-primitives/issues/9), [#13 sheet-walk filing](https://github.com/plocher/kicad-primitives/issues/13).
 
 ## Working agreements
@@ -164,7 +168,7 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 ## Layout (proposed)
 
 ```
-src/kicad_primitives/   one subpackage per API area above
+src/kicad_primitives/   functional services and private implementation layers
 tests/                  Unit tests
 features/               behave / gherkin functional scenarios
 docs/                   the survey, ADRs, review notes
