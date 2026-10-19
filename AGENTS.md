@@ -10,6 +10,22 @@ This last part, the consolidation, that is this session's focus.  The various pe
 
 Read `docs/kicad-services-survey-2026-10-12.md` first. It is the brief: the inventory of what each source repo can do, the overlaps, the gaps, the two options considered, and the owner's pending decisions (its section 6). Nothing in this file overrides it.
 
+## Package identity (locked)
+
+Canonical record: `docs/PACKAGE_IDENTITY.md` and ADR 0001. Do not invent alternate names in code or docs.
+
+| Field | Value |
+| --- | --- |
+| Distribution | `kicad-primitives` |
+| Import | `kicad_primitives` |
+| License | MIT |
+| Python | 3.10+ |
+| KiCad write/edit target | 10 |
+| Format contract | per-file `(version …)` |
+| Older formats | read-only when cheap |
+| `sexpdata` | declare only after parser ADR keeps it |
+| Home | this repo only for shared KiCad I/O |
+
 ## Sources, by what they are strongest at (survey section 1 and 2)
 
 | Repo | Take from it | Path |
