@@ -15,6 +15,8 @@ Identity is canonical in [`docs/PACKAGE_IDENTITY.md`](docs/PACKAGE_IDENTITY.md) 
 ## Start here
 
 - [`AGENTS.md`](AGENTS.md) — working agreements and API area list
+- [ADR 0002](docs/adr/0002-functional-service-toc.md) — accepted functional TOC, ownership, donor basis, and exclusions
+- [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
 - [`docs/kicad-services-survey-2026-10-12.md`](docs/kicad-services-survey-2026-10-12.md) — founding survey
 - [Wayfinder map #1](https://github.com/plocher/kicad-primitives/issues/1) — package design decisions
 
@@ -25,6 +27,11 @@ python3 -m pip install -e .
 python3 -c "import kicad_primitives as kp; print(kp.__version__)"
 ```
 
-## Non-goals (until a consumer asks)
+## Scope and implementation status
 
-PCB editing, 3D models.
+The accepted functional TOC includes projects, schematics, PCBs, symbol libraries, footprint libraries, library resolution, and connectivity.
+This is intended scope, not a list of shipped capabilities.
+PCB editing follows the same high-level patterns as schematic and library editing.
+Exposed unimplemented operations must fail explicitly before making changes.
+
+3D models remain out of scope until a consumer asks.

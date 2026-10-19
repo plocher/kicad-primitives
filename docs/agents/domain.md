@@ -6,4 +6,7 @@ Single-context layout:
 - `docs/adr/` for ADRs (STE-flavored; see `AGENTS.md`)
 - `docs/kicad-services-survey-2026-10-12.md` — founding survey / brief
 
-Skills should read `AGENTS.md` and the survey before exploring source repos. Prefer the survey's vocabulary for capability areas (`sexp`, `text`, `symbols`, `netlist`, `schematic`, `project`, `cli`, `tables`, `footprints`, `runtime`, `checks`).
+Skills should read `AGENTS.md` and the survey before exploring source repos.
+Use ADR 0002 for the accepted functional TOC and ownership rules.
+Use `CONTEXT.md` for capability and release terminology.
+The survey's eleven implementation and domain areas remain donor vocabulary, not the public TOC.
