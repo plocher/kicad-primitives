@@ -1,0 +1,621 @@
+{
+  "purpose": "Throwaway evidence for write-philosophy ticket #4. Not a shipped API or test corpus.",
+  "recorded_date": "2026-10-22",
+  "harness": "experiments/write_representation.py",
+  "harness_sha256": "d8c49dd48bc42b38981228fb76ba0d131928ec6426cf7602c1da185f68f4a5d1",
+  "candidates": {
+    "circuitdk": {
+      "repository": "td2sk/circuitdk",
+      "revision": "aca240a0404f6bb2162bb60257f7b1f0c756db06"
+    },
+    "parts2kicad": {
+      "repository": "julianschick/parts2kicad",
+      "revision": "7b00d7ce223379f03183cf40482667e608258dd1"
+    },
+    "sexpdata": {
+      "repository": "jd-boyd/sexpdata",
+      "revision": "29170a5daed7c07a8d035856356416141210d963"
+    }
+  },
+  "initial_python310_source_run": {
+    "python": "3.10.22",
+    "upstream_tests_passed": 30,
+    "originals_and_snapshot_unchanged_during_recorded_run": true,
+    "results": {
+      "circuitdk": {
+        "counts": {
+          "pass": 30,
+          "not_exercised": 1
+        },
+        "failed_cases": []
+      },
+      "parts2kicad": {
+        "counts": {
+          "pass": 20,
+          "fail": 9,
+          "not_exercised": 2
+        },
+        "failed_cases": [
+          {
+            "case": "real.noop:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "5076 lists; 105106 -> 105102 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "14248 lists; 332906 -> 332904 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:escaped_quote",
+            "detail": "2 lists; 39 -> 38 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.noop:escaped_neighbor",
+            "detail": "3 lists; 56 -> 55 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:escaped_neighbor",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "malformed:extra_close",
+            "detail": "accepted malformed input"
+          },
+          {
+            "case": "malformed:bare_close",
+            "detail": "accepted malformed input"
+          }
+        ]
+      },
+      "sexpdata": {
+        "counts": {
+          "fail": 25,
+          "not_exercised": 2,
+          "pass": 4
+        },
+        "failed_cases": [
+          {
+            "case": "real.noop:symbols/Railroad-Field.kicad_sym",
+            "detail": "3661 lists; 76182 -> 55981 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Field.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:symbols/Railroad-HardwareIO.kicad_sym",
+            "detail": "5658 lists; 119388 -> 85628 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-HardwareIO.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:symbols/Railroad-Office.kicad_sym",
+            "detail": "3989 lists; 83640 -> 61231 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Office.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "5076 lists; 105106 -> 77493 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:SPCoast/SPCoast.kicad_sch",
+            "detail": "65 lists; 2623 -> 2356 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.noop:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "14248 lists; 332906 -> 261499 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:escaped_quote",
+            "detail": "2 lists; 39 -> 38 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:escaped_quote",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:backslashes",
+            "detail": "2 lists; 48 -> 47 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:backslashes",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:unicode",
+            "detail": "2 lists; 47 -> 46 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:unicode",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:crlf",
+            "detail": "2 lists; 45 -> 39 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:crlf",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:numbers",
+            "detail": "3 lists; 65 -> 58 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:numbers",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:opaque",
+            "detail": "4 lists; 76 -> 73 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:opaque",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:escaped_neighbor",
+            "detail": "3 lists; 56 -> 55 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:escaped_neighbor",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          }
+        ]
+      }
+    }
+  },
+  "fresh_python311_source_run": {
+    "python": "3.11.17",
+    "kicad": "10.0.1",
+    "upstream_tests_passed": 30,
+    "originals_and_snapshot_unchanged": true,
+    "results": {
+      "circuitdk": {
+        "counts": {
+          "pass": 79,
+          "not_exercised": 1
+        },
+        "failed_cases": []
+      },
+      "parts2kicad": {
+        "counts": {
+          "pass": 20,
+          "fail": 9,
+          "not_exercised": 3
+        },
+        "failed_cases": [
+          {
+            "case": "real.noop:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "5077 lists; 105112 -> 105108 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "14249 lists; 332926 -> 332924 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:escaped_quote",
+            "detail": "2 lists; 39 -> 38 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.noop:escaped_neighbor",
+            "detail": "3 lists; 56 -> 55 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:escaped_neighbor",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "malformed:extra_close",
+            "detail": "accepted malformed input"
+          },
+          {
+            "case": "malformed:bare_close",
+            "detail": "accepted malformed input"
+          }
+        ]
+      },
+      "sexpdata": {
+        "counts": {
+          "fail": 25,
+          "not_exercised": 3,
+          "pass": 4
+        },
+        "failed_cases": [
+          {
+            "case": "real.noop:symbols/Railroad-Field.kicad_sym",
+            "detail": "3661 lists; 76182 -> 55981 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Field.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:symbols/Railroad-HardwareIO.kicad_sym",
+            "detail": "5658 lists; 119427 -> 85667 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-HardwareIO.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:symbols/Railroad-Office.kicad_sym",
+            "detail": "3989 lists; 83642 -> 61233 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Office.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "5077 lists; 105112 -> 77495 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:symbols/Railroad-Trackplan.kicad_sym",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "real.noop:SPCoast/SPCoast.kicad_sch",
+            "detail": "65 lists; 2623 -> 2356 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.noop:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "14249 lists; 332926 -> 261514 bytes; sha256_equal=False"
+          },
+          {
+            "case": "real.edit:SPCoast/GilroyCalTrain.kicad_sch",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:escaped_quote",
+            "detail": "2 lists; 39 -> 38 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:escaped_quote",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:backslashes",
+            "detail": "2 lists; 48 -> 47 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:backslashes",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:unicode",
+            "detail": "2 lists; 47 -> 46 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:unicode",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:crlf",
+            "detail": "2 lists; 45 -> 39 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:crlf",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:numbers",
+            "detail": "3 lists; 65 -> 58 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:numbers",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:opaque",
+            "detail": "4 lists; 76 -> 73 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:opaque",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          },
+          {
+            "case": "edge.noop:escaped_neighbor",
+            "detail": "3 lists; 56 -> 55 bytes; sha256_equal=False"
+          },
+          {
+            "case": "edge.edit:escaped_neighbor",
+            "detail": "changed bytes outside selected value, or wrong interpreted value"
+          }
+        ]
+      }
+    }
+  },
+  "published_release_run": {
+    "python": "3.11.17",
+    "kicad": "10.0.1",
+    "distribution": "0.1.1",
+    "upstream_tests_passed": 6,
+    "originals_and_snapshot_unchanged_during_recorded_run": true,
+    "results": {
+      "circuitdk": {
+        "counts": {
+          "pass": 79,
+          "not_exercised": 1
+        },
+        "failed_cases": []
+      }
+    },
+    "artifacts": [
+      {
+        "filename": "circuitdk_lossless_sexpr-0.1.1-py3-none-any.whl",
+        "sha256": "5a41a4f4d8b83e6d43b449c281e08ceb66ca8c6ffb0b09c5f398d609f860108f",
+        "url": "https://files.pythonhosted.org/packages/70/47/b8f3e4c95f467e0191b98ab83adfb68418fcba6222c4428b924d245c0b1c/circuitdk_lossless_sexpr-0.1.1-py3-none-any.whl",
+        "source_modules_match": [
+          "lossless_sexpr/__init__.py",
+          "lossless_sexpr/diagnostics.py",
+          "lossless_sexpr/edits.py",
+          "lossless_sexpr/nodes.py",
+          "lossless_sexpr/parser.py",
+          "lossless_sexpr/strings.py",
+          "lossless_sexpr/tokens.py"
+        ]
+      },
+      {
+        "filename": "circuitdk_lossless_sexpr-0.1.1.tar.gz",
+        "sha256": "3337b298b30916bc196137dc5f9c9a8c23eebee0225bca787b424594a8199068",
+        "url": "https://files.pythonhosted.org/packages/af/81/a5a092e00518eea23ca2fbf71e64977305d765838a0bdd3a8ff8e239aa8d/circuitdk_lossless_sexpr-0.1.1.tar.gz",
+        "source_modules_match": [
+          "lossless_sexpr/__init__.py",
+          "lossless_sexpr/diagnostics.py",
+          "lossless_sexpr/edits.py",
+          "lossless_sexpr/nodes.py",
+          "lossless_sexpr/parser.py",
+          "lossless_sexpr/strings.py",
+          "lossless_sexpr/tokens.py"
+        ]
+      }
+    ]
+  },
+  "ordering_controls": [
+    {
+      "candidate": "circuitdk",
+      "case": "insert.preservation:beginning",
+      "passed": true,
+      "detail": "fixed UUID; original blocks byte-identical; old relative order unchanged"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "ki.normalized:insert-beginning",
+      "passed": true,
+      "detail": "334670 -> 334670 bytes; sha256_equal=True; expected_reorder=False"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "insert.preservation:middle",
+      "passed": true,
+      "detail": "fixed UUID; original blocks byte-identical; old relative order unchanged"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "ki.normalized:insert-middle",
+      "passed": true,
+      "detail": "334670 -> 334670 bytes; sha256_equal=True; expected_reorder=False"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "ki.accept:negative-append-middle-uuid",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "ki.normalized:negative-append-middle-uuid",
+      "passed": true,
+      "detail": "334670 -> 334670 bytes; sha256_equal=False; expected_reorder=True"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "ki.fixed_point:negative-append-middle-uuid",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "insert.negative_control",
+      "passed": true,
+      "detail": "incorrect append normalizes to the same output as ordered insertion"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "insert.preservation:end",
+      "passed": true,
+      "detail": "fixed UUID; original blocks byte-identical; old relative order unchanged"
+    },
+    {
+      "candidate": "circuitdk",
+      "case": "ki.normalized:insert-end",
+      "passed": true,
+      "detail": "334670 -> 334670 bytes; sha256_equal=True; expected_reorder=False"
+    },
+    {
+      "candidate": "parts2kicad",
+      "case": "insert.ki_comparison",
+      "passed": null,
+      "detail": "not pursued: native no-op already violates real-file preservation"
+    },
+    {
+      "candidate": "sexpdata",
+      "case": "insert.ki_comparison",
+      "passed": null,
+      "detail": "not pursued: native no-op already violates real-file preservation"
+    }
+  ],
+  "provenance_note": "The live donor project changed after the first snapshot. The old snapshot stayed intact; the original-vs-snapshot audit flagged drift. Validation was repeated on a fresh copy without reverting or writing donor files. It reproduced the same selected-candidate results.",
+  "fresh_snapshot_bytes": 4340017,
+  "fresh_snapshot_files": [
+    {
+      "path": "SPCoast/Christopher-Panel.kicad_sch",
+      "sha256": "1d9fe2302d163ca050be465f2cc0e1dcc084988057aaf915f93a41b30fe233a0",
+      "bytes": 157730
+    },
+    {
+      "path": "SPCoast/Christopher.kicad_sch",
+      "sha256": "2450e884759098066726b0274388438c4f74a5a8ad56e4e7968d92fa12f72e9f",
+      "bytes": 411175
+    },
+    {
+      "path": "SPCoast/Corporal-Panel.kicad_sch",
+      "sha256": "330bff42b97a8e969d1362518339826f4e4e851230a541b7b2dce0ca7eafd23b",
+      "bytes": 131328
+    },
+    {
+      "path": "SPCoast/Corporal.kicad_sch",
+      "sha256": "f6ebebc08eee207be62a15a79484adf0bce482ddfb6d16b6c85cd956a812c292",
+      "bytes": 357703
+    },
+    {
+      "path": "SPCoast/GilroyCalTrain-Panel.kicad_sch",
+      "sha256": "18208dc233a1e4df4829e6fe5c957c3664215852aa7fb31717e1bee2acf3e1a0",
+      "bytes": 121759
+    },
+    {
+      "path": "SPCoast/GilroyCalTrain.kicad_sch",
+      "sha256": "69a8531fa4d274be9ea80cf596531a96679b47fcd1e26e89fdabb3343a84b984",
+      "bytes": 332926
+    },
+    {
+      "path": "SPCoast/GilroyInterchange-Panel.kicad_sch",
+      "sha256": "a2afadc1b4d45264b72e6c167d26de198c0fe6730094674187e9c306338e973f",
+      "bytes": 130163
+    },
+    {
+      "path": "SPCoast/GilroyInterchange.kicad_sch",
+      "sha256": "ffcc654c10dd86c2214cf9188d168511cf0c9f1d26394d3b1896416bf0567ac3",
+      "bytes": 293009
+    },
+    {
+      "path": "SPCoast/Luchessa-Panel.kicad_sch",
+      "sha256": "30050e945e9624666bf2e181e9815288eff868761468a36ab79ba6fa58a90e07",
+      "bytes": 135439
+    },
+    {
+      "path": "SPCoast/Luchessa.kicad_sch",
+      "sha256": "aae8ac67670c1baf5994f78f661a7a75ec202fa4ae4de5ed3f5afe920665fab3",
+      "bytes": 402236
+    },
+    {
+      "path": "SPCoast/SPCoast.kicad_pro",
+      "sha256": "d2fe6a329c9e7ad982e1ef6cb189281d224b919e9d671cad4d020e3a0b774c7a",
+      "bytes": 12642
+    },
+    {
+      "path": "SPCoast/SPCoast.kicad_sch",
+      "sha256": "26333c02825724dd9b71e9f3bef32de8193f75567ad762548fd1858b66fdee09",
+      "bytes": 2623
+    },
+    {
+      "path": "SPCoast/Sargent-Panel.kicad_sch",
+      "sha256": "509bc8472fa7a01831f3ea510a3c4cf7a06797a07597ccd679bd6c4bc435be42",
+      "bytes": 100761
+    },
+    {
+      "path": "SPCoast/Sargent.kicad_sch",
+      "sha256": "865c10f166208f5b052a28d080917d22ce125c1e7346486eeee2b33038009fc9",
+      "bytes": 378362
+    },
+    {
+      "path": "SPCoast/South-cTc.kicad_sch",
+      "sha256": "12cf854b16bd4f6a228a6c4046985e789321f44104f32d0617d4ff6000c5afbe",
+      "bytes": 67339
+    },
+    {
+      "path": "SPCoast/Watsonville-Panel.kicad_sch",
+      "sha256": "7407998ef680fb7b8b84547515d6f574616df8b4be3d329f8d37a20b53e63607",
+      "bytes": 101728
+    },
+    {
+      "path": "SPCoast/Watsonville.kicad_sch",
+      "sha256": "d2cc7d1c7582bd142810aaddbbd42e0ff30d793005803c4e96771c50c74fbc97",
+      "bytes": 818731
+    },
+    {
+      "path": "symbols/Railroad-Field.kicad_sym",
+      "sha256": "7714f38e2f6fb5b3f9d2ea8b86ac2ea0f8c0fbb8343ed7a7707014dbb216e15c",
+      "bytes": 76182
+    },
+    {
+      "path": "symbols/Railroad-HardwareIO.kicad_sym",
+      "sha256": "339ae344a7300ed096b98b5b3de70726c7e5fe4951bf118b814e4e27c985e4d0",
+      "bytes": 119427
+    },
+    {
+      "path": "symbols/Railroad-Office.kicad_sym",
+      "sha256": "32191b252ec856bb674131801034ade89178c785533c42d4373eb66f6ec9d9e5",
+      "bytes": 83642
+    },
+    {
+      "path": "symbols/Railroad-Trackplan.kicad_sym",
+      "sha256": "a97adde61aaba3dc3417411de7f5c7bd950f70f21d9666f1bb5d8a9b6804bb77",
+      "bytes": 105112
+    }
+  ],
+  "initial_primary_article_hashes": [
+    {
+      "path": "SPCoast/GilroyCalTrain.kicad_sch",
+      "sha256": "1433ecfa036243a9902103d1b913f202f9d8fa2304e7487e811a5ceb4e622816"
+    },
+    {
+      "path": "SPCoast/SPCoast.kicad_sch",
+      "sha256": "26333c02825724dd9b71e9f3bef32de8193f75567ad762548fd1858b66fdee09"
+    },
+    {
+      "path": "symbols/Railroad-Field.kicad_sym",
+      "sha256": "7714f38e2f6fb5b3f9d2ea8b86ac2ea0f8c0fbb8343ed7a7707014dbb216e15c"
+    },
+    {
+      "path": "symbols/Railroad-HardwareIO.kicad_sym",
+      "sha256": "5878bd50d15d6c77205fbae46e5ddb32ba7359ab0ab18c197ef4f54fc08a255e"
+    },
+    {
+      "path": "symbols/Railroad-Office.kicad_sym",
+      "sha256": "eb1dfde37fa931dc939568d05b18a3a0b2b3b4ef95352690248189b9531f8725"
+    },
+    {
+      "path": "symbols/Railroad-Trackplan.kicad_sym",
+      "sha256": "2ebd9f3187f0cf5ac9727f4c6dc03e90a967fb55143ba42df422597830261097"
+    }
+  ],
+  "limits": [
+    "CircuitDK render retains source; changed text must be reparsed.",
+    "Insertion clones a formatted block, not a general formatter.",
+    "No electrical-correctness or ERC/DRC claim.",
+    "No general file-type, performance, or deep-nesting claim.",
+    "One Description case is absent from the root sheet.",
+    "Baseline-candidate failures are measurements, not failures of the selected candidate.",
+    "No copies of the original designs are committed."
+  ]
+}
