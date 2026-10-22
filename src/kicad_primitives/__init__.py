@@ -1,6 +1,6 @@
 """kicad_primitives — shared KiCad project and library services.
 
-Package identity is locked in docs/PACKAGE_IDENTITY.md and ADR 0001.
+Package identity is locked in docs/PACKAGE_IDENTITY.md and ADRs 0001/0003.
 API modules are not shipped yet; this package is pre-alpha.
 """
 

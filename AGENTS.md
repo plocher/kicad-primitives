@@ -12,18 +12,18 @@ Read `docs/kicad-services-survey-2026-10-12.md` first. It is the founding invent
 
 ## Package identity (locked)
 
-Canonical record: `docs/PACKAGE_IDENTITY.md` and ADR 0001. Do not invent alternate names in code or docs.
+Canonical record: `docs/PACKAGE_IDENTITY.md`, ADR 0001, and its parser/Python amendment in ADR 0003. Do not invent alternate names in code or docs.
 
 | Field | Value |
 | --- | --- |
 | Distribution | `kicad-primitives` |
 | Import | `kicad_primitives` |
 | License | MIT |
-| Python | 3.10+ |
+| Python | 3.11+ |
 | KiCad write/edit target | 10 |
 | Format contract | per-file `(version …)` |
 | Older formats | read-only when cheap |
-| `sexpdata` | declare only after parser ADR keeps it |
+| Parser dependency | `circuitdk-lossless-sexpr==0.1.1`, private import `lossless_sexpr` |
 | Home | this repo only for shared KiCad I/O |
 
 ## Sources, by what they are strongest at (survey section 1 and 2)
@@ -51,6 +51,13 @@ Projects own schematic and PCB context. Checks belong to the project or document
 Library resolution can work without a project. Project context adds lookup locations and variables.
 
 Parsing, text editing, and runtime safeguards are internal details.
+ADR 0003 selects one source-preserving S-expression representation for semantic reads and localized edits.
+Preserve opaque content outside the operation's required understanding. Use current spans and reparse changed source before subsequent edits.
+No-op saves preserve bytes. Edited output must contain the required delta and preserve untouched content.
+Connectivity-preserving operations also verify unchanged connectivity. Electrical edits verify their intended changes instead.
+Placed-symbol insertion follows W4-ORDER-01: UUID order within the symbol section, not coordinates or references.
+Do not normalize unrelated content through a whole-file rewrite or automatic KiCad resave.
+Consumer-specific compatibility adapters belong in consumers, not this package.
 KiCad integration is provisional internal machinery, not a committed public CLI module.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
 Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
@@ -94,6 +101,7 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 
 - Feature branches + PRs only. `main` is protected (require PR; no force-push; enforce for admins).
 - No direct pushes to `main`.
+- Commit coherent, validated changes regularly on feature branches using Conventional Commits. The owner authorizes this without a separate approval request for each commit.
 
 ### Package vs consumer migration
 
@@ -174,7 +182,7 @@ features/               behave / gherkin functional scenarios
 docs/                   the survey, ADRs, review notes
 ```
 
-Python 3.10 or later; `sexpdata` as a runtime dependency, if the chosen parser keeps it.
+Python 3.11 or later. CircuitDK's `lossless_sexpr` is the private parser foundation under ADR 0003.
 
 ## Commands
 
