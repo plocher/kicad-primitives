@@ -3,6 +3,11 @@
 Date: 2026-10-19  
 Status: Accepted  
 Ticket: [#2](https://github.com/plocher/kicad-primitives/issues/2)
+## Amendment: 2026-10-22
+
+[ADR 0003](0003-source-preserving-parser-and-writes.md) supersedes this record's original Python floor and conditional parser choice.
+The current floor is Python 3.11+. The parser dependency is `circuitdk-lossless-sexpr==0.1.1`, not `sexpdata`.
+The original options and decision below remain as history. Other identity decisions are unchanged.
 
 ## Problem
 
