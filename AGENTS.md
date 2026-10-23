@@ -60,7 +60,7 @@ Do not normalize unrelated content through a whole-file rewrite or automatic KiC
 Consumer-specific compatibility adapters belong in consumers, not this package.
 ADR 0004 selects the first functional slice: explicit-path symbol-library inspection and localized updates to existing, unambiguous properties declared on a selected symbol.
 Keep declared and inherited values distinct, preserve unit/body-style identity and repeated properties, and follow its acceptance gates.
-This is an approved release target, not implemented capability or the 1.0 completeness bar.
+The first slice is implemented in `kicad_primitives.symbols`; usage and limits are in `docs/symbol-libraries.md`. It is not the 1.0 completeness bar.
 KiCad integration is provisional internal machinery, not a committed public CLI module.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
 Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
@@ -189,7 +189,10 @@ Python 3.11 or later. CircuitDK's `lossless_sexpr` is the private parser foundat
 
 ## Commands
 
-None yet. When they exist: `python3 -m unittest discover -s tests -q`, and `kicad-cli` from `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli` on this machine (set `KICAD_CLI` to override).
+Install in the active Python 3.11+ environment, then run `python -m unittest discover -s tests -q`.
+Static checks used for the first slice: `ruff check src tests`, `ruff format --check src tests`, and `mypy --strict --follow-untyped-imports src/kicad_primitives`.
+The normal suite needs neither KiCad nor donor checkouts. The opt-in `tests/verify_symbol_libraries.py` takes explicit library paths, a new output directory, and optionally `--kicad-cli`; see `docs/symbol-libraries.md`.
+On this machine KiCad's CLI is `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`. No public locator or precedence contract is introduced by the verification runner.
 
 
 ## Agent skills

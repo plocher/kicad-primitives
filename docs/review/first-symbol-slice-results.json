@@ -1,0 +1,252 @@
+{
+  "date": "2026-10-23",
+  "python": "3.11.17",
+  "kicad": "10.0.1",
+  "parser": "circuitdk-lossless-sexpr==0.1.1",
+  "service_commit": "2a815a8",
+  "runner": "tests/verify_symbol_libraries.py",
+  "limitations": [
+    "Bounded 11-library sample, not all installed libraries or electrical/project validation.",
+    "Descriptions/private fields exercised with Unicode, quotes and backslashes; all production writes stay byte-localized.",
+    "KiCad trims leading whitespace in Description values. Canonical probes avoid adding leading whitespace when the original Description is empty.",
+    "Input hashes identify originals; resaves run only on disposable copies."
+  ],
+  "libraries": [
+    {
+      "sha256": "14700bcec319188be98e8cbc7b7bb3cfdfde8b7ae0b058ddd0e7bb2a3948dbb8",
+      "version": 20251024,
+      "symbols": 18,
+      "resolved": 18,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "Device-Contact",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Railroad-Field.kicad_sym"
+    },
+    {
+      "sha256": "ba199290fe61fd4c90feb84114aedb482ddbd760b3ddd35426cd8ba71ae53b92",
+      "version": 20251024,
+      "symbols": 18,
+      "resolved": 18,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "Driver-CMRInet-IB",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Railroad-HardwareIO.kicad_sym"
+    },
+    {
+      "sha256": "7cc3cbd50e6a57da333fafdf6013a7a67df15e5787a7ec468888af2c6f879a30",
+      "version": 20251024,
+      "symbols": 22,
+      "resolved": 22,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "Encoding-AAR",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Railroad-Office.kicad_sym"
+    },
+    {
+      "sha256": "b762a803d1b1337f1abc453a7dcd116a048f6948bac7ef7c18b5217d4fed5325",
+      "version": 20251024,
+      "symbols": 38,
+      "resolved": 38,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "AUXILIARY",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Railroad-Trackplan.kicad_sym"
+    },
+    {
+      "sha256": "3844506ad136424702062b26d04efb3e95b172a9e37960a60364ce7a08b16878",
+      "version": 20251024,
+      "symbols": 69,
+      "resolved": 69,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "AMS1117",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "SPCoast.kicad_sym"
+    },
+    {
+      "sha256": "b7baf3f8561add51df277d49eb6267c4d149957c9888f238dbd6335f9bdf7764",
+      "version": 20251024,
+      "symbols": 537,
+      "resolved": 537,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": false,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "Ammeter_AC",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": false,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        },
+        {
+          "symbol": "Crystal_GND23",
+          "property_name": "KLC_S3.3",
+          "exact_delta": true,
+          "first_save_unchanged": false,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Device.kicad_sym"
+    },
+    {
+      "sha256": "f957f4cf2a72c52eae6d421ec9eeee33de43c88b5d48f42f80f80f0d0c52f874",
+      "version": 20251024,
+      "symbols": 277,
+      "resolved": 277,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": false,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "7400",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": false,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "74xx.kicad_sym"
+    },
+    {
+      "sha256": "35379658c530df47756a9226b5b6fd37d7ac877ae8e3e0dd4bc6348b91206cb5",
+      "version": 20251024,
+      "symbols": 425,
+      "resolved": 425,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": false,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "AD797",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": false,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        },
+        {
+          "symbol": "ADL5303ACP",
+          "property_name": "KLC_S4.6",
+          "exact_delta": true,
+          "first_save_unchanged": false,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Amplifier_Operational.kicad_sym"
+    },
+    {
+      "sha256": "e88f0c9bd2bb124915b54783b25792db26896f913a1f5b3e7201c996bedf4390",
+      "version": 20251024,
+      "symbols": 391,
+      "resolved": 391,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": false,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "2N2219",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": false,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Transistor_BJT.kicad_sym"
+    },
+    {
+      "sha256": "b40057d620867e58e8c3d1be9ab822bba6955e76ccfc566fd0945eedcf527fd3",
+      "version": 20251024,
+      "symbols": 334,
+      "resolved": 334,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "Conn_01x01",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "Connector_Generic.kicad_sym"
+    },
+    {
+      "sha256": "8113f8fe90853413603d619987cc744e33dc47ff27faac19a58d7caf8c334fd0",
+      "version": 20251024,
+      "symbols": 101,
+      "resolved": 101,
+      "no_op_bytes": true,
+      "baseline_first_save_unchanged": true,
+      "baseline_second_save_stable": true,
+      "cases": [
+        {
+          "symbol": "+10V",
+          "property_name": "Description",
+          "exact_delta": true,
+          "first_save_unchanged": true,
+          "second_save_stable": true,
+          "normalized_delta_only": true
+        }
+      ],
+      "library": "power.kicad_sym"
+    }
+  ]
+}

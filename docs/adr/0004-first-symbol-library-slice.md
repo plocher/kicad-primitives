@@ -43,8 +43,9 @@ This is source-preservation evidence, not proof of complete semantic support or 
   Subdivision's overview returned no pins for `7400`, which extends the later `74LS00`.
 - Twenty base symbols in 74xx contained alternate body styles.
   Combining every body's pins would count alternate representations together.
-- Four Device symbols contained repeated `private` properties.
-  A dictionary alone cannot represent every declared property without loss.
+- Correction from implementation inspection: four Device symbols contained eight private properties, using `(property private "name" "value" ...)`.
+  `private` is a modifier, not their name; the modifier-aware scan found no duplicate names in Device.
+  Repeated-name preservation remains an approved defensive contract, exercised with synthetic inputs rather than claimed as observed in Device.
 - All 22 existing Subdivision overview tests passed despite the forward-inheritance defect.
 
 The counts describe this bounded inspection, not all installed libraries or current consumer usage.
@@ -92,7 +93,7 @@ Choose C. The owner approved the following scope and done-bar.
 ### Included
 
 - A public symbol-library functional service opened by an explicit library path.
-  Exact Python module, function, type, and exception names remain unspecified.
+  At decision acceptance, exact Python names were unspecified; the owner approved the first implementation surface on 2026-10-23 (see implementation note below).
 - One reader covering all properties, inheritance, units/body styles, and unit-specific pins without silent flattening.
   Declared and effective inherited values remain distinguishable, including where a value originates.
   Repeated declared properties are not silently collapsed into a dictionary.
@@ -136,3 +137,11 @@ The first implementation can proceed as ordinary work under this bounded functio
 No service is delivered by recording this decision.
 The parser remains private, and no consumer-specific compatibility adapter moves into the package.
 Distribution, the job/session seam, full capability inventory, lookup policy, and 1.0 completeness remain separate decisions.
+
+## Implementation note — 2026-10-23
+
+The owner approved `kicad_primitives.symbols.SymbolLibrary` with declared inspection, explicit inheritance resolution, in-memory property edits, byte preview, and a separate `save()`.
+Issue #19 implements that surface and the plan's optimistic single-file persistence safeguards.
+The [usage recipe](../symbol-libraries.md) documents the shipped methods, errors, and limitations.
+The [verification record](../review/first-symbol-slice-results.json) separates byte preservation, KiCad first-save normalization, and second-save stability.
+This note does not reopen #3, close #11, change distribution policy, or claim consumer cutover.

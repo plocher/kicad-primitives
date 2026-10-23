@@ -1,0 +1,3 @@
+recursive-include tests *.py *.kicad_sym
+include docs/symbol-libraries.md
+include docs/review/first-symbol-slice-results.json
