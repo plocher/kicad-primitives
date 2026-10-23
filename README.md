@@ -17,6 +17,7 @@ Identity is canonical in [`docs/PACKAGE_IDENTITY.md`](docs/PACKAGE_IDENTITY.md),
 - [`AGENTS.md`](AGENTS.md) — working agreements and API area list
 - [ADR 0002](docs/adr/0002-functional-service-toc.md) — accepted functional TOC, ownership, donor basis, and exclusions
 - [ADR 0003](docs/adr/0003-source-preserving-parser-and-writes.md) — accepted source-preserving parser, write guarantees, and Python floor
+- [ADR 0004](docs/adr/0004-first-symbol-library-slice.md) — accepted first slice and done-bar: symbol-library inspection and existing-property updates; not implemented yet
 - [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
 - [`docs/kicad-services-survey-2026-10-12.md`](docs/kicad-services-survey-2026-10-12.md) — founding survey
 - [Wayfinder map #1](https://github.com/plocher/kicad-primitives/issues/1) — package design decisions
