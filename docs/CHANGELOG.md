@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ratify symbol-library inspection and localized existing-property updates as the first functional slice, with its acceptance gates, in ADR 0004; services are not implemented yet.
 - Accept CircuitDK's source-preserving parser and write contract in ADR 0003, including the verified UUID insertion rule.
 - Raise the Python floor to 3.11 and declare the verified `circuitdk-lossless-sexpr==0.1.1` dependency.
 - Ratify seven public functional areas and their ownership rules in ADR 0002.

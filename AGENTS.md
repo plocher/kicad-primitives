@@ -58,6 +58,9 @@ Connectivity-preserving operations also verify unchanged connectivity. Electrica
 Placed-symbol insertion follows W4-ORDER-01: UUID order within the symbol section, not coordinates or references.
 Do not normalize unrelated content through a whole-file rewrite or automatic KiCad resave.
 Consumer-specific compatibility adapters belong in consumers, not this package.
+ADR 0004 selects the first functional slice: explicit-path symbol-library inspection and localized updates to existing, unambiguous properties declared on a selected symbol.
+Keep declared and inherited values distinct, preserve unit/body-style identity and repeated properties, and follow its acceptance gates.
+This is an approved release target, not implemented capability or the 1.0 completeness bar.
 KiCad integration is provisional internal machinery, not a committed public CLI module.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
 Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
