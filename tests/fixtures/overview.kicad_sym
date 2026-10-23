@@ -1,0 +1,121 @@
+(kicad_symbol_lib
+	(version 20251024)
+	(generator "kicad_symbol_editor")
+	(generator_version "10.0")
+	(symbol "Gadget"
+		(property "Reference" "G"
+			(at 0 0 0)
+		)
+		(property "Value" ""
+			(at 0 0 0)
+			(do_not_autoplace yes)
+		)
+		(property "Footprint" ""
+			(at 0 0 0)
+		)
+		(property "Datasheet" ""
+			(at 0 0 0)
+		)
+		(property "Description" "A <b>gadget</b> & its \"friend\""
+			(at 0 0 0)
+		)
+		(property "Role" "DEVICE"
+			(at 0 0 0)
+		)
+		(property "Appliance" "gadget"
+			(at 0 0 0)
+		)
+		(property "Pin.OCC" "binary out"
+			(at 0 0 0)
+		)
+		(property "Pin.EN" "binary in"
+			(at 0 0 0)
+		)
+		(property "hold_ms" "1500"
+			(at 0 0 0)
+		)
+		(symbol "Gadget_0_1"
+			(rectangle
+				(start -2.54 2.54)
+				(end 2.54 -2.54)
+			)
+		)
+		(symbol "Gadget_1_1"
+			(pin output line
+				(at 5.08 0 180)
+				(length 2.54)
+				(name "~{OCC}"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+		)
+		(symbol "Gadget_2_1"
+			(pin input line
+				(at -5.08 0 0)
+				(length 2.54)
+				(name "EN"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+		)
+	)
+	(symbol "Marker"
+		(property "Reference" "M"
+			(at 0 0 0)
+		)
+		(property "Value" "MARK"
+			(at 0 0 0)
+		)
+		(property "Description" "Plain marker"
+			(at 0 0 0)
+		)
+		(property "Role" "TRACK"
+			(at 0 0 0)
+		)
+		(property "Kind" "END_CTC"
+			(at 0 0 0)
+		)
+		(symbol "Marker_1_1"
+			(pin passive line
+				(at 0 0 0)
+				(length 2.54)
+				(name "T"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+		)
+	)
+)
