@@ -3,7 +3,7 @@
 from os import PathLike
 from pathlib import Path
 
-from . import _symbol_parse
+from . import _symbol_parse, _symbol_persist
 from ._symbol_types import (
     AmbiguousPropertyError,
     AmbiguousSymbolError,
@@ -71,9 +71,26 @@ class SymbolLibrary:
         return self._source.document.render().encode("utf-8")
 
     def set_property(self, symbol_name: str, property_name: str, value: str) -> None:
-        """Update an existing declared value in memory (not yet implemented)."""
-        raise UnsupportedOperationError("Property editing is not implemented yet")
+        """Update one existing declared value in memory, never a parent implicitly.
+
+        Missing properties, ambiguous targets and read-only formats fail without
+        changing either memory or disk. Query again for a fresh snapshot.
+        """
+        updated = _symbol_parse.replace_property(
+            self._source, symbol_name, property_name, value
+        )
+        self._source = updated
 
     def save(self) -> None:
-        """Persist changed source explicitly (not yet implemented)."""
-        raise UnsupportedOperationError("Persistence is not implemented yet")
+        """Persist to the opened path after an optimistic conflict check.
+
+        Changed output replaces a regular singly linked file atomically; no-op
+        saves perform no replacement. This is not coordination with KiCad or
+        another writer: a final check/replace race remains possible. OS errors
+        propagate; unsuccessful saves retain edits in memory for inspection/retry.
+        """
+        if self.version != _symbol_parse.WRITE_VERSION:
+            raise UnsupportedOperationError(f"Format {self.version} is read-only")
+        output = self.to_bytes()
+        _symbol_persist.save_source(self._path, self._baseline, output)
+        self._baseline = output
