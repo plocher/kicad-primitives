@@ -30,3 +30,6 @@ Issues = "https://github.com/plocher/kicad-primitives/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+kicad_primitives = ["py.typed"]
