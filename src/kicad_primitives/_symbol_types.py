@@ -2,6 +2,12 @@
 
 from dataclasses import dataclass
 
+_MANDATORY = frozenset({"reference", "value", "footprint", "datasheet", "description"})
+
+
+def _property_key(name: str) -> str:
+    return name.casefold() if name.casefold() in _MANDATORY else name
+
 
 class SymbolLibraryError(Exception):
     """Base error for symbol-library operations."""
@@ -84,8 +90,10 @@ class Symbol:
     resolved: bool = False
 
     def property(self, name: str) -> SymbolProperty:
-        """Return one exact-name property; raise on missing or ambiguous names."""
-        matches = tuple(p for p in self.properties if p.name == name)
+        """Get one property; mandatory names use KiCad's case-insensitive identity."""
+        matches = tuple(
+            p for p in self.properties if _property_key(p.name) == _property_key(name)
+        )
         if not matches:
             raise KeyError(name)
         if len(matches) != 1:

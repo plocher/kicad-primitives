@@ -3,9 +3,19 @@
 from dataclasses import dataclass, replace
 from math import isfinite
 
-from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse
+from lossless_sexpr import (
+    AtomNode,
+    Document,
+    ListNode,
+    ParseError,
+    TextEdit,
+    apply_edits,
+    parse,
+    quote,
+)
 
 from ._symbol_types import (
+    _MANDATORY,
     AmbiguousPropertyError,
     AmbiguousSymbolError,
     InheritanceError,
@@ -15,10 +25,10 @@ from ._symbol_types import (
     SymbolPin,
     SymbolProperty,
     UnsupportedOperationError,
+    _property_key,
 )
 
 WRITE_VERSION = 20251024
-_MANDATORY = frozenset({"reference", "value", "footprint", "datasheet", "description"})
 _NONEMPTY_OVERRIDE = frozenset({"ki_keywords", "ki_fp_filters", "ki_description"})
 
 
@@ -194,11 +204,6 @@ def read_source(raw: bytes) -> ParsedLibrary:
     )
 
 
-def _key(name: str) -> str:
-    # KiCad canonicalizes mandatory field identities case-insensitively.
-    return name.casefold() if name.casefold() in _MANDATORY else name
-
-
 def resolve(source: ParsedLibrary, name: str) -> Symbol:
     chain: list[Symbol] = []
     visited: set[str] = set()
@@ -220,12 +225,14 @@ def resolve(source: ParsedLibrary, name: str) -> Symbol:
     for symbol in reversed(chain):
         local: set[str] = set()
         for prop in symbol.properties:
-            key = _key(prop.name)
+            key = _property_key(prop.name)
             if key in local:
                 raise AmbiguousPropertyError(
                     f"{symbol.name}: ambiguous property {prop.name!r}"
                 )
             local.add(key)
+            if symbol is not root and key == "ki_fp_filters" and not prop.value.split():
+                continue
             if (
                 symbol is not root
                 and (key in _MANDATORY or key in _NONEMPTY_OVERRIDE)
@@ -247,3 +254,39 @@ def resolve(source: ParsedLibrary, name: str) -> Symbol:
         units_locked=root.units_locked,
         resolved=True,
     )
+
+
+def replace_property(
+    source: ParsedLibrary, symbol_name: str, property_name: str, value: str
+) -> ParsedLibrary:
+    if source.version != WRITE_VERSION:
+        raise UnsupportedOperationError(f"Format {source.version} is read-only")
+    if not isinstance(value, str):
+        raise TypeError("Property value must be a string")
+    if "\x00" in value:
+        raise ValueError("Property value cannot contain NUL")
+    value.encode("utf-8")
+    symbol = source.symbol(symbol_name)
+    try:
+        target = symbol.property(property_name)
+    except KeyError as exc:
+        raise UnsupportedOperationError(
+            f"{symbol_name}: property {property_name!r} is not declared; insertion is unsupported"
+        ) from exc
+    if target.value == value:
+        return source
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    prop_node = symbol_node.child_lists("property")[symbol.properties.index(target)]
+    token = property_value_node(prop_node)
+    before = source.document.source
+    replacement = quote(value)
+    edited = apply_edits(before, [TextEdit(token.span, replacement)])
+    expected = before[: token.span.start] + replacement + before[token.span.end :]
+    if edited != expected:
+        raise InvalidLibraryError(
+            "Property edit did not preserve the required source delta"
+        )
+    updated = read_source(edited.encode("utf-8"))
+    if updated.symbol(symbol_name).property(property_name).value != value:
+        raise InvalidLibraryError("Property edit did not establish the requested value")
+    return updated
