@@ -9,3 +9,6 @@
 - **Consumer usability:** The capabilities required by a consumer, together with migration recipes and documentation needed to use the replacement.
 - **Completeness:** The capability coverage needed for general KiCad use, beyond a single consumer's minimum needs.
 - **Releasability:** Satisfaction of the owner-approved release bar, including parity and selected completeness requirements and defect fixes.
+- **Pre-1.0 label:** An informational `0.x` package version with no compatibility promise (ADR 0005).
+- **Production dependency bar:** First public PyPI version a donor may pin for released use: `1.0.0` (ADR 0005).
+- **Validation probe:** Disposable install and exercise of WIP against a donor without merging a released pre-1.0 dependency.

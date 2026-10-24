@@ -25,6 +25,9 @@ Canonical record: `docs/PACKAGE_IDENTITY.md`, ADR 0001, and its parser/Python am
 | Older formats | read-only when cheap |
 | Parser dependency | `circuitdk-lossless-sexpr==0.1.1`, private import `lossless_sexpr` |
 | Home | this repo only for shared KiCad I/O |
+| Dependency bar | no released donor pin before `1.0.0` on public PyPI (ADR 0005) |
+| Pre-1.0 | informational `0.x` only; no compatibility promise |
+| WIP install | `uv venv` + `uv pip install -e .`; optional Test PyPI probes; no `sys.path` |
 
 ## Sources, by what they are strongest at (survey section 1 and 2)
 
@@ -109,8 +112,10 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 ### Package vs consumer migration
 
 - Building and ratifying this package **does not wait** on cutting over jBOM, kproj, kDoctor, Subdivision, or others.
-- When a slice is good enough for consumer X, **open an issue on X's tracker**: list frozen local modules, require remove-and-replace with `kicad-primitives`, and give a concrete recipe. That migration is X's work and does not gate this map.
-- Optional early cutovers are **validation probes** (find gaps), not milestones that block package progress.
+- Released donor packaging must **not** depend on `kicad-primitives` before **`1.0.0`** on public PyPI ([ADR 0005](docs/adr/0005-distribution-and-versioning.md)).
+- When the package is ready to offer to consumer X (**at or after 1.0** unless the owner reopens policy), **open an issue on X's tracker**: list frozen local modules, require remove-and-replace with `kicad-primitives`, and give a concrete recipe. That migration is X's work and does not gate this map.
+- Optional **validation probes** before 1.0 find gaps and draft recipes. Use a disposable env and `uv pip install -e` (or Test PyPI). Do not merge a pre-1.0 dependency into donor `main`. Probes are not production cutovers and do not block package progress.
+- Do not vendor this tree into a donor. Do not couple jBOM (or other donor) version lines to this package before a post-1.0 cutover PR.
 
 ### Tests until foundation
 
@@ -137,7 +142,7 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. The public TOC decision is recorded in ADR 0002.
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. The public TOC decision is recorded in ADR 0002. Distribution and versioning are recorded in ADR 0005.
 3. Optional parallel AFK: [#9 lift inventory](https://github.com/plocher/kicad-primitives/issues/9), [#13 sheet-walk filing](https://github.com/plocher/kicad-primitives/issues/13).
 
 ## Working agreements
@@ -189,10 +194,19 @@ Python 3.11 or later. CircuitDK's `lossless_sexpr` is the private parser foundat
 
 ## Commands
 
-Install in the active Python 3.11+ environment, then run `python -m unittest discover -s tests -q`.
+Create a venv and install this package editable with `uv` (ADR 0005):
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install -e .
+python -m unittest discover -s tests -q
+```
+
 Static checks used for the first slice: `ruff check src tests`, `ruff format --check src tests`, and `mypy --strict --follow-untyped-imports src/kicad_primitives`.
 The normal suite needs neither KiCad nor donor checkouts. The opt-in `tests/verify_symbol_libraries.py` takes explicit library paths, a new output directory, and optionally `--kicad-cli`; see `docs/symbol-libraries.md`.
 On this machine KiCad's CLI is `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`. No public locator or precedence contract is introduced by the verification runner.
+Full `uv lock` / release automation is deferred; it is not required by ADR 0005.
 
 
 ## Agent skills
