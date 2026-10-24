@@ -26,6 +26,7 @@ Canonical record: `docs/PACKAGE_IDENTITY.md`, ADR 0001, and its parser/Python am
 | Parser dependency | `circuitdk-lossless-sexpr==0.1.1`, private import `lossless_sexpr` |
 | Home | this repo only for shared KiCad I/O |
 | Dependency bar | no released donor pin before `1.0.0` on public PyPI (ADR 0005) |
+| 1.0 capability bar | ADR 0006 (A/B/C surfaces, proven cores, donor floor; functional tests) |
 | Pre-1.0 | informational `0.x` only; no compatibility promise |
 | WIP install | `uv venv` + `uv pip install -e .`; optional Test PyPI probes; no `sys.path` |
 
@@ -63,15 +64,16 @@ Do not normalize unrelated content through a whole-file rewrite or automatic KiC
 Consumer-specific compatibility adapters belong in consumers, not this package.
 ADR 0004 selects the first functional slice: explicit-path symbol-library inspection and localized updates to existing, unambiguous properties declared on a selected symbol.
 Keep declared and inherited values distinct, preserve unit/body-style identity and repeated properties, and follow its acceptance gates.
-The first slice is implemented in `kicad_primitives.symbols`; usage and limits are in `docs/symbol-libraries.md`. It is not the 1.0 completeness bar.
-KiCad integration is provisional internal machinery, not a committed public CLI module.
+The first slice is implemented in `kicad_primitives.symbols`; usage and limits are in `docs/symbol-libraries.md`. It is foundation evidence, not the 1.0 completeness bar.
+The owner-locked 1.0 capability and releasability bar is [ADR 0006](docs/adr/0006-1.0-capability-and-releasability-bar.md): macro service surfaces (A), proven cores (B), donor-used floor (C); functional tests as required evidence; cutover is not a gate.
+KiCad integration is provisional internal machinery, not a committed public CLI module. Report/export operations belong on services; backend choice (`kicad-cli` or otherwise) is implementation detail (ADR 0006). KiCad IPC/plugin Python is out of default scope.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
 Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
-3D models remain out of scope until requested.
+3D models remain out of scope until requested. Variants are deferred future work under ADR 0006.
 
 Inventory used, unused, and unimplemented capabilities separately from defects and exclusions.
 Parity equals used capabilities. Consumer usability also needs migration recipes and documentation.
-Consumer usability is not package completeness. The owner locks the 1.0 release bar.
+Consumer usability is not package completeness. Releasability follows ADR 0006.
 
 
 ## Operating model (map + agents)
@@ -142,8 +144,8 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. The public TOC decision is recorded in ADR 0002. Distribution and versioning are recorded in ADR 0005.
-3. Optional parallel AFK: [#9 lift inventory](https://github.com/plocher/kicad-primitives/issues/9), [#13 sheet-walk filing](https://github.com/plocher/kicad-primitives/issues/13).
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002 (TOC), ADR 0003 (writes), ADR 0004 (first slice), ADR 0005 (distribution), ADR 0006 (1.0 bar). Mainline after #22 is bounded implementation under those ADRs.
+3. Optional parallel AFK: [#13 sheet-walk filing](https://github.com/plocher/kicad-primitives/issues/13) and other unblocked research/tasks that do not invent policy.
 
 ## Working agreements
 
