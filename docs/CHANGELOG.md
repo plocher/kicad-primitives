@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Accept distribution and versioning rules in ADR 0005: no released donor dependency before `1.0.0` on public PyPI; pre-1.0 labels informational only; owner WIP via `uv` editable installs and optional Test PyPI probes; no donor version coupling or vendoring.
 - Implement explicit-path symbol-library inspection, including private property modifiers, inheritance provenance, immutable snapshots, and unit/body-style pin membership.
 - Add byte-localized existing-property edits with reparsing and explicit atomic single-file saves, conflict detection, and link/permission safeguards.
 - Port donor behavior tests; add failure/preservation contracts and an opt-in real-library/KiCad gate with a hashed verification record.

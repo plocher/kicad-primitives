@@ -8,9 +8,11 @@ Stand-alone Python package for reading, editing, and writing KiCad **10** projec
 | **Import** | `kicad_primitives` |
 | **License** | MIT |
 | **Python** | 3.11+ |
-| **Status** | Pre-alpha (`0.0.0`); first symbol-library read/edit service implemented |
+| **Status** | Pre-alpha (`0.0.0` informational); first symbol-library read/edit service implemented |
+| **Production dependency** | Not before `1.0.0` on public PyPI ([ADR 0005](docs/adr/0005-distribution-and-versioning.md)) |
 
 Identity is canonical in [`docs/PACKAGE_IDENTITY.md`](docs/PACKAGE_IDENTITY.md), [ADR 0001](docs/adr/0001-package-identity.md), and its [ADR 0003 amendment](docs/adr/0003-source-preserving-parser-and-writes.md).
+Dependency rules are in [ADR 0005](docs/adr/0005-distribution-and-versioning.md).
 
 ## Start here
 
@@ -18,17 +20,44 @@ Identity is canonical in [`docs/PACKAGE_IDENTITY.md`](docs/PACKAGE_IDENTITY.md),
 - [ADR 0002](docs/adr/0002-functional-service-toc.md) — accepted functional TOC, ownership, donor basis, and exclusions
 - [ADR 0003](docs/adr/0003-source-preserving-parser-and-writes.md) — accepted source-preserving parser, write guarantees, and Python floor
 - [ADR 0004](docs/adr/0004-first-symbol-library-slice.md) — accepted first slice and done-bar
+- [ADR 0005](docs/adr/0005-distribution-and-versioning.md) — distribution, versioning, and probe install rules
 - [Symbol-library usage](docs/symbol-libraries.md) — inspect declarations/inheritance, edit existing values, and save explicitly
 - [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
 - [`docs/kicad-services-survey-2026-10-12.md`](docs/kicad-services-survey-2026-10-12.md) — founding survey
 - [Wayfinder map #1](https://github.com/plocher/kicad-primitives/issues/1) — package design decisions
 
-## Install (editable, local)
+## Install (owner development and probes)
+
+Pre-1.0 labels carry **no** compatibility promise.
+Donor **released** packaging must not depend on this package until **`1.0.0`** on public PyPI.
+Do not add `sys.path` hacks to this tree.
+
+### Package work (this repo)
 
 ```bash
-python3 -m pip install -e .
-python3 -c "import kicad_primitives as kp; print(kp.__version__)"
+uv venv
+source .venv/bin/activate
+uv pip install -e .
+python -c "import kicad_primitives as kp; print(kp.__version__)"
 ```
+
+### Disposable donor probe
+
+Use a separate venv or throwaway branch environment. Do not merge a pre-1.0 dependency into donor `main`.
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install -e /path/to/kicad-primitives
+```
+
+Optional Test PyPI wheels are probe-only. Use public PyPI as an extra index for transitive dependencies such as `circuitdk-lossless-sexpr`.
+Day-to-day donor work without a probe leaves `kicad-primitives` uninstalled so local donor code remains the source of truth.
+
+### After 1.0 (donor cutover note)
+
+When a donor migrates, that donor adds an ordinary pin such as `kicad-primitives>=1.0.0,<2` and removes its local duplicate modules.
+Exact ranges belong in the donor migration PR. No jBOM (or other donor) version line couples to this package before that cutover. Do not vendor this tree into a donor.
 
 ## Scope and implementation status
 

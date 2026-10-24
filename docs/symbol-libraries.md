@@ -2,7 +2,8 @@
 
 `kicad_primitives.symbols.SymbolLibrary` opens one explicit `.kicad_sym` path.
 It does not discover libraries, open a project, edit schematic caches, or invoke KiCad.
-The package remains pre-alpha (`0.0.0`); this is not the whole functional TOC or a distribution-policy decision.
+The package remains pre-alpha (`0.0.0` informational). This is not the whole functional TOC.
+Released donor dependencies wait for `1.0.0` on public PyPI ([ADR 0005](adr/0005-distribution-and-versioning.md)).
 
 ## Inspect declarations and inheritance
 
