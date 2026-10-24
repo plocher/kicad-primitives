@@ -1,7 +1,7 @@
 """kicad_primitives — shared KiCad project and library services.
 
 Package identity is locked in docs/PACKAGE_IDENTITY.md and ADRs 0001/0003.
-The first symbol-library service lives in kicad_primitives.symbols.
+Public services today: kicad_primitives.symbols and kicad_primitives.projects.
 Other functional areas remain unimplemented; this package is pre-alpha.
 """
 

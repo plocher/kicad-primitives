@@ -8,7 +8,7 @@ Stand-alone Python package for reading, editing, and writing KiCad **10** projec
 | **Import** | `kicad_primitives` |
 | **License** | MIT |
 | **Python** | 3.11+ |
-| **Status** | Pre-alpha (`0.0.0` informational); first symbol-library read/edit service implemented |
+| **Status** | Pre-alpha (`0.0.0` informational); symbol-library and project-context services implemented |
 | **Production dependency** | Not before `1.0.0` on public PyPI ([ADR 0005](docs/adr/0005-distribution-and-versioning.md)) |
 
 Identity is canonical in [`docs/PACKAGE_IDENTITY.md`](docs/PACKAGE_IDENTITY.md), [ADR 0001](docs/adr/0001-package-identity.md), and its [ADR 0003 amendment](docs/adr/0003-source-preserving-parser-and-writes.md).
@@ -22,6 +22,7 @@ Dependency rules are in [ADR 0005](docs/adr/0005-distribution-and-versioning.md)
 - [ADR 0004](docs/adr/0004-first-symbol-library-slice.md) — accepted first slice and done-bar
 - [ADR 0005](docs/adr/0005-distribution-and-versioning.md) — distribution, versioning, and probe install rules
 - [Symbol-library usage](docs/symbol-libraries.md) — inspect declarations/inheritance, edit existing values, and save explicitly
+- [Project context usage](docs/projects.md) — open a project, list hierarchical sheets, read text variables
 - [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
 - [`docs/kicad-services-survey-2026-10-12.md`](docs/kicad-services-survey-2026-10-12.md) — founding survey
 - [Wayfinder map #1](https://github.com/plocher/kicad-primitives/issues/1) — package design decisions
@@ -63,8 +64,10 @@ Exact ranges belong in the donor migration PR. No jBOM (or other donor) version 
 
 The accepted functional TOC includes projects, schematics, PCBs, symbol libraries, footprint libraries, library resolution, and connectivity.
 This is intended scope, not a list of shipped capabilities.
-The implemented first slice is `kicad_primitives.symbols.SymbolLibrary`: explicit-path inspection and localized existing-property updates, with byte-preserving output.
-See the [usage recipe and limitations](docs/symbol-libraries.md). The other functional areas are not implemented yet.
+Implemented services today:
+- `kicad_primitives.symbols.SymbolLibrary` — explicit-path inspection and localized existing-property updates, with byte-preserving output ([usage](docs/symbol-libraries.md)).
+- `kicad_primitives.projects.Project` — open a project directory or `.kicad_pro`, list hierarchical schematic paths with parent-relative `Sheetfile` resolution, and read `text_variables` ([usage](docs/projects.md)).
+Schematic/PCB document models, library tables, connectivity, and the remaining TOC areas are not implemented yet.
 PCB editing follows the same high-level patterns as schematic and library editing.
 Exposed unimplemented operations must fail explicitly before making changes.
 
