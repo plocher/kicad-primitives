@@ -66,7 +66,7 @@ ADR 0004 selects the first functional slice: explicit-path symbol-library inspec
 Keep declared and inherited values distinct, preserve unit/body-style identity and repeated properties, and follow its acceptance gates.
 The first slice is implemented in `kicad_primitives.symbols`; usage and limits are in `docs/symbol-libraries.md`. It is foundation evidence, not the 1.0 completeness bar.
 The owner-locked 1.0 capability and releasability bar is [ADR 0006](docs/adr/0006-1.0-capability-and-releasability-bar.md): macro service surfaces (A), proven cores (B), donor-used floor (C); functional tests as required evidence; cutover is not a gate.
-KiCad integration is provisional internal machinery, not a committed public CLI module. Report/export operations belong on services; backend choice (`kicad-cli` or otherwise) is implementation detail (ADR 0006). KiCad IPC/plugin Python is out of default scope.
+KiCad integration is provisional internal machinery, not a committed public CLI module. Report/export operations belong on services; backend choice (`kicad-cli` or otherwise) is implementation detail (ADR 0006). Private `kicad-cli` path discovery is [ADR 0007](docs/adr/0007-internal-kicad-cli-discovery.md): lazy resolve via explicit path, `KICAD_CLI`, platform defaults, then `PATH`. KiCad IPC/plugin Python is out of default scope.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
 Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
 3D models remain out of scope until requested. Variants are deferred future work under ADR 0006.
@@ -144,8 +144,8 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002 (TOC), ADR 0003 (writes), ADR 0004 (first slice), ADR 0005 (distribution), ADR 0006 (1.0 bar). Mainline after #22 is bounded implementation under those ADRs.
-3. Optional parallel AFK: [#13 sheet-walk filing](https://github.com/plocher/kicad-primitives/issues/13) and other unblocked research/tasks that do not invent policy.
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0007. Mainline after the decision map is bounded implementation under those ADRs (Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
+3. Remaining map grilling is just-in-time (`#8` job/session, `#6` post-1.0 cutover rules) when a workflow needs it—not by lowest issue number.
 
 ## Working agreements
 
@@ -207,7 +207,7 @@ python -m unittest discover -s tests -q
 
 Static checks used for the first slice: `ruff check src tests`, `ruff format --check src tests`, and `mypy --strict --follow-untyped-imports src/kicad_primitives`.
 The normal suite needs neither KiCad nor donor checkouts. The opt-in `tests/verify_symbol_libraries.py` takes explicit library paths, a new output directory, and optionally `--kicad-cli`; see `docs/symbol-libraries.md`.
-On this machine KiCad's CLI is `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`. No public locator or precedence contract is introduced by the verification runner.
+On this machine KiCad's CLI is `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`. The verifier may take an explicit `--kicad-cli` path (ADR 0007 step 1). Shared auto-discovery is private package machinery under ADR 0007, not a public module.
 Full `uv lock` / release automation is deferred; it is not required by ADR 0005.
 
 

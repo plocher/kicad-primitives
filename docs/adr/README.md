@@ -8,5 +8,6 @@
 | [0004-first-symbol-library-slice.md](0004-first-symbol-library-slice.md) | Accepted | First functional slice: explicit-path symbol-library inspection and localized updates to existing declared properties, with inheritance/unit/style fidelity and preservation gates. |
 | [0005-distribution-and-versioning.md](0005-distribution-and-versioning.md) | Accepted | No released donor dependency before `1.0.0` on public PyPI; pre-1.0 is informational only; WIP via `uv` editable installs and optional Test PyPI probes; no jBOM version coupling or vendoring. |
 | [0006-1.0-capability-and-releasability-bar.md](0006-1.0-capability-and-releasability-bar.md) | Accepted | `1.0.0` bar: macro service surfaces (A), proven cores (B), donor-used floor (C); FieldUnit schematic ingest and symbol authoring in B; functional tests as evidence; cutover not a gate. |
+| [0007-internal-kicad-cli-discovery.md](0007-internal-kicad-cli-discovery.md) | Accepted | Private lazy `kicad-cli` path discovery: explicit path, then `KICAD_CLI`, platform defaults, `PATH`; hard discovery error; no public `cli` module. |
 
 Form and process: see root `AGENTS.md` (Proposals are ADRs).
