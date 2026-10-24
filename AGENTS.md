@@ -65,6 +65,7 @@ Consumer-specific compatibility adapters belong in consumers, not this package.
 ADR 0004 selects the first functional slice: explicit-path symbol-library inspection and localized updates to existing, unambiguous properties declared on a selected symbol.
 Keep declared and inherited values distinct, preserve unit/body-style identity and repeated properties, and follow its acceptance gates.
 The first slice is implemented in `kicad_primitives.symbols`; usage and limits are in `docs/symbol-libraries.md`. It is foundation evidence, not the 1.0 completeness bar.
+Project context opening, parent-relative schematic hierarchy, and `text_variables` are implemented in `kicad_primitives.projects`; usage is in `docs/projects.md`.
 The owner-locked 1.0 capability and releasability bar is [ADR 0006](docs/adr/0006-1.0-capability-and-releasability-bar.md): macro service surfaces (A), proven cores (B), donor-used floor (C); functional tests as required evidence; cutover is not a gate.
 KiCad integration is provisional internal machinery, not a committed public CLI module. Report/export operations belong on services; backend choice (`kicad-cli` or otherwise) is implementation detail (ADR 0006). Private `kicad-cli` path discovery is [ADR 0007](docs/adr/0007-internal-kicad-cli-discovery.md): lazy resolve via explicit path, `KICAD_CLI`, platform defaults, then `PATH`. KiCad IPC/plugin Python is out of default scope.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
