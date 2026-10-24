@@ -8,7 +8,10 @@
 - **Parity:** Coverage of the used capabilities.
 - **Consumer usability:** The capabilities required by a consumer, together with migration recipes and documentation needed to use the replacement.
 - **Completeness:** The capability coverage needed for general KiCad use, beyond a single consumer's minimum needs.
-- **Releasability:** Satisfaction of the owner-approved release bar, including parity and selected completeness requirements and defect fixes.
+- **Releasability:** Satisfaction of the owner-approved release bar (ADR 0006), including the A/B/C model, selected proven cores, defect fixes, and functional evidence.
+- **Surface (A):** The complete functional contract defined for a service, independent of how much is implemented yet.
+- **Proven core (B):** The implemented portion of a surface that must work in practice before that service counts toward 1.0.
+- **Donor floor (C):** Used donor capabilities that must be possible through the package surface; a usability check, not the API shape.
 - **Pre-1.0 label:** An informational `0.x` package version with no compatibility promise (ADR 0005).
-- **Production dependency bar:** First public PyPI version a donor may pin for released use: `1.0.0` (ADR 0005).
-- **Validation probe:** Disposable install and exercise of WIP against a donor without merging a released pre-1.0 dependency.
+- **Production dependency bar:** First public PyPI version a donor may pin for released use: `1.0.0` (ADR 0005). Capability content of that release: ADR 0006.
+- **Validation probe:** Disposable install and exercise of WIP against a donor without merging a released pre-1.0 dependency. Not a substitute for package functional tests.
