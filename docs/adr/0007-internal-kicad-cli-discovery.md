@@ -98,5 +98,5 @@ Private implementation only. Public report/export APIs live on functional servic
 
 - Implement one private discovery helper when the first engine-backed operation lands. Bring kproj unit tests as the net where they still match this contract.
 - Opt-in tools may keep an explicit `--kicad-cli` path and feed precedence step 1.
-- Donor cutovers replace local finders with this helper (or inject paths). Fixing latent donor bugs in place is optional and does not gate the package.
+- Donor cutovers call public functional services that need an engine. Those services invoke the private helper internally. Consumers do not import the private finder. A consumer may still pass an explicit path into a service API when the service exposes that argument. Fixing latent donor bugs in place is optional and does not gate the package.
 - Map ticket #12 is satisfied by this ADR. No locator code is required in the same change set.
