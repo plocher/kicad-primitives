@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Publish a current lift inventory across the seven functional areas (`docs/review/lift-inventory-2026-10-24.md`), with donor anchors, usage/defect separation, package gaps, and recommended bounded slices.
 - Accept distribution and versioning rules in ADR 0005: no released donor dependency before `1.0.0` on public PyPI; pre-1.0 labels informational only; owner WIP via `uv` editable installs and optional Test PyPI probes; no donor version coupling or vendoring.
 - Implement explicit-path symbol-library inspection, including private property modifiers, inheritance provenance, immutable snapshots, and unit/body-style pin membership.
 - Add byte-localized existing-property edits with reparsing and explicit atomic single-file saves, conflict detection, and link/permission safeguards.
