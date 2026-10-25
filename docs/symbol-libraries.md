@@ -1,11 +1,13 @@
 # Symbol libraries: first-slice usage
 
+## Scope
+
 `kicad_primitives.symbols.SymbolLibrary` opens one explicit `.kicad_sym` path.
 It does not discover libraries, open a project, edit schematic caches, or invoke KiCad.
 The package remains pre-alpha (`0.0.0` informational). This is not the whole functional TOC.
 Released donor dependencies wait for `1.0.0` on public PyPI ([ADR 0005](adr/0005-distribution-and-versioning.md)).
 
-## Inspect declarations and inheritance
+## Open and inspect
 
 ```python
 from kicad_primitives.symbols import SymbolLibrary
@@ -80,6 +82,13 @@ Future formats and older-format writes fail explicitly. A read-only library can 
 Invalid UTF-8, malformed required structure, non-finite coordinates, or ambiguous edit targets fail rather than silently dropping content.
 Replacement values must be strings without NUL and must encode as UTF-8.
 
+## Limits
+
+- No library discovery, project open, or schematic cache edit on this surface.
+- No property insert/delete, pin edit, rename, unit split, or cross-library copy in this slice.
+- No public parser, span, or node types.
+- Graphics and full text-effects models are out of scope here.
+
 ## Persistence and errors
 
 `save()` compares disk bytes with the last successful open/save baseline.
@@ -108,15 +117,17 @@ Errors exported from `kicad_primitives.symbols`:
 Missing symbol/property lookup raises `KeyError`; filesystem errors remain ordinary `OSError` subclasses.
 No public signature or error requires dependency node/span types.
 
-## Tests and real-library verification
+## Tests
+
+### Normal suite and real-library verification
 
 The normal suite uses unittest and has no donor-checkout, KiCad, or network requirement after package installation:
 
 ```bash
-python -m unittest discover -s tests -q
-ruff check src tests
-ruff format --check src tests
-mypy --strict --follow-untyped-imports src/kicad_primitives
+uv run python -m unittest discover -s tests -q
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy --strict --follow-untyped-imports src/kicad_primitives
 ```
 
 Fixture and assertion provenance is recorded in `tests/functional/test_symbol_inspection.py`.

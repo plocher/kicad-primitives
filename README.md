@@ -17,6 +17,7 @@ Dependency rules are in [ADR 0005](docs/adr/0005-distribution-and-versioning.md)
 ## Start here
 
 - [`AGENTS.md`](AGENTS.md) — working agreements and API area list
+- [Documentation contract](docs/DOCUMENTATION.md) — usage pages, docstrings, and PR doc gates
 - [ADR 0002](docs/adr/0002-functional-service-toc.md) — accepted functional TOC, ownership, donor basis, and exclusions
 - [ADR 0003](docs/adr/0003-source-preserving-parser-and-writes.md) — accepted source-preserving parser, write guarantees, and Python floor
 - [ADR 0004](docs/adr/0004-first-symbol-library-slice.md) — accepted first slice and done-bar
@@ -80,7 +81,7 @@ Exposed unimplemented operations must fail explicitly before making changes.
 After installing the package in the active Python 3.11+ environment:
 
 ```bash
-python -m unittest discover -s tests -q
+uv run python -m unittest discover -s tests -q
 ```
 
 The normal suite has no KiCad installation or donor checkout dependency.
