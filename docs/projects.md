@@ -4,8 +4,9 @@
 explicit `.kicad_pro` path.
 It establishes design context: root document paths, hierarchical schematic
 files, and project `text_variables`.
-It does not open schematic or PCB documents for inspection or edit, run
-KiCad, or resolve library tables.
+It opens schematic **content** through `schematic()` / `schematics()` (see
+[schematics.md](schematics.md)). It does not edit schematics, open PCB document
+models, run KiCad, or resolve library tables.
 The package remains pre-alpha (`0.0.0` informational).
 
 ## Open a project
@@ -46,8 +47,8 @@ Missing children are skipped. Cycles stop after the first visit. Without a
 root schematic the result is empty.
 
 This list is path discovery only.
-Sheet instance paths, multi-instance sheets, and schematic content models
-remain later work.
+Sheet instance paths and multi-instance sheet models remain later work.
+Placed-symbol and title-block read: [schematics.md](schematics.md).
 
 ## Text variables
 

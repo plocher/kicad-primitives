@@ -23,6 +23,7 @@ Dependency rules are in [ADR 0005](docs/adr/0005-distribution-and-versioning.md)
 - [ADR 0005](docs/adr/0005-distribution-and-versioning.md) — distribution, versioning, and probe install rules
 - [Symbol-library usage](docs/symbol-libraries.md) — inspect declarations/inheritance, edit existing values, and save explicitly
 - [Project context usage](docs/projects.md) — open a project, list hierarchical sheets, read text variables
+- [Schematic placed-symbol read](docs/schematics.md) — title block and merged instance fields/transform via project context
 - [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
 - [`docs/kicad-services-survey-2026-10-12.md`](docs/kicad-services-survey-2026-10-12.md) — founding survey
 - [Wayfinder map #1](https://github.com/plocher/kicad-primitives/issues/1) — package design decisions
@@ -67,6 +68,7 @@ This is intended scope, not a list of shipped capabilities.
 Implemented services today:
 - `kicad_primitives.symbols.SymbolLibrary` — explicit-path inspection and localized existing-property updates, with byte-preserving output ([usage](docs/symbol-libraries.md)).
 - `kicad_primitives.projects.Project` — open a project directory or `.kicad_pro`, list hierarchical schematic paths with parent-relative `Sheetfile` resolution, and read `text_variables` ([usage](docs/projects.md)).
+- `kicad_primitives.schematics` via `Project.schematic` / `schematics` — merged placed-symbol read and title block ([usage](docs/schematics.md)).
 Schematic/PCB document models, library tables, connectivity, and the remaining TOC areas are not implemented yet.
 PCB editing follows the same high-level patterns as schematic and library editing.
 Exposed unimplemented operations must fail explicitly before making changes.
