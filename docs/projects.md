@@ -1,4 +1,6 @@
-# Projects: open, hierarchy, and text variables
+# Projects: open, hierarchy, text variables, and write guards
+
+## Scope
 
 `kicad_primitives.projects.Project` opens one KiCad project directory or an
 explicit `.kicad_pro` path.
@@ -84,6 +86,13 @@ KiCad, allow dry-run previews when locked, otherwise raise
 `ProjectWriteBlockedError` (a `PermissionError`). The package does not print
 to stderr.
 
+## Limits
+
+- This page does not define schematic field edit or PCB document models.
+- Sheet instance paths and multi-instance sheet models remain later work.
+- Library table resolution is a different area.
+- Lock guards do not coordinate with KiCad beyond detecting the `.lck` file.
+
 ## Errors
 
 - `InvalidProjectError`: missing project file, wrong open target, or unreadable
@@ -94,11 +103,11 @@ to stderr.
 ## Tests
 
 Donor gates from jBOM project discovery, context, and variables tests are
-ported under `tests/functional/test_project_context.py`, plus a nested
-parent-relative sheet case.
+ported under `tests/functional/test_project_context.py`, plus a nested parent-relative sheet case.
+Write lock gates: `tests/functional/test_project_write_lock.py`.
 The normal suite still needs no KiCad install or donor checkout after package
 installation:
 
 ```bash
-python -m unittest discover -s tests -q
+uv run python -m unittest discover -s tests -q
 ```

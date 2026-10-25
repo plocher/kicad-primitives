@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Lock the package documentation contract in `docs/DOCUMENTATION.md` (usage pages + docstrings + changelog; generated API reference deferred) and align existing usage pages to the shared section order.
 - Add project write lock/guard hooks on `Project` (`lock_file`, `is_locked`, `write_is_permitted`, `ensure_writes_allowed`) with dry-run and in-KiCad bypass (#27).
 - Add schematic geometry/electrical structure read on `Schematic` (wires, junctions, labels, global/hierarchical labels, no-connects, sheet edges) for FieldUnit-style ingest (#35).
 - Add schematic placed-symbol and title-block read via `Project.schematic` / `Project.schematics` (`kicad_primitives.schematics`): merged fields, uuid, transform, unit, flags; top-level placements only; hierarchy-gated paths (#28).

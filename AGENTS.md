@@ -213,6 +213,18 @@ On this machine KiCad's CLI is `/Applications/KiCad/KiCad.app/Contents/MacOS/kic
 Full `uv lock` / release automation is deferred; it is not required by ADR 0005.
 
 
+
+## Documentation contract
+
+Canonical rules: [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md).
+
+- **Usage page** under `docs/` is the human API contract for each shipped public area (STE-flavored).
+- **Docstrings** are required on public classes, methods, and exported exceptions.
+- **CHANGELOG** records the landing; link the usage page when useful.
+- A PR that adds or changes **public** surface must update the matching usage page and docstrings.
+- Generated full API reference is **deferred**; do not invent a second hand-written API style.
+- Docs follow a real public surface. Do not open a docs-factory epic before foundation.
+
 ## Agent skills
 
 ### Issue tracker

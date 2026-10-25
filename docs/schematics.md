@@ -1,4 +1,6 @@
-# Schematics: placed-symbol read
+# Schematics: placed symbols, title block, and geometry
+
+## Scope
 
 `Project.schematic()` and `Project.schematics()` open schematic **content** inside
 project context (ADR 0002).
@@ -79,6 +81,13 @@ Wires keep polyline points in file order. Sheet edges expose `Sheetname` /
 still goes through `Project.schematic_files()` / `Project.schematic(path)`
 (parent-relative), not a second walker.
 
+## Limits
+
+- Read-only. No localized field annotate and no geometry edit on this surface.
+- Embedded `lib_symbols` restore is later work.
+- Sheet instance path / multi-instance models are not first-class here.
+- Prefer `Project.schematic` over free `open_schematic` in application code.
+
 ## Errors
 
 - `InvalidSchematicError`: bad path, syntax, or required structure.
@@ -90,3 +99,7 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 Donor gates from jBOM schematic/title-block tests and Subdivision placement
 fields are ported in `tests/functional/test_schematic_placed_symbols.py`.
 Geometry gates live in `tests/functional/test_schematic_geometry.py`.
+
+```bash
+uv run python -m unittest discover -s tests -q
+```
