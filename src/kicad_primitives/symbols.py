@@ -248,21 +248,32 @@ class SymbolLibrary:
     def copy_symbol(self, source_name: str, new_name: str) -> None:
         """Duplicate one symbol inside this library under a new name.
 
-        Preserves properties, bodies, and extends. Cross-library copy is not
-        supported until library-table resolution exists; pass only same-library
-        names here.
+        Preserves properties, bodies, and extends. For a second library use
+        :meth:`copy_symbol_from`.
         """
         self._source = _symbol_parse.copy_symbol(self._source, source_name, new_name)
 
     def copy_symbol_from(
         self,
-        _source_library: "SymbolLibrary",
-        _source_name: str,
-        _new_name: str,
+        source_library: "SymbolLibrary",
+        source_name: str,
+        new_name: str,
     ) -> None:
-        """Cross-library symbol copy — unsupported until library tables resolve."""
-        raise UnsupportedOperationError(
-            "Cross-library copy_symbol_from requires library table resolution (#32)"
+        """Copy one symbol from another opened library into this library.
+
+        Inserts a renamed declared definition. ``extends`` is preserved and the
+        parent must already exist in this library (copy parents first). Same
+        library object delegates to :meth:`copy_symbol` rules. Missing targets,
+        duplicates, and read-only formats fail without changing memory or disk.
+        Callers locate paths however they like (including
+        :class:`~kicad_primitives.tables.LibraryTables`); this method does not
+        open tables itself.
+        """
+        self._source = _symbol_parse.copy_symbol_from(
+            self._source,
+            source_library._source,
+            source_name,
+            new_name,
         )
 
     def ensure_body(self, symbol_name: str, unit: int, body_style: int) -> None:

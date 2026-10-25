@@ -768,7 +768,7 @@ class SymbolLifecycleTests(unittest.TestCase):
             lambda: library.rename_symbol("A", "B"),
             lambda: library.copy_symbol("A", "B"),
             lambda: library.delete_symbol("A"),
-            lambda: library.copy_symbol_from(library, "A", "C"),
+            lambda: library.copy_symbol_from(library, "A", "A"),
             lambda: library.create_symbol("X", extends="Missing"),
         )
         for action in cases:
@@ -777,6 +777,105 @@ class SymbolLifecycleTests(unittest.TestCase):
                     action()
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
+
+    def test_copy_symbol_from_cross_library(self) -> None:
+        source_path = Path(self.temp.name) / "Source.kicad_sym"
+        dest_path = Path(self.temp.name) / "Dest.kicad_sym"
+        source_original = (
+            b"(kicad_symbol_lib (version 20251024)\n"
+            b'  (symbol "Root"\n'
+            b'    (property "Description" "base")\n'
+            b'    (symbol "Root_0_1"\n'
+            b"      (rectangle (start -1 1) (end 1 -1))\n"
+            b"    )\n"
+            b'    (symbol "Root_1_1"\n'
+            b"      (pin passive line (at 0 0 0) (length 1)\n"
+            b'        (name "A") (number "1"))\n'
+            b"    )\n"
+            b"  )\n"
+            b'  (symbol "Child" (extends "Root") (property "Note" "c"))\n'
+            b")\n"
+        )
+        source_path.write_bytes(source_original)
+        dest_original = (
+            b"(kicad_symbol_lib (version 20251024)\n"
+            b'  (symbol "Keep" (property "Description" "stay"))\n'
+            b")\n"
+        )
+        dest_path.write_bytes(dest_original)
+        source = SymbolLibrary.open(source_path)
+        dest = SymbolLibrary.open(dest_path)
+
+        dest.copy_symbol_from(source, "Root", "ImportedRoot")
+        copied = dest.symbol("ImportedRoot")
+        self.assertEqual(copied.property("Description").value, "base")
+        self.assertEqual(
+            [(b.unit, b.body_style, b.name) for b in copied.bodies],
+            [(0, 1, "ImportedRoot_0_1"), (1, 1, "ImportedRoot_1_1")],
+        )
+        self.assertEqual(dest.symbol("Keep").property("Description").value, "stay")
+        self.assertEqual([s.name for s in source.symbols], ["Root", "Child"])
+
+        with self.assertRaises(UnsupportedOperationError):
+            dest.copy_symbol_from(source, "Child", "Child")
+
+        # Parent must exist under the extends name the child still carries.
+        dest.copy_symbol_from(source, "Root", "Root")
+        dest.copy_symbol_from(source, "Child", "Child")
+        self.assertEqual(dest.symbol("Child").extends, "Root")
+        self.assertEqual(dest.symbol("Child").property("Note").value, "c")
+
+        with self.assertRaises(UnsupportedOperationError):
+            dest.copy_symbol_from(source, "Root", "Root")
+        self.assertEqual(source_path.read_bytes(), source_original)
+        self.assertEqual(dest_path.read_bytes(), dest_original)
+        dest.save()
+        reopened = SymbolLibrary.open(dest_path)
+        self.assertEqual(
+            [s.name for s in reopened.symbols],
+            ["Keep", "ImportedRoot", "Root", "Child"],
+        )
+
+    def test_copy_symbol_from_via_library_table_resolve(self) -> None:
+        from kicad_primitives.tables import LibraryTables
+
+        config_home = Path(self.temp.name) / "cfg"
+        libs = Path(self.temp.name) / "libs"
+        config_home.mkdir()
+        libs.mkdir()
+        source_path = libs / "Source.kicad_sym"
+        dest_path = libs / "Dest.kicad_sym"
+        source_path.write_bytes(
+            b'(kicad_symbol_lib (version 20251024) (symbol "Part"'
+            b' (property "Description" "from-table")'
+            b' (symbol "Part_1_1")))'
+        )
+        dest_path.write_bytes(
+            b'(kicad_symbol_lib (version 20251024) (symbol "Keep"'
+            b' (property "Description" "dest")))'
+        )
+        (config_home / "sym-lib-table").write_text(
+            "(sym_lib_table\n"
+            f'  (lib (name "Src") (type "KiCad") (uri "{source_path}")'
+            ' (options "") (descr ""))\n'
+            f'  (lib (name "Dst") (type "KiCad") (uri "{dest_path}")'
+            ' (options "") (descr ""))\n'
+            ")\n",
+            encoding="utf-8",
+        )
+        tables = LibraryTables.open(config_home=config_home)
+        source = SymbolLibrary.open(
+            tables.resolve("Src", library_type="symbol").resolved_path
+        )
+        dest = SymbolLibrary.open(
+            tables.resolve("Dst", library_type="symbol").resolved_path
+        )
+        dest.copy_symbol_from(source, "Part", "Imported")
+        self.assertEqual(
+            dest.symbol("Imported").property("Description").value, "from-table"
+        )
+        self.assertEqual(dest.symbol("Keep").property("Description").value, "dest")
+        self.assertEqual([s.name for s in source.symbols], ["Part"])
 
     def test_lifecycle_rejects_readonly_format(self) -> None:
         original = (

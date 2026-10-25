@@ -1254,20 +1254,42 @@ def rename_symbol(source: ParsedLibrary, old_name: str, new_name: str) -> Parsed
 
 def copy_symbol(source: ParsedLibrary, old_name: str, new_name: str) -> ParsedLibrary:
     """Duplicate one symbol inside the same library under a new name."""
-    _require_writeable(source)
-    old_name = _require_symbol_name(old_name, label="Source symbol name")
-    new_name = _require_symbol_name(new_name, label="New symbol name")
-    if old_name == new_name:
-        raise UnsupportedOperationError("copy_symbol requires a distinct new name")
-    symbol = source.symbol(old_name)
-    try:
-        source.symbol(new_name)
-    except KeyError:
-        pass
-    else:
-        raise UnsupportedOperationError(f"Symbol {new_name!r} already exists")
+    return _copy_symbol_into(
+        dest=source,
+        source=source,
+        old_name=old_name,
+        new_name=new_name,
+        require_distinct_names=True,
+    )
 
-    symbol_node = source.nodes[source.symbols.index(symbol)]
+
+def copy_symbol_from(
+    dest: ParsedLibrary,
+    source: ParsedLibrary,
+    source_name: str,
+    new_name: str,
+) -> ParsedLibrary:
+    """Copy one symbol from *source* into *dest* under *new_name*.
+
+    When *source* is the same library object as *dest*, behaves like
+    :func:`copy_symbol`. Derived symbols keep their ``extends`` parent name;
+    that parent must already exist in *dest* (copy parents first).
+    """
+    return _copy_symbol_into(
+        dest=dest,
+        source=source,
+        old_name=source_name,
+        new_name=new_name,
+        require_distinct_names=source is dest,
+    )
+
+
+def _renamed_symbol_chunk(
+    source: ParsedLibrary,
+    symbol_node: ListNode,
+    old_name: str,
+    new_name: str,
+) -> str:
     before = source.document.source
     chunk = before[symbol_node.span.start : symbol_node.span.end]
     rel_edits: list[tuple[int, int, str]] = []
@@ -1297,10 +1319,48 @@ def copy_symbol(source: ParsedLibrary, old_name: str, new_name: str) -> ParsedLi
     new_chunk = chunk
     for start, end, token in sorted(rel_edits, key=lambda item: item[0], reverse=True):
         new_chunk = new_chunk[:start] + token + new_chunk[end:]
+    return new_chunk
 
-    insert_at, _anchor = _symbol_insert_anchor(source)
+
+def _copy_symbol_into(
+    *,
+    dest: ParsedLibrary,
+    source: ParsedLibrary,
+    old_name: str,
+    new_name: str,
+    require_distinct_names: bool,
+) -> ParsedLibrary:
+    _require_writeable(dest)
+    old_name = _require_symbol_name(old_name, label="Source symbol name")
+    new_name = _require_symbol_name(new_name, label="New symbol name")
+    if require_distinct_names and old_name == new_name:
+        raise UnsupportedOperationError("copy_symbol requires a distinct new name")
+    symbol = source.symbol(old_name)
+    try:
+        dest.symbol(new_name)
+    except KeyError:
+        pass
+    else:
+        raise UnsupportedOperationError(f"Symbol {new_name!r} already exists")
+    if symbol.extends is not None:
+        try:
+            dest.symbol(symbol.extends)
+        except KeyError as exc:
+            raise UnsupportedOperationError(
+                f"Cannot copy derived symbol {old_name!r}: parent "
+                f"{symbol.extends!r} is not in the destination library"
+            ) from exc
+
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    new_chunk = _renamed_symbol_chunk(source, symbol_node, old_name, new_name)
+    before = dest.document.source
+    insert_at, _anchor = _symbol_insert_anchor(dest)
     if "\n" in before:
-        indent = _indent_before(before, symbol_node.span.start)
+        # Prefer the destination library's indent style when it already has symbols.
+        if dest.nodes:
+            indent = _indent_before(before, dest.nodes[-1].span.start)
+        else:
+            indent = _indent_before(before, symbol_node.span.start)
         fragment = f"{_line_ending(before)}{indent}{new_chunk}"
     else:
         fragment = f" {new_chunk}"
@@ -1313,7 +1373,8 @@ def copy_symbol(source: ParsedLibrary, old_name: str, new_name: str) -> ParsedLi
         raise InvalidLibraryError("Symbol copy changed property counts")
     if copied.extends != symbol.extends:
         raise InvalidLibraryError("Symbol copy did not preserve extends")
-    if len(updated.symbols) != len(source.symbols) + 1:
+    if len(updated.symbols) != len(dest.symbols) + 1:
         raise InvalidLibraryError("Symbol copy changed unexpected symbol counts")
-    updated.symbol(old_name)
+    if source is dest:
+        updated.symbol(old_name)
     return updated
