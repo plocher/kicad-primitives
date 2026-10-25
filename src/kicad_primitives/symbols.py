@@ -81,6 +81,41 @@ class SymbolLibrary:
         )
         self._source = updated
 
+    def add_property(
+        self,
+        symbol_name: str,
+        property_name: str,
+        value: str,
+        *,
+        private: bool = False,
+    ) -> None:
+        """Insert one new declared property on the selected symbol in memory.
+
+        Does not edit a parent or replace an existing identity. Ambiguous names,
+        empty names, invalid values, and read-only formats fail without changing
+        memory or disk. Query again for a fresh snapshot.
+        """
+        updated = _symbol_parse.insert_property(
+            self._source,
+            symbol_name,
+            property_name,
+            value,
+            private=private,
+        )
+        self._source = updated
+
+    def delete_property(self, symbol_name: str, property_name: str) -> None:
+        """Remove one unambiguous declared property from the selected symbol.
+
+        Does not edit a parent. Missing or ambiguous targets and read-only
+        formats fail without changing memory or disk. Query again for a fresh
+        snapshot.
+        """
+        updated = _symbol_parse.delete_property(
+            self._source, symbol_name, property_name
+        )
+        self._source = updated
+
     def save(self) -> None:
         """Persist to the opened path after an optimistic conflict check.
 

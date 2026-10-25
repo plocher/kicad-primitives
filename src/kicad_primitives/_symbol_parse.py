@@ -8,6 +8,7 @@ from lossless_sexpr import (
     Document,
     ListNode,
     ParseError,
+    SourceSpan,
     TextEdit,
     apply_edits,
     parse,
@@ -256,22 +257,130 @@ def resolve(source: ParsedLibrary, name: str) -> Symbol:
     )
 
 
-def replace_property(
-    source: ParsedLibrary, symbol_name: str, property_name: str, value: str
-) -> ParsedLibrary:
+def _require_writeable(source: ParsedLibrary) -> None:
     if source.version != WRITE_VERSION:
         raise UnsupportedOperationError(f"Format {source.version} is read-only")
+
+
+def _require_property_value(value: object) -> str:
     if not isinstance(value, str):
         raise TypeError("Property value must be a string")
     if "\x00" in value:
         raise ValueError("Property value cannot contain NUL")
     value.encode("utf-8")
+    return value
+
+
+def _require_property_name(property_name: str) -> str:
+    if not isinstance(property_name, str):
+        raise TypeError("Property name must be a string")
+    if not property_name:
+        raise ValueError("Property name cannot be empty")
+    if "\x00" in property_name:
+        raise ValueError("Property name cannot contain NUL")
+    property_name.encode("utf-8")
+    return property_name
+
+
+def _apply_source_edit(before: str, span: SourceSpan, replacement: str) -> str:
+    edited = apply_edits(before, [TextEdit(span, replacement)])
+    expected = before[: span.start] + replacement + before[span.end :]
+    if edited != expected:
+        raise InvalidLibraryError(
+            "Property edit did not preserve the required source delta"
+        )
+    return edited
+
+
+def _line_ending(source: str) -> str:
+    return "\r\n" if "\r\n" in source else "\n"
+
+
+def _indent_before(source: str, index: int) -> str:
+    line_start = source.rfind("\n", 0, index) + 1
+    indent = ""
+    cursor = line_start
+    while cursor < index and source[cursor] in " \t":
+        indent += source[cursor]
+        cursor += 1
+    return indent
+
+
+def _indent_step(indent: str, sample: str) -> str:
+    if indent.endswith("\t") or "\t" in sample:
+        return "\t"
+    return "  "
+
+
+def _insertion_anchor(symbol_node: ListNode) -> tuple[int, ListNode | None]:
+    """Return (insert_at, style_anchor) after the last property or prelude node."""
+    properties = symbol_node.child_lists("property")
+    if properties:
+        return properties[-1].span.end, properties[-1]
+    extends = one(symbol_node, "extends")
+    if extends is not None:
+        return extends.span.end, extends
+    return atom(symbol_node, 1).span.end, None
+
+
+def _property_fragment(
+    source: str,
+    symbol_node: ListNode,
+    style_anchor: ListNode | None,
+    name: str,
+    value: str,
+    *,
+    private: bool,
+) -> str:
+    """Build inserted property text matching the symbol's existing layout."""
+    sample = source[symbol_node.span.start : symbol_node.span.end]
+    compact = "\n" not in sample
+    head = "property private" if private else "property"
+    if compact:
+        return f" ({head} {quote(name)} {quote(value)} (at 0 0 0))"
+    newline = _line_ending(source)
+    if style_anchor is not None:
+        indent = _indent_before(source, style_anchor.span.start)
+    else:
+        indent = _indent_before(source, symbol_node.span.start) + _indent_step(
+            _indent_before(source, symbol_node.span.start), sample
+        )
+    if not indent:
+        indent = _indent_step("", sample)
+    inner = indent + _indent_step(indent, sample)
+    return (
+        f"{newline}{indent}({head} {quote(name)} {quote(value)}"
+        f"{newline}{inner}(at 0 0 0)"
+        f"{newline}{indent})"
+    )
+
+
+def _leading_separator_start(source: str, node_start: int) -> int:
+    index = node_start
+    while index > 0 and source[index - 1] in " \t":
+        index -= 1
+    if index > 0 and source[index - 1] == "\n":
+        index -= 1
+        if index > 0 and source[index - 1] == "\r":
+            index -= 1
+    elif index == node_start and index > 0 and source[index - 1] == " ":
+        # Compact single-line form: drop the space before the node.
+        index -= 1
+    return index
+
+
+def replace_property(
+    source: ParsedLibrary, symbol_name: str, property_name: str, value: str
+) -> ParsedLibrary:
+    _require_writeable(source)
+    value = _require_property_value(value)
     symbol = source.symbol(symbol_name)
     try:
         target = symbol.property(property_name)
     except KeyError as exc:
         raise UnsupportedOperationError(
-            f"{symbol_name}: property {property_name!r} is not declared; insertion is unsupported"
+            f"{symbol_name}: property {property_name!r} is not declared; "
+            "use add_property to insert"
         ) from exc
     if target.value == value:
         return source
@@ -280,13 +389,78 @@ def replace_property(
     token = property_value_node(prop_node)
     before = source.document.source
     replacement = quote(value)
-    edited = apply_edits(before, [TextEdit(token.span, replacement)])
-    expected = before[: token.span.start] + replacement + before[token.span.end :]
-    if edited != expected:
-        raise InvalidLibraryError(
-            "Property edit did not preserve the required source delta"
-        )
+    edited = _apply_source_edit(before, token.span, replacement)
     updated = read_source(edited.encode("utf-8"))
     if updated.symbol(symbol_name).property(property_name).value != value:
         raise InvalidLibraryError("Property edit did not establish the requested value")
+    return updated
+
+
+def insert_property(
+    source: ParsedLibrary,
+    symbol_name: str,
+    property_name: str,
+    value: str,
+    *,
+    private: bool = False,
+) -> ParsedLibrary:
+    _require_writeable(source)
+    property_name = _require_property_name(property_name)
+    value = _require_property_value(value)
+    if not isinstance(private, bool):
+        raise TypeError("private must be a bool")
+    symbol = source.symbol(symbol_name)
+    try:
+        symbol.property(property_name)
+    except KeyError:
+        pass
+    else:
+        raise UnsupportedOperationError(
+            f"{symbol_name}: property {property_name!r} already declared"
+        )
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    before = source.document.source
+    insert_at, style_anchor = _insertion_anchor(symbol_node)
+    fragment = _property_fragment(
+        before,
+        symbol_node,
+        style_anchor,
+        property_name,
+        value,
+        private=private,
+    )
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    inserted = updated.symbol(symbol_name).property(property_name)
+    if inserted.value != value or inserted.is_private != private:
+        raise InvalidLibraryError(
+            "Property insert did not establish the requested field"
+        )
+    if len(updated.symbol(symbol_name).properties) != len(symbol.properties) + 1:
+        raise InvalidLibraryError("Property insert changed unexpected property counts")
+    return updated
+
+
+def delete_property(
+    source: ParsedLibrary, symbol_name: str, property_name: str
+) -> ParsedLibrary:
+    _require_writeable(source)
+    property_name = _require_property_name(property_name)
+    symbol = source.symbol(symbol_name)
+    target = symbol.property(property_name)
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    prop_node = symbol_node.child_lists("property")[symbol.properties.index(target)]
+    before = source.document.source
+    start = _leading_separator_start(before, prop_node.span.start)
+    edited = _apply_source_edit(before, SourceSpan(start, prop_node.span.end), "")
+    updated = read_source(edited.encode("utf-8"))
+    remaining = updated.symbol(symbol_name)
+    try:
+        remaining.property(property_name)
+    except KeyError:
+        pass
+    else:
+        raise InvalidLibraryError("Property delete did not remove the requested field")
+    if len(remaining.properties) != len(symbol.properties) - 1:
+        raise InvalidLibraryError("Property delete changed unexpected property counts")
     return updated

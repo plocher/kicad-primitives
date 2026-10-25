@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add symbol-library `add_property` / `delete_property` for declared fields (private modifier optional), with inheritance-safe boundaries and byte-local deltas (`docs/symbol-libraries.md`; #29).
 - Lock the package documentation contract in `docs/DOCUMENTATION.md` (usage pages + docstrings + changelog; generated API reference deferred) and align existing usage pages to the shared section order.
 - Add project write lock/guard hooks on `Project` (`lock_file`, `is_locked`, `write_is_permitted`, `ensure_writes_allowed`) with dry-run and in-KiCad bypass (#27).
 - Add schematic geometry/electrical structure read on `Schematic` (wires, junctions, labels, global/hierarchical labels, no-connects, sheet edges) for FieldUnit-style ingest (#35).
