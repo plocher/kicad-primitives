@@ -17,6 +17,7 @@ from lossless_sexpr import (
 
 from ._symbol_types import (
     _MANDATORY,
+    AmbiguousPinError,
     AmbiguousPropertyError,
     AmbiguousSymbolError,
     InheritanceError,
@@ -463,4 +464,401 @@ def delete_property(
         raise InvalidLibraryError("Property delete did not remove the requested field")
     if len(remaining.properties) != len(symbol.properties) - 1:
         raise InvalidLibraryError("Property delete changed unexpected property counts")
+    return updated
+
+
+def _require_pin_string(label: str, value: object, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be a string")
+    if not allow_empty and not value:
+        raise ValueError(f"{label} cannot be empty")
+    if "\x00" in value:
+        raise ValueError(f"{label} cannot contain NUL")
+    value.encode("utf-8")
+    return value
+
+
+def _require_pin_token(label: str, value: object) -> str:
+    text = _require_pin_string(label, value)
+    if any(ch.isspace() for ch in text) or any(ch in text for ch in '()"'):
+        raise ValueError(f"Invalid {label}: {text!r}")
+    return text
+
+
+def _require_pin_number_coord(label: str, value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{label} must be a number")
+    number_value = float(value)
+    if not isfinite(number_value):
+        raise ValueError(f"{label} must be finite")
+    return number_value
+
+
+def _format_number(value: float) -> str:
+    if value == 0:
+        return "0"
+    as_int = int(value)
+    if as_int == value and abs(value) < 1e15:
+        return str(as_int)
+    return format(value, "g")
+
+
+def _require_unit_style(unit: object, body_style: object) -> tuple[int, int]:
+    if isinstance(unit, bool) or not isinstance(unit, int):
+        raise TypeError("unit must be an int")
+    if isinstance(body_style, bool) or not isinstance(body_style, int):
+        raise TypeError("body_style must be an int")
+    if unit < 0 or body_style < 0:
+        raise ValueError("unit and body_style must be non-negative")
+    return unit, body_style
+
+
+def _body_node(
+    source: ParsedLibrary, symbol: Symbol, unit: int, body_style: int
+) -> tuple[SymbolBody, ListNode]:
+    body = symbol.body(unit, body_style)
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    body_node = symbol_node.child_lists("symbol")[symbol.bodies.index(body)]
+    return body, body_node
+
+
+def _pin_node(
+    body: SymbolBody, body_node: ListNode, number: str
+) -> tuple[SymbolPin, ListNode]:
+    pin = body.pin(number)
+    return pin, body_node.child_lists("pin")[body.pins.index(pin)]
+
+
+def _pin_insertion_anchor(body_node: ListNode) -> tuple[int, ListNode | None]:
+    pins = body_node.child_lists("pin")
+    if pins:
+        return pins[-1].span.end, pins[-1]
+    return atom(body_node, 1).span.end, None
+
+
+def _pin_fragment(
+    source: str,
+    body_node: ListNode,
+    style_anchor: ListNode | None,
+    *,
+    number: str,
+    name: str,
+    electrical_type: str,
+    shape: str,
+    x: float,
+    y: float,
+    rotation: float,
+    length: float,
+    hidden: bool,
+) -> str:
+    sample = source[body_node.span.start : body_node.span.end]
+    compact = "\n" not in sample
+    hide = " (hide yes)" if hidden else ""
+    at = f"(at {_format_number(x)} {_format_number(y)} {_format_number(rotation)})"
+    length_node = f"(length {_format_number(length)})"
+    name_node = f"(name {quote(name)})"
+    number_node = f"(number {quote(number)})"
+    if compact:
+        return (
+            f" (pin {electrical_type} {shape} {at} {length_node} "
+            f"{name_node} {number_node}{hide})"
+        )
+    newline = _line_ending(source)
+    if style_anchor is not None:
+        indent = _indent_before(source, style_anchor.span.start)
+    else:
+        indent = _indent_before(source, body_node.span.start) + _indent_step(
+            _indent_before(source, body_node.span.start), sample
+        )
+    if not indent:
+        indent = _indent_step("", sample)
+    inner = indent + _indent_step(indent, sample)
+    hide_line = f"{newline}{inner}(hide yes)" if hidden else ""
+    return (
+        f"{newline}{indent}(pin {electrical_type} {shape}"
+        f"{newline}{inner}{at}"
+        f"{newline}{inner}{length_node}"
+        f"{newline}{inner}{name_node}"
+        f"{newline}{inner}{number_node}"
+        f"{hide_line}"
+        f"{newline}{indent})"
+    )
+
+
+def insert_pin(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    number: str,
+    name: str,
+    electrical_type: str,
+    *,
+    x: float,
+    y: float,
+    rotation: float = 0.0,
+    length: float = 2.54,
+    shape: str = "line",
+    hidden: bool = False,
+) -> ParsedLibrary:
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    number = _require_pin_string("Pin number", number)
+    name = _require_pin_string("Pin name", name, allow_empty=True)
+    electrical_type = _require_pin_token("electrical_type", electrical_type)
+    shape = _require_pin_token("shape", shape)
+    x = _require_pin_number_coord("x", x)
+    y = _require_pin_number_coord("y", y)
+    rotation = _require_pin_number_coord("rotation", rotation)
+    length = _require_pin_number_coord("length", length)
+    if not isinstance(hidden, bool):
+        raise TypeError("hidden must be a bool")
+    symbol = source.symbol(symbol_name)
+    body, body_node = _body_node(source, symbol, unit, body_style)
+    try:
+        body.pin(number)
+    except KeyError:
+        pass
+    except AmbiguousPinError as exc:
+        raise UnsupportedOperationError(
+            f"{symbol_name}: pin {number!r} already declared on unit {unit} "
+            f"body style {body_style}"
+        ) from exc
+    else:
+        raise UnsupportedOperationError(
+            f"{symbol_name}: pin {number!r} already declared on unit {unit} "
+            f"body style {body_style}"
+        )
+    before = source.document.source
+    insert_at, style_anchor = _pin_insertion_anchor(body_node)
+    fragment = _pin_fragment(
+        before,
+        body_node,
+        style_anchor,
+        number=number,
+        name=name,
+        electrical_type=electrical_type,
+        shape=shape,
+        x=x,
+        y=y,
+        rotation=rotation,
+        length=length,
+        hidden=hidden,
+    )
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    inserted = updated.symbol(symbol_name).body(unit, body_style).pin(number)
+    if (
+        inserted.name != name
+        or inserted.electrical_type != electrical_type
+        or inserted.shape != shape
+        or inserted.x != x
+        or inserted.y != y
+        or inserted.rotation != rotation
+        or inserted.length != length
+        or inserted.hidden != hidden
+    ):
+        raise InvalidLibraryError("Pin insert did not establish the requested pin")
+    prior_count = len(body.pins)
+    if len(updated.symbol(symbol_name).body(unit, body_style).pins) != prior_count + 1:
+        raise InvalidLibraryError("Pin insert changed unexpected pin counts")
+    return updated
+
+
+def _pin_context(
+    source: ParsedLibrary, symbol_name: str, unit: int, body_style: int, number: str
+) -> tuple[SymbolPin, ListNode]:
+    symbol = source.symbol(symbol_name)
+    body, body_node = _body_node(source, symbol, unit, body_style)
+    return _pin_node(body, body_node, number)
+
+
+def _apply_pin_edit(
+    source: ParsedLibrary, span: SourceSpan, replacement: str
+) -> ParsedLibrary:
+    edited = _apply_source_edit(source.document.source, span, replacement)
+    return read_source(edited.encode("utf-8"))
+
+
+def replace_pin(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    number: str,
+    *,
+    name: str | None = None,
+    electrical_type: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    rotation: float | None = None,
+    length: float | None = None,
+    shape: str | None = None,
+    hidden: bool | None = None,
+) -> ParsedLibrary:
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    number = _require_pin_string("Pin number", number)
+    if name is not None:
+        name = _require_pin_string("Pin name", name, allow_empty=True)
+    if electrical_type is not None:
+        electrical_type = _require_pin_token("electrical_type", electrical_type)
+    if shape is not None:
+        shape = _require_pin_token("shape", shape)
+    if x is not None:
+        x = _require_pin_number_coord("x", x)
+    if y is not None:
+        y = _require_pin_number_coord("y", y)
+    if rotation is not None:
+        rotation = _require_pin_number_coord("rotation", rotation)
+    if length is not None:
+        length = _require_pin_number_coord("length", length)
+    if hidden is not None and not isinstance(hidden, bool):
+        raise TypeError("hidden must be a bool")
+    if all(
+        value is None
+        for value in (name, electrical_type, x, y, rotation, length, shape, hidden)
+    ):
+        raise ValueError("set_pin requires at least one field to update")
+
+    pin, _ = _pin_context(source, symbol_name, unit, body_style, number)
+    desired_name = pin.name if name is None else name
+    desired_type = pin.electrical_type if electrical_type is None else electrical_type
+    desired_shape = pin.shape if shape is None else shape
+    desired_x = pin.x if x is None else x
+    desired_y = pin.y if y is None else y
+    desired_rotation = pin.rotation if rotation is None else rotation
+    desired_length = pin.length if length is None else length
+    desired_hidden = pin.hidden if hidden is None else hidden
+
+    if (
+        pin.name == desired_name
+        and pin.electrical_type == desired_type
+        and pin.shape == desired_shape
+        and pin.x == desired_x
+        and pin.y == desired_y
+        and pin.rotation == desired_rotation
+        and pin.length == desired_length
+        and pin.hidden == desired_hidden
+    ):
+        return source
+
+    current = source
+    pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+
+    if pin.electrical_type != desired_type:
+        current = _apply_pin_edit(current, atom(pin_node, 1).span, desired_type)
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+
+    if pin.shape != desired_shape:
+        current = _apply_pin_edit(current, atom(pin_node, 2).span, desired_shape)
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+
+    at = one(pin_node, "at", required=True)
+    assert at is not None
+    if pin.x != desired_x:
+        current = _apply_pin_edit(current, atom(at, 1).span, _format_number(desired_x))
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+        at = one(pin_node, "at", required=True)
+        assert at is not None
+    if pin.y != desired_y:
+        current = _apply_pin_edit(current, atom(at, 2).span, _format_number(desired_y))
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+        at = one(pin_node, "at", required=True)
+        assert at is not None
+    if pin.rotation != desired_rotation:
+        current = _apply_pin_edit(
+            current, atom(at, 3).span, _format_number(desired_rotation)
+        )
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+
+    if pin.length != desired_length:
+        length_node = one(pin_node, "length", required=True)
+        assert length_node is not None
+        current = _apply_pin_edit(
+            current, atom(length_node, 1).span, _format_number(desired_length)
+        )
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+
+    if pin.name != desired_name:
+        name_node = one(pin_node, "name", required=True)
+        assert name_node is not None
+        current = _apply_pin_edit(current, atom(name_node, 1).span, quote(desired_name))
+        pin, pin_node = _pin_context(current, symbol_name, unit, body_style, number)
+
+    if pin.hidden != desired_hidden:
+        text = current.document.source
+        hide_lists = pin_node.child_lists("hide")
+        bare_hides = [
+            child
+            for child in pin_node.children()[1:]
+            if isinstance(child, AtomNode) and child.raw == "hide"
+        ]
+        if desired_hidden:
+            if not hide_lists and not bare_hides:
+                insert_at = pin_node.span.end - 1
+                indent = _indent_before(text, pin_node.span.start)
+                sample = text[pin_node.span.start : pin_node.span.end]
+                if "\n" in sample:
+                    inner = indent + _indent_step(indent, sample)
+                    fragment = f"{_line_ending(text)}{inner}(hide yes)"
+                else:
+                    fragment = " (hide yes)"
+                current = _apply_pin_edit(
+                    current, SourceSpan(insert_at, insert_at), fragment
+                )
+        elif hide_lists:
+            hide_list = hide_lists[0]
+            start = _leading_separator_start(text, hide_list.span.start)
+            current = _apply_pin_edit(
+                current, SourceSpan(start, hide_list.span.end), ""
+            )
+        elif bare_hides:
+            bare_hide = bare_hides[0]
+            start = _leading_separator_start(text, bare_hide.span.start)
+            current = _apply_pin_edit(
+                current, SourceSpan(start, bare_hide.span.end), ""
+            )
+
+    final = current.symbol(symbol_name).body(unit, body_style).pin(number)
+    if (
+        final.name != desired_name
+        or final.electrical_type != desired_type
+        or final.shape != desired_shape
+        or final.x != desired_x
+        or final.y != desired_y
+        or final.rotation != desired_rotation
+        or final.length != desired_length
+        or final.hidden != desired_hidden
+    ):
+        raise InvalidLibraryError("Pin edit did not establish the requested values")
+    return current
+
+
+def delete_pin(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    number: str,
+) -> ParsedLibrary:
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    number = _require_pin_string("Pin number", number)
+    symbol = source.symbol(symbol_name)
+    body, body_node = _body_node(source, symbol, unit, body_style)
+    _pin, pin_node = _pin_node(body, body_node, number)
+    before = source.document.source
+    start = _leading_separator_start(before, pin_node.span.start)
+    edited = _apply_source_edit(before, SourceSpan(start, pin_node.span.end), "")
+    updated = read_source(edited.encode("utf-8"))
+    remaining = updated.symbol(symbol_name).body(unit, body_style)
+    try:
+        remaining.pin(number)
+    except KeyError:
+        pass
+    else:
+        raise InvalidLibraryError("Pin delete did not remove the requested pin")
+    if len(remaining.pins) != len(body.pins) - 1:
+        raise InvalidLibraryError("Pin delete changed unexpected pin counts")
     return updated
