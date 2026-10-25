@@ -691,3 +691,105 @@ class GraphicsAnchorTests(unittest.TestCase):
 
         with self.assertRaises(KicadCliNotFoundError):
             library.export_svgs(out / "missing", kicad_cli=out / "no-such-cli")
+
+
+class SymbolLifecycleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "Example.kicad_sym"
+
+    def test_create_rename_copy_delete_same_library(self) -> None:
+        original = (
+            b"(kicad_symbol_lib (version 20251024)\n"
+            b'  (symbol "Root"\n'
+            b'    (property "Description" "base")\n'
+            b'    (symbol "Root_0_1"\n'
+            b"      (rectangle (start -1 1) (end 1 -1))\n"
+            b"    )\n"
+            b'    (symbol "Root_1_1"\n'
+            b"      (pin passive line (at 0 0 0) (length 1)\n"
+            b'        (name "A") (number "1"))\n'
+            b"    )\n"
+            b"  )\n"
+            b'  (symbol "Child" (extends "Root") (property "Note" "c"))\n'
+            b")\n"
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        library.create_symbol("Empty")
+        library.create_symbol("Derived", extends="Root")
+        self.assertIsNone(library.symbol("Empty").extends)
+        self.assertEqual(library.symbol("Derived").extends, "Root")
+
+        library.copy_symbol("Root", "RootCopy")
+        copy = library.symbol("RootCopy")
+        self.assertEqual(copy.property("Description").value, "base")
+        self.assertEqual(
+            [(b.unit, b.body_style, b.name) for b in copy.bodies],
+            [(0, 1, "RootCopy_0_1"), (1, 1, "RootCopy_1_1")],
+        )
+        self.assertEqual(library.symbol("Root").bodies[1].pins[0].number, "1")
+
+        library.rename_symbol("Root", "Base")
+        self.assertEqual(library.symbol("Child").extends, "Base")
+        self.assertEqual(library.symbol("Derived").extends, "Base")
+        base = library.symbol("Base")
+        self.assertEqual(base.bodies[0].name, "Base_0_1")
+        self.assertEqual(base.bodies[1].name, "Base_1_1")
+        with self.assertRaises(KeyError):
+            library.symbol("Root")
+
+        with self.assertRaises(UnsupportedOperationError):
+            library.delete_symbol("Base")  # still extended
+        library.delete_symbol("Child")
+        library.delete_symbol("Derived")
+        library.delete_symbol("Empty")
+        library.delete_symbol("RootCopy")
+        library.delete_symbol("Base")
+        self.assertEqual(library.symbols, ())
+        self.assertEqual(self.path.read_bytes(), original)  # no save yet
+        library.save()
+        self.assertEqual(
+            [s.name for s in SymbolLibrary.open(self.path).symbols],
+            [],
+        )
+
+    def test_lifecycle_failures_leave_memory_and_disk_unchanged(self) -> None:
+        original = (
+            b"(kicad_symbol_lib (version 20251024)"
+            b' (symbol "A" (symbol "A_1_1"))'
+            b' (symbol "B" (extends "A")))'
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        cases = (
+            lambda: library.create_symbol("A"),
+            lambda: library.rename_symbol("A", "B"),
+            lambda: library.copy_symbol("A", "B"),
+            lambda: library.delete_symbol("A"),
+            lambda: library.copy_symbol_from(library, "A", "C"),
+            lambda: library.create_symbol("X", extends="Missing"),
+        )
+        for action in cases:
+            with self.subTest(action=action):
+                with self.assertRaises((UnsupportedOperationError, KeyError)):
+                    action()
+                self.assertEqual(library.to_bytes(), original)
+                self.assertEqual(self.path.read_bytes(), original)
+
+    def test_lifecycle_rejects_readonly_format(self) -> None:
+        original = (
+            b'(kicad_symbol_lib (version 20231618) (symbol "A" (symbol "A_1_1")))'
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        with self.assertRaises(UnsupportedOperationError):
+            library.create_symbol("B")
+        with self.assertRaises(UnsupportedOperationError):
+            library.rename_symbol("A", "B")
+        with self.assertRaises(UnsupportedOperationError):
+            library.copy_symbol("A", "B")
+        with self.assertRaises(UnsupportedOperationError):
+            library.delete_symbol("A")
+        self.assertEqual(library.to_bytes(), original)

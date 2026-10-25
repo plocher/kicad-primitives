@@ -1078,3 +1078,242 @@ def insert_body_text(
             "Body text insert did not establish the requested text"
         )
     return updated
+
+
+def _require_symbol_name(name: object, *, label: str = "Symbol name") -> str:
+    if not isinstance(name, str):
+        raise TypeError(f"{label} must be a string")
+    if not name:
+        raise ValueError(f"{label} cannot be empty")
+    if "\x00" in name:
+        raise ValueError(f"{label} cannot contain NUL")
+    name.encode("utf-8")
+    return name
+
+
+def _root_node(source: ParsedLibrary) -> ListNode:
+    roots = source.document.roots()
+    assert len(roots) == 1 and isinstance(roots[0], ListNode)
+    return roots[0]
+
+
+def _symbol_insert_anchor(source: ParsedLibrary) -> tuple[int, ListNode | None]:
+    root = _root_node(source)
+    if source.nodes:
+        return source.nodes[-1].span.end, source.nodes[-1]
+    version = one(root, "version", required=True)
+    assert version is not None
+    return version.span.end, version
+
+
+def _symbol_shell_fragment(
+    source_text: str, anchor: ListNode | None, name: str, extends: str | None
+) -> str:
+    if "\n" not in source_text:
+        if extends is None:
+            return f" (symbol {quote(name)})"
+        return f" (symbol {quote(name)} (extends {quote(extends)}))"
+    newline = _line_ending(source_text)
+    if anchor is not None:
+        indent = _indent_before(source_text, anchor.span.start)
+    else:
+        indent = _indent_step("", source_text)
+    if not indent:
+        indent = _indent_step("", source_text)
+    inner = indent + _indent_step(indent, source_text)
+    if extends is None:
+        return f"{newline}{indent}(symbol {quote(name)}{newline}{indent})"
+    return (
+        f"{newline}{indent}(symbol {quote(name)}"
+        f"{newline}{inner}(extends {quote(extends)})"
+        f"{newline}{indent})"
+    )
+
+
+def create_symbol(
+    source: ParsedLibrary,
+    name: str,
+    *,
+    extends: str | None = None,
+) -> ParsedLibrary:
+    """Insert a new empty top-level symbol (optional extends)."""
+    _require_writeable(source)
+    name = _require_symbol_name(name)
+    if extends is not None:
+        extends = _require_symbol_name(extends, label="extends")
+        source.symbol(extends)
+    try:
+        source.symbol(name)
+    except KeyError:
+        pass
+    else:
+        raise UnsupportedOperationError(f"Symbol {name!r} already exists")
+    before = source.document.source
+    insert_at, anchor = _symbol_insert_anchor(source)
+    fragment = _symbol_shell_fragment(before, anchor, name, extends)
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    created = updated.symbol(name)
+    if created.extends != extends or created.bodies:
+        raise InvalidLibraryError("Symbol create did not establish the requested shell")
+    if len(updated.symbols) != len(source.symbols) + 1:
+        raise InvalidLibraryError("Symbol create changed unexpected symbol counts")
+    return updated
+
+
+def delete_symbol(source: ParsedLibrary, name: str) -> ParsedLibrary:
+    """Remove one top-level symbol; refuse if others still extend it."""
+    _require_writeable(source)
+    name = _require_symbol_name(name)
+    symbol = source.symbol(name)
+    dependents = tuple(s.name for s in source.symbols if s.extends == name)
+    if dependents:
+        raise UnsupportedOperationError(
+            f"Cannot delete {name!r}: extended by {', '.join(dependents)}"
+        )
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    before = source.document.source
+    start = _leading_separator_start(before, symbol_node.span.start)
+    edited = _apply_source_edit(before, SourceSpan(start, symbol_node.span.end), "")
+    updated = read_source(edited.encode("utf-8"))
+    try:
+        updated.symbol(name)
+    except KeyError:
+        pass
+    else:
+        raise InvalidLibraryError("Symbol delete did not remove the requested symbol")
+    if len(updated.symbols) != len(source.symbols) - 1:
+        raise InvalidLibraryError("Symbol delete changed unexpected symbol counts")
+    return updated
+
+
+def rename_symbol(source: ParsedLibrary, old_name: str, new_name: str) -> ParsedLibrary:
+    """Rename a symbol, its body names, and in-library extends references."""
+    _require_writeable(source)
+    old_name = _require_symbol_name(old_name, label="Old symbol name")
+    new_name = _require_symbol_name(new_name, label="New symbol name")
+    if old_name == new_name:
+        return source
+    symbol = source.symbol(old_name)
+    try:
+        source.symbol(new_name)
+    except KeyError:
+        pass
+    else:
+        raise UnsupportedOperationError(f"Symbol {new_name!r} already exists")
+
+    current = source
+    for other in list(current.symbols):
+        if other.name == old_name or other.extends != old_name:
+            continue
+        other_node = current.nodes[current.symbols.index(other)]
+        extends_node = one(other_node, "extends", required=True)
+        assert extends_node is not None
+        edited = _apply_source_edit(
+            current.document.source, atom(extends_node, 1).span, quote(new_name)
+        )
+        current = read_source(edited.encode("utf-8"))
+
+    symbol = current.symbol(old_name)
+    symbol_node = current.nodes[current.symbols.index(symbol)]
+    replacements: list[tuple[SourceSpan, str]] = [
+        (atom(symbol_node, 1).span, quote(new_name))
+    ]
+    for body_node in symbol_node.child_lists("symbol"):
+        body_atom = atom(body_node, 1)
+        old_body = body_atom.value
+        if not old_body.startswith(old_name + "_"):
+            raise InvalidLibraryError(
+                f"{old_name}: body name {old_body!r} does not match symbol"
+            )
+        suffix = old_body[len(old_name) :]
+        replacements.append((body_atom.span, quote(new_name + suffix)))
+    edited = current.document.source
+    for span, token in sorted(
+        replacements, key=lambda item: item[0].start, reverse=True
+    ):
+        edited = _apply_source_edit(edited, span, token)
+    updated = read_source(edited.encode("utf-8"))
+    try:
+        updated.symbol(old_name)
+    except KeyError:
+        pass
+    else:
+        raise InvalidLibraryError("Symbol rename left the old name in place")
+    renamed = updated.symbol(new_name)
+    expected_bodies = {(b.unit, b.body_style) for b in symbol.bodies}
+    if {(b.unit, b.body_style) for b in renamed.bodies} != expected_bodies:
+        raise InvalidLibraryError("Symbol rename changed body identities")
+    for body in renamed.bodies:
+        if body.name != f"{new_name}_{body.unit}_{body.body_style}":
+            raise InvalidLibraryError("Symbol rename did not rewrite body names")
+    if any(s.extends == old_name for s in updated.symbols):
+        raise InvalidLibraryError("Symbol rename left stale extends references")
+    return updated
+
+
+def copy_symbol(source: ParsedLibrary, old_name: str, new_name: str) -> ParsedLibrary:
+    """Duplicate one symbol inside the same library under a new name."""
+    _require_writeable(source)
+    old_name = _require_symbol_name(old_name, label="Source symbol name")
+    new_name = _require_symbol_name(new_name, label="New symbol name")
+    if old_name == new_name:
+        raise UnsupportedOperationError("copy_symbol requires a distinct new name")
+    symbol = source.symbol(old_name)
+    try:
+        source.symbol(new_name)
+    except KeyError:
+        pass
+    else:
+        raise UnsupportedOperationError(f"Symbol {new_name!r} already exists")
+
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    before = source.document.source
+    chunk = before[symbol_node.span.start : symbol_node.span.end]
+    rel_edits: list[tuple[int, int, str]] = []
+    top = atom(symbol_node, 1)
+    rel_edits.append(
+        (
+            top.span.start - symbol_node.span.start,
+            top.span.end - symbol_node.span.start,
+            quote(new_name),
+        )
+    )
+    for body_node in symbol_node.child_lists("symbol"):
+        body_atom = atom(body_node, 1)
+        old_body = body_atom.value
+        if not old_body.startswith(old_name + "_"):
+            raise InvalidLibraryError(
+                f"{old_name}: body name {old_body!r} does not match symbol"
+            )
+        suffix = old_body[len(old_name) :]
+        rel_edits.append(
+            (
+                body_atom.span.start - symbol_node.span.start,
+                body_atom.span.end - symbol_node.span.start,
+                quote(new_name + suffix),
+            )
+        )
+    new_chunk = chunk
+    for start, end, token in sorted(rel_edits, key=lambda item: item[0], reverse=True):
+        new_chunk = new_chunk[:start] + token + new_chunk[end:]
+
+    insert_at, _anchor = _symbol_insert_anchor(source)
+    if "\n" in before:
+        indent = _indent_before(before, symbol_node.span.start)
+        fragment = f"{_line_ending(before)}{indent}{new_chunk}"
+    else:
+        fragment = f" {new_chunk}"
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    copied = updated.symbol(new_name)
+    if len(copied.bodies) != len(symbol.bodies):
+        raise InvalidLibraryError("Symbol copy changed body counts")
+    if len(copied.properties) != len(symbol.properties):
+        raise InvalidLibraryError("Symbol copy changed property counts")
+    if copied.extends != symbol.extends:
+        raise InvalidLibraryError("Symbol copy did not preserve extends")
+    if len(updated.symbols) != len(source.symbols) + 1:
+        raise InvalidLibraryError("Symbol copy changed unexpected symbol counts")
+    updated.symbol(old_name)
+    return updated
