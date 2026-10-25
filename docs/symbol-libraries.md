@@ -28,12 +28,16 @@ for body in effective.bodies:
     print(body.unit, body.body_style, body.origin_symbol)
     for pin in body.pins:
         print(pin.number, pin.name, pin.electrical_type, pin.x, pin.y)
+    for rect in body.rectangles:
+        print(rect.start_x, rect.start_y, rect.end_x, rect.end_y)
+    for text in body.texts:
+        print(text.text, text.x, text.y, text.rotation)
 ```
 
-Symbols, properties, bodies, and pins are immutable dataclass snapshots.
+Symbols, properties, bodies, pins, rectangles, and body texts are immutable dataclass snapshots.
 Query again after editing; previous snapshots do not become live handles.
-Graphics, fonts, unrelated metadata, and unrecognized nodes remain in the source without a public parser escape hatch.
-The service exposes property visibility/autoplace/position and pin position/orientation/length/shape/hidden state, not a full graphics or text-effects model.
+Stroke/fill, fonts, unrelated metadata, and unrecognized nodes remain in the source without a public parser escape hatch.
+The service exposes property visibility/autoplace/position, pin position/orientation/length/shape/hidden state, and minimal rectangle/text geometry—not a full graphics or text-effects model.
 
 `symbol(name)` is declared content, including empty values.
 `resolve(name)` follows same-library parents in either file order and retains the origin of inherited fields and bodies.
@@ -69,6 +73,10 @@ library.add_pin(
 )
 library.set_pin("Part", 1, 1, "2", name="Y", hidden=True)
 library.delete_pin("Part", 1, 1, "2")
+library.ensure_body("Part", 0, 1)  # shared unit-0 body; do not copy into every unit
+library.add_rectangle("Part", 0, 1, start=(-2.54, 2.54), end=(2.54, -2.54))
+library.add_body_text("Part", 0, 1, "LABEL", x=0.0, y=3.81)
+library.export_svgs("/tmp/symbol-svgs")  # kicad-cli inspection hook; optional kicad_cli=
 preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
 ```
@@ -86,6 +94,12 @@ They do not create bodies, collapse alternate body styles, or edit a parent.
 Pin electrical type and shape must be single sexpr tokens (no spaces).
 Duplicate pin numbers on the same body fail on insert; ambiguous numbers fail on edit/delete.
 
+Graphics **B anchors** (not full artwork-editor parity):
+`ensure_body` creates an empty `(unit, body_style)` body when missing (no-op when present).
+Prefer **unit 0** for shared boxes/text instead of copying the same artwork into every placed unit.
+`add_rectangle` / `add_body_text` insert minimal geometry/text on an existing body.
+`export_svgs` writes SVG via private `kicad-cli` discovery (explicit path, `KICAD_CLI`, platform defaults, `PATH`); it exports current in-memory bytes through a temp file. It is an inspection hook for contact-sheet style checks, not an HTML product.
+
 Private modifiers, field placement/effects on untouched fields, other definitions, newline spelling, and unrelated bytes survive unchanged.
 Setting an already equal value is a lexical no-op, even if its source escape spelling is noncanonical.
 Each changed edit reparses before further queries/edits; callers never manage spans.
@@ -94,7 +108,7 @@ Edits are all-or-nothing in memory, not a public multi-edit transaction.
 `set_property` does not insert a missing field; use `add_property`.
 `add_property` fails when the identity already exists (including mandatory case-insensitive clashes).
 No parent is edited implicitly. Deleting a local override leaves any inherited effective value visible through `resolve()`.
-Symbol rename, unit restructuring, body create/delete, and cross-library copying remain outside this surface.
+Symbol rename, unit restructuring, body delete, and cross-library copying remain outside this surface.
 Changing a declared empty mandatory field changes its declared value; inspect `resolve()` separately to understand the effective inherited value.
 Generic field values are not validated against Railroad or procurement policy.
 
@@ -107,11 +121,11 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 ## Limits
 
 - No library discovery, project open, or schematic cache edit on this surface.
-- No symbol rename, body create/delete, unit split, or cross-library copy on this surface.
-- Pin ops require an existing `(unit, body_style)` body; they do not author shared unit-0 graphics.
-- Inserted properties get a minimal position node only; full text-effects authoring is out of scope.
-- No public parser, span, or node types.
-- Graphics and full text-effects models are out of scope here.
+- No symbol rename, body delete, unit split, or cross-library copy on this surface.
+- `ensure_body` creates empty bodies only; it does not restructure multi-unit definitions.
+- Rectangle/text inserts are minimal geometry; stroke/fill and full text-effects authoring stay out of scope.
+- `export_svgs` needs a resolvable `kicad-cli`; pure file edits do not.
+- No public parser, span, node, or `cli` module types.
 
 ## Persistence and errors
 
@@ -136,6 +150,7 @@ Errors exported from `kicad_primitives.symbols`:
 - `AmbiguousSymbolError` / `AmbiguousPropertyError` / `AmbiguousPinError`: non-unique identity.
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
+- `KicadCliNotFoundError`: `export_svgs` could not resolve `kicad-cli`.
 - `SymbolLibraryError`: shared base for the package errors.
 
 Missing symbol/property/body/pin lookup raises `KeyError`; filesystem errors remain ordinary `OSError` subclasses.

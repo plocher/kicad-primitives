@@ -26,6 +26,8 @@ from ._symbol_types import (
     SymbolBody,
     SymbolPin,
     SymbolProperty,
+    SymbolRectangle,
+    SymbolText,
     UnsupportedOperationError,
     _property_key,
 )
@@ -125,6 +127,29 @@ def pin_view(node: ListNode) -> SymbolPin:
     )
 
 
+def rectangle_view(node: ListNode) -> SymbolRectangle:
+    start = one(node, "start", required=True)
+    end = one(node, "end", required=True)
+    assert start is not None and end is not None
+    return SymbolRectangle(
+        start_x=number(start, 1),
+        start_y=number(start, 2),
+        end_x=number(end, 1),
+        end_y=number(end, 2),
+    )
+
+
+def text_view(node: ListNode) -> SymbolText:
+    at = one(node, "at", required=True)
+    assert at is not None
+    return SymbolText(
+        text=atom(node, 1).value,
+        x=number(at, 1),
+        y=number(at, 2),
+        rotation=number(at, 3),
+    )
+
+
 def body_view(node: ListNode, origin: str) -> SymbolBody:
     name = atom(node, 1).value
     parts = name.rsplit("_", 2)
@@ -140,6 +165,8 @@ def body_view(node: ListNode, origin: str) -> SymbolBody:
         body_style=int(parts[2]),
         pins=tuple(pin_view(p) for p in node.child_lists("pin")),
         origin_symbol=origin,
+        rectangles=tuple(rectangle_view(r) for r in node.child_lists("rectangle")),
+        texts=tuple(text_view(t) for t in node.child_lists("text")),
     )
 
 
@@ -861,4 +888,193 @@ def delete_pin(
         raise InvalidLibraryError("Pin delete did not remove the requested pin")
     if len(remaining.pins) != len(body.pins) - 1:
         raise InvalidLibraryError("Pin delete changed unexpected pin counts")
+    return updated
+
+
+def _body_name(symbol_name: str, unit: int, body_style: int) -> str:
+    return f"{symbol_name}_{unit}_{body_style}"
+
+
+def _body_fragment(
+    source: str,
+    symbol_node: ListNode,
+    style_anchor: ListNode | None,
+    body_name: str,
+) -> str:
+    sample = source[symbol_node.span.start : symbol_node.span.end]
+    compact = "\n" not in sample
+    if compact:
+        return f" (symbol {quote(body_name)})"
+    newline = _line_ending(source)
+    if style_anchor is not None:
+        indent = _indent_before(source, style_anchor.span.start)
+    else:
+        indent = _indent_before(source, symbol_node.span.start) + _indent_step(
+            _indent_before(source, symbol_node.span.start), sample
+        )
+    if not indent:
+        indent = _indent_step("", sample)
+    return f"{newline}{indent}(symbol {quote(body_name)}{newline}{indent})"
+
+
+def _body_insertion_anchor(symbol_node: ListNode) -> tuple[int, ListNode | None]:
+    bodies = symbol_node.child_lists("symbol")
+    if bodies:
+        return bodies[-1].span.end, bodies[-1]
+    properties = symbol_node.child_lists("property")
+    if properties:
+        return properties[-1].span.end, properties[-1]
+    extends = one(symbol_node, "extends")
+    if extends is not None:
+        return extends.span.end, extends
+    return atom(symbol_node, 1).span.end, None
+
+
+def ensure_body(
+    source: ParsedLibrary, symbol_name: str, unit: int, body_style: int
+) -> ParsedLibrary:
+    """Create an empty body when missing; no-op when present."""
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    symbol = source.symbol(symbol_name)
+    try:
+        symbol.body(unit, body_style)
+    except KeyError:
+        pass
+    else:
+        return source
+    symbol_node = source.nodes[source.symbols.index(symbol)]
+    before = source.document.source
+    insert_at, style_anchor = _body_insertion_anchor(symbol_node)
+    name = _body_name(symbol_name, unit, body_style)
+    fragment = _body_fragment(before, symbol_node, style_anchor, name)
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    updated.symbol(symbol_name).body(unit, body_style)
+    if len(updated.symbol(symbol_name).bodies) != len(symbol.bodies) + 1:
+        raise InvalidLibraryError("Body ensure changed unexpected body counts")
+    return updated
+
+
+def _graphic_insertion_anchor(body_node: ListNode) -> tuple[int, ListNode | None]:
+    children = [
+        child for child in body_node.children()[1:] if isinstance(child, ListNode)
+    ]
+    if children:
+        return children[-1].span.end, children[-1]
+    return atom(body_node, 1).span.end, None
+
+
+def insert_rectangle(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    *,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+) -> ParsedLibrary:
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    start_x = _require_pin_number_coord("start_x", start_x)
+    start_y = _require_pin_number_coord("start_y", start_y)
+    end_x = _require_pin_number_coord("end_x", end_x)
+    end_y = _require_pin_number_coord("end_y", end_y)
+    symbol = source.symbol(symbol_name)
+    body, body_node = _body_node(source, symbol, unit, body_style)
+    before = source.document.source
+    insert_at, style_anchor = _graphic_insertion_anchor(body_node)
+    sample = before[body_node.span.start : body_node.span.end]
+    compact = "\n" not in sample
+    start = f"(start {_format_number(start_x)} {_format_number(start_y)})"
+    end = f"(end {_format_number(end_x)} {_format_number(end_y)})"
+    if compact:
+        fragment = f" (rectangle {start} {end})"
+    else:
+        newline = _line_ending(before)
+        if style_anchor is not None:
+            indent = _indent_before(before, style_anchor.span.start)
+        else:
+            indent = _indent_before(before, body_node.span.start) + _indent_step(
+                _indent_before(before, body_node.span.start), sample
+            )
+        if not indent:
+            indent = _indent_step("", sample)
+        inner = indent + _indent_step(indent, sample)
+        fragment = (
+            f"{newline}{indent}(rectangle"
+            f"{newline}{inner}{start}"
+            f"{newline}{inner}{end}"
+            f"{newline}{indent})"
+        )
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    rects = updated.symbol(symbol_name).body(unit, body_style).rectangles
+    if len(rects) != len(body.rectangles) + 1:
+        raise InvalidLibraryError("Rectangle insert changed unexpected counts")
+    last = rects[-1]
+    if (
+        last.start_x != start_x
+        or last.start_y != start_y
+        or last.end_x != end_x
+        or last.end_y != end_y
+    ):
+        raise InvalidLibraryError("Rectangle insert did not establish geometry")
+    return updated
+
+
+def insert_body_text(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    text: str,
+    *,
+    x: float,
+    y: float,
+    rotation: float = 0.0,
+) -> ParsedLibrary:
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    text = _require_pin_string("Body text", text, allow_empty=True)
+    x = _require_pin_number_coord("x", x)
+    y = _require_pin_number_coord("y", y)
+    rotation = _require_pin_number_coord("rotation", rotation)
+    symbol = source.symbol(symbol_name)
+    body, body_node = _body_node(source, symbol, unit, body_style)
+    before = source.document.source
+    insert_at, style_anchor = _graphic_insertion_anchor(body_node)
+    sample = before[body_node.span.start : body_node.span.end]
+    compact = "\n" not in sample
+    at = f"(at {_format_number(x)} {_format_number(y)} {_format_number(rotation)})"
+    if compact:
+        fragment = f" (text {quote(text)} {at})"
+    else:
+        newline = _line_ending(before)
+        if style_anchor is not None:
+            indent = _indent_before(before, style_anchor.span.start)
+        else:
+            indent = _indent_before(before, body_node.span.start) + _indent_step(
+                _indent_before(before, body_node.span.start), sample
+            )
+        if not indent:
+            indent = _indent_step("", sample)
+        inner = indent + _indent_step(indent, sample)
+        fragment = (
+            f"{newline}{indent}(text {quote(text)}"
+            f"{newline}{inner}{at}"
+            f"{newline}{indent})"
+        )
+    edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
+    updated = read_source(edited.encode("utf-8"))
+    texts = updated.symbol(symbol_name).body(unit, body_style).texts
+    if len(texts) != len(body.texts) + 1:
+        raise InvalidLibraryError("Body text insert changed unexpected counts")
+    last = texts[-1]
+    if last.text != text or last.x != x or last.y != y or last.rotation != rotation:
+        raise InvalidLibraryError(
+            "Body text insert did not establish the requested text"
+        )
     return updated

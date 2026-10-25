@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add symbol graphics B anchors: `ensure_body`, `add_rectangle`, `add_body_text`, body rectangle/text inspection, and `export_svgs` via private ADR 0007 `kicad-cli` discovery—prefer unit-0 shared artwork over copying into every unit (`docs/symbol-libraries.md`; #31).
 - Add symbol-library pin `add_pin` / `set_pin` / `delete_pin` on existing `(unit, body_style)` bodies, preserving alternate body styles and ADR 0003 local deltas (`docs/symbol-libraries.md`; #30).
 - Add symbol-library `add_property` / `delete_property` for declared fields (private modifier optional), with inheritance-safe boundaries and byte-local deltas (`docs/symbol-libraries.md`; #29).
 - Lock the package documentation contract in `docs/DOCUMENTATION.md` (usage pages + docstrings + changelog; generated API reference deferred) and align existing usage pages to the shared section order.

@@ -76,6 +76,8 @@ class DonorInspectionTests(unittest.TestCase):
             ],
             [(0, 1, ()), (1, 1, ("~{OCC}",)), (2, 1, ("EN",))],
         )
+        self.assertEqual(len(gadget.bodies[0].rectangles), 1)
+        self.assertEqual(gadget.bodies[0].rectangles[0].start_x, -2.54)
         self.assertEqual(gadget.bodies[1].pins[0].x, 5.08)
         self.assertEqual(gadget.bodies[1].pins[0].rotation, 180)
         self.assertEqual(library.symbol("Marker").property("Kind").value, "END_CTC")

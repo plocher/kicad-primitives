@@ -1,9 +1,12 @@
 """Inspect and edit explicit-path symbol libraries; parsing stays private."""
 
+import subprocess
+import tempfile
 from os import PathLike
 from pathlib import Path
 
 from . import _symbol_parse, _symbol_persist
+from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
 from ._symbol_types import (
     AmbiguousPinError,
     AmbiguousPropertyError,
@@ -16,6 +19,8 @@ from ._symbol_types import (
     SymbolLibraryError,
     SymbolPin,
     SymbolProperty,
+    SymbolRectangle,
+    SymbolText,
     UnsupportedOperationError,
 )
 
@@ -26,12 +31,15 @@ __all__ = [
     "FileConflictError",
     "InheritanceError",
     "InvalidLibraryError",
+    "KicadCliNotFoundError",
     "Symbol",
     "SymbolBody",
     "SymbolLibrary",
     "SymbolLibraryError",
     "SymbolPin",
     "SymbolProperty",
+    "SymbolRectangle",
+    "SymbolText",
     "UnsupportedOperationError",
 ]
 
@@ -212,6 +220,118 @@ class SymbolLibrary:
             self._source, symbol_name, unit, body_style, number
         )
         self._source = updated
+
+    def ensure_body(self, symbol_name: str, unit: int, body_style: int) -> None:
+        """Create an empty body when missing; no-op when already present.
+
+        Prefer unit ``0`` for shared graphics instead of copying artwork into
+        every placed unit. Does not edit a parent. Read-only formats fail
+        without changing memory or disk.
+        """
+        self._source = _symbol_parse.ensure_body(
+            self._source, symbol_name, unit, body_style
+        )
+
+    def add_rectangle(
+        self,
+        symbol_name: str,
+        unit: int,
+        body_style: int,
+        *,
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> None:
+        """Insert a minimal rectangle on an existing body.
+
+        Stroke/fill stay out of scope. Missing bodies and read-only formats fail
+        without changing memory or disk. Put shared boxes on unit ``0``.
+        """
+        start_x, start_y = start
+        end_x, end_y = end
+        self._source = _symbol_parse.insert_rectangle(
+            self._source,
+            symbol_name,
+            unit,
+            body_style,
+            start_x=start_x,
+            start_y=start_y,
+            end_x=end_x,
+            end_y=end_y,
+        )
+
+    def add_body_text(
+        self,
+        symbol_name: str,
+        unit: int,
+        body_style: int,
+        text: str,
+        *,
+        x: float,
+        y: float,
+        rotation: float = 0.0,
+    ) -> None:
+        """Insert minimal body text on an existing body.
+
+        Full text-effects authoring is out of scope. Missing bodies and
+        read-only formats fail without changing memory or disk.
+        """
+        self._source = _symbol_parse.insert_body_text(
+            self._source,
+            symbol_name,
+            unit,
+            body_style,
+            text,
+            x=x,
+            y=y,
+            rotation=rotation,
+        )
+
+    def export_svgs(
+        self,
+        output_dir: str | PathLike[str],
+        *,
+        kicad_cli: str | PathLike[str] | None = None,
+        symbol: str | None = None,
+    ) -> Path:
+        """Export the current library bytes to SVG via kicad-cli.
+
+        Writes a temporary copy of ``to_bytes()`` so in-memory edits are visible
+        without saving. Discovery follows ADR 0007. Raises
+        ``KicadCliNotFoundError`` when discovery fails, and ``RuntimeError`` when
+        the export process fails. This is an inspection hook, not a contact-sheet
+        product UI.
+        """
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        cli = resolve_kicad_cli(None if kicad_cli is None else Path(kicad_cli))
+        with tempfile.TemporaryDirectory(prefix="kicad-primitives-svg-") as tmp:
+            lib_path = Path(tmp) / self._path.name
+            lib_path.write_bytes(self.to_bytes())
+            command = [
+                str(cli),
+                "sym",
+                "export",
+                "svg",
+                "--output",
+                str(out),
+                str(lib_path),
+            ]
+            if symbol is not None:
+                command.extend(["--symbol", symbol])
+            try:
+                subprocess.run(
+                    command,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()
+                raise RuntimeError(
+                    f"kicad-cli svg export failed ({exc.returncode}): {detail}"
+                ) from exc
+        return out
 
     def save(self) -> None:
         """Persist to the opened path after an optimistic conflict check.
