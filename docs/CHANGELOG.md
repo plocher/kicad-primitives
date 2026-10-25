@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `kicad_primitives.tables.LibraryTables`: global/project symbol and footprint table discover/read/resolve/write with `${VAR}` expansion, nested `Table` rows, project-over-global nickname resolve, and localized add/remove/rename (`docs/tables.md`; #32).
 - Add same-library symbol `create_symbol` / `rename_symbol` / `delete_symbol` / `copy_symbol`; cross-library `copy_symbol_from` fails explicitly until library tables (#38).
 - Add symbol graphics B anchors: `ensure_body`, `add_rectangle`, `add_body_text`, body rectangle/text inspection, and `export_svgs` via private ADR 0007 `kicad-cli` discovery—prefer unit-0 shared artwork over copying into every unit (`docs/symbol-libraries.md`; #31).
 - Add symbol-library pin `add_pin` / `set_pin` / `delete_pin` on existing `(unit, body_style)` bodies, preserving alternate body styles and ADR 0003 local deltas (`docs/symbol-libraries.md`; #30).

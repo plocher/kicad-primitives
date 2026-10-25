@@ -8,7 +8,7 @@ It establishes design context: root document paths, hierarchical schematic
 files, and project `text_variables`.
 It opens schematic **content** through `schematic()` / `schematics()` (see
 [schematics.md](schematics.md)). It does not edit schematics, open PCB document
-models, run KiCad, or resolve library tables.
+models, or run KiCad. Library tables: [tables.md](tables.md).
 The package remains pre-alpha (`0.0.0` informational).
 
 ## Open a project
