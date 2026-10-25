@@ -16,3 +16,4 @@ build/
 htmlcov/
 .DS_Store
 docs/handoff/
+uv.lock
