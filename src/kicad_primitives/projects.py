@@ -1,7 +1,8 @@
-"""Open a KiCad project and expose settings paths, hierarchy, and text variables.
+"""Open a KiCad project and expose settings, hierarchy, variables, and schematics.
 
-Parsing of schematic content beyond Sheetfile references stays private and minimal.
-This service does not open schematic or PCB documents for edit; that remains later work.
+Sheetfile path walks stay private. Schematic *content* is read through
+:meth:`Project.schematic` / :meth:`Project.schematics` (ADR 0002 ownership).
+PCB document models and schematic edits remain later work.
 """
 
 from __future__ import annotations
@@ -12,6 +13,10 @@ from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .schematics import Schematic
 
 __all__ = [
     "InvalidProjectError",
@@ -105,6 +110,35 @@ class Project:
     def text_variables(self) -> Mapping[str, str]:
         """Read-only ``text_variables`` map from the project file."""
         return self._text_variables
+
+    def schematic(self, path: str | PathLike[str] | None = None) -> Schematic:
+        """Open one schematic in this project (root by default).
+
+        When *path* is given it must resolve to a file returned by
+        :meth:`schematic_files`. Outsiders and missing roots fail explicitly.
+        """
+        from .schematics import open_schematic
+
+        if path is None:
+            if self._schematic_file is None:
+                raise InvalidProjectError(
+                    f"No root schematic file found for project {self._project_file}"
+                )
+            target = self._schematic_file
+        else:
+            target = Path(path).expanduser().resolve()
+            allowed = {p.resolve() for p in self.schematic_files()}
+            if target not in allowed:
+                raise InvalidProjectError(
+                    f"Schematic is not part of project hierarchy: {target}"
+                )
+        return open_schematic(target)
+
+    def schematics(self) -> tuple[Schematic, ...]:
+        """Open every schematic in the hierarchical file list, in walk order."""
+        from .schematics import open_schematic
+
+        return tuple(open_schematic(path) for path in self.schematic_files())
 
     def schematic_files(self) -> tuple[Path, ...]:
         """Root schematic plus reachable child sheets in discovery order.
