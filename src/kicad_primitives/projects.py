@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "InvalidProjectError",
     "Project",
+    "ProjectWriteBlockedError",
 ]
 
 _SHEETFILE_RE = re.compile(
@@ -31,6 +32,10 @@ _SHEETFILE_RE = re.compile(
 
 class InvalidProjectError(ValueError):
     """The path is not a usable KiCad project or its settings cannot be read."""
+
+
+class ProjectWriteBlockedError(PermissionError):
+    """A KiCad lock file blocks package writes outside an in-KiCad session."""
 
 
 class Project:
@@ -111,6 +116,59 @@ class Project:
         """Read-only ``text_variables`` map from the project file."""
         return self._text_variables
 
+    @property
+    def lock_file(self) -> Path:
+        """Path of the KiCad ``.lck`` file for this project basename."""
+        return (self._directory / f"{self.base_name}.lck").resolve()
+
+    @property
+    def is_locked(self) -> bool:
+        """True when the KiCad lock file is present on disk.
+
+        Presence means KiCad may hold unsaved state; it does not by itself
+        forbid reads. Writers should call :meth:`ensure_writes_allowed`.
+        """
+        return self.lock_file.is_file()
+
+    def write_is_permitted(self, *, inside_kicad: bool | None = None) -> bool:
+        """Return whether filesystem writes should proceed under lock policy.
+
+        When *inside_kicad* is omitted, the package probes for an importable
+        ``pcbnew`` module (KiCad embedded Python). Callers may pass an explicit
+        boolean in tests or known host contexts.
+        """
+        if _resolve_inside_kicad(inside_kicad):
+            return True
+        return not self.is_locked
+
+    def ensure_writes_allowed(
+        self,
+        *,
+        dry_run: bool = False,
+        inside_kicad: bool | None = None,
+    ) -> None:
+        """Raise if a KiCad lock should block real filesystem writes.
+
+        Policy:
+        - Inside KiCad (plugin/session): always allowed (in-memory host owns state).
+        - No lock file: allowed.
+        - Locked + ``dry_run=True``: allowed (preview only; no package stderr).
+        - Locked + ``dry_run=False``: raises :class:`ProjectWriteBlockedError`.
+        """
+        if self.write_is_permitted(inside_kicad=inside_kicad):
+            return
+        if dry_run:
+            return
+        lock_name = self.lock_file.name
+        raise ProjectWriteBlockedError(
+            f"KiCad lock file detected ({lock_name}). "
+            "The project appears to be open in KiCad. "
+            "Unsaved KiCad edits may be invisible to this process, and package "
+            "writes may be overwritten when KiCad saves. "
+            "Close KiCad before writing, or call ensure_writes_allowed(dry_run=True) "
+            "only for non-writing previews."
+        )
+
     def schematic(self, path: str | PathLike[str] | None = None) -> Schematic:
         """Open one schematic in this project (root by default).
 
@@ -153,6 +211,16 @@ class Project:
         processed: set[Path] = set()
         _walk_schematic(self._schematic_file, files, processed)
         return tuple(files)
+
+
+def _resolve_inside_kicad(inside_kicad: bool | None) -> bool:
+    if inside_kicad is not None:
+        return inside_kicad
+    try:
+        import pcbnew  # type: ignore[import-not-found]  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def _find_project_file(directory: Path) -> Path:

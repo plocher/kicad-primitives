@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add project write lock/guard hooks on `Project` (`lock_file`, `is_locked`, `write_is_permitted`, `ensure_writes_allowed`) with dry-run and in-KiCad bypass (#27).
 - Add schematic geometry/electrical structure read on `Schematic` (wires, junctions, labels, global/hierarchical labels, no-connects, sheet edges) for FieldUnit-style ingest (#35).
 - Add schematic placed-symbol and title-block read via `Project.schematic` / `Project.schematics` (`kicad_primitives.schematics`): merged fields, uuid, transform, unit, flags; top-level placements only; hierarchy-gated paths (#28).
 - Add `kicad_primitives.projects.Project`: open a project directory or `.kicad_pro`, discover optional schematic/PCB companions, list hierarchical schematic files with parent-relative `Sheetfile` resolution, and expose read-only `text_variables` (jBOM donor gates; sheet-walk defect corrected).
