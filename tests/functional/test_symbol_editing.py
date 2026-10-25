@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from kicad_primitives.symbols import (
+    AmbiguousPinError,
     AmbiguousPropertyError,
     AmbiguousSymbolError,
     SymbolLibrary,
@@ -314,3 +315,283 @@ class PropertyInsertDeleteTests(unittest.TestCase):
         with self.assertRaises(UnsupportedOperationError):
             library.delete_property("A", "Note")
         self.assertEqual(library.to_bytes(), original)
+
+
+class PinEditTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "Example.kicad_sym"
+
+    def test_add_pin_exact_delta_and_body_style_identity(self) -> None:
+        original = (
+            b"(kicad_symbol_lib (version 20251024)\r\n"
+            b'  (symbol "Part"\r\n'
+            b'    (property "Description" "keep")\r\n'
+            b'    (symbol "Part_1_1"\r\n'
+            b"      (pin passive line (at 0 0 0) (length 1)\r\n"
+            b'        (name "A") (number "1"))\r\n'
+            b"    )\r\n"
+            b'    (symbol "Part_1_2"\r\n'
+            b"      (pin passive line (at 1 1 90) (length 1)\r\n"
+            b'        (name "A") (number "1"))\r\n'
+            b"    )\r\n"
+            b"  )\r\n"
+            b")\r\n"
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        library.add_pin(
+            "Part",
+            1,
+            1,
+            "2",
+            "B",
+            "input",
+            x=5.08,
+            y=0.0,
+            rotation=180.0,
+            length=2.54,
+            shape="line",
+        )
+        expected = original.replace(
+            b'(name "A") (number "1"))\r\n    )\r\n    (symbol "Part_1_2"',
+            (
+                b'(name "A") (number "1"))\r\n'
+                b"      (pin input line\r\n"
+                b"        (at 5.08 0 180)\r\n"
+                b"        (length 2.54)\r\n"
+                b'        (name "B")\r\n'
+                b'        (number "2")\r\n'
+                b"      )\r\n"
+                b"    )\r\n"
+                b'    (symbol "Part_1_2"'
+            ),
+            1,
+        )
+        self.assertEqual(library.to_bytes(), expected)
+        self.assertEqual(self.path.read_bytes(), original)
+        body11 = next(b for b in library.symbol("Part").bodies if b.body_style == 1)
+        body12 = next(b for b in library.symbol("Part").bodies if b.body_style == 2)
+        self.assertEqual([p.number for p in body11.pins], ["1", "2"])
+        self.assertEqual(body11.pins[1].name, "B")
+        self.assertEqual(body11.pins[1].electrical_type, "input")
+        self.assertEqual(body11.pins[1].x, 5.08)
+        self.assertEqual(body11.pins[1].rotation, 180.0)
+        self.assertEqual(body11.pins[1].length, 2.54)
+        # Alternate body style untouched.
+        self.assertEqual([p.number for p in body12.pins], ["1"])
+        self.assertEqual(body12.pins[0].name, "A")
+        library.save()
+        reopened = SymbolLibrary.open(self.path)
+        body = next(b for b in reopened.symbol("Part").bodies if b.body_style == 1)
+        self.assertEqual([p.number for p in body.pins], ["1", "2"])
+
+    def test_set_pin_exact_delta_and_lexical_no_op(self) -> None:
+        original = (
+            b"(kicad_symbol_lib (version 20251024)\n"
+            b'  (symbol "Part"\n'
+            b'    (symbol "Part_1_1"\n'
+            b"      (pin passive line (at 0 0 0) (length 1)\n"
+            b'        (name "A") (number "1"))\n'
+            b"    )\n"
+            b"  )\n"
+            b")\n"
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        library.set_pin(
+            "Part",
+            1,
+            1,
+            "1",
+            name="IN",
+            x=2.54,
+            y=-1.27,
+            rotation=90.0,
+            length=2.54,
+        )
+        expected = (
+            original.replace(b"(at 0 0 0)", b"(at 2.54 -1.27 90)", 1)
+            .replace(b"(length 1)", b"(length 2.54)", 1)
+            .replace(b'(name "A")', b'(name "IN")', 1)
+        )
+        self.assertEqual(library.to_bytes(), expected)
+        pin = library.symbol("Part").bodies[0].pins[0]
+        self.assertEqual(pin.name, "IN")
+        self.assertEqual(
+            (pin.x, pin.y, pin.rotation, pin.length), (2.54, -1.27, 90.0, 2.54)
+        )
+        # Lexical no-op when values already match.
+        before = library.to_bytes()
+        library.set_pin(
+            "Part",
+            1,
+            1,
+            "1",
+            name="IN",
+            x=2.54,
+            y=-1.27,
+            rotation=90.0,
+            length=2.54,
+        )
+        self.assertEqual(library.to_bytes(), before)
+        library.set_pin(
+            "Part",
+            1,
+            1,
+            "1",
+            electrical_type="input",
+            shape="inverted",
+            hidden=True,
+        )
+        pin = library.symbol("Part").bodies[0].pins[0]
+        self.assertEqual(pin.electrical_type, "input")
+        self.assertEqual(pin.shape, "inverted")
+        self.assertTrue(pin.hidden)
+
+    def test_delete_pin_preserves_alternate_body_and_siblings(self) -> None:
+        original = (
+            b"(kicad_symbol_lib (version 20251024)\n"
+            b'  (symbol "Part"\n'
+            b'    (property "Description" "keep")\n'
+            b'    (symbol "Part_1_1"\n'
+            b"      (pin passive line (at 0 0 0) (length 1)\n"
+            b'        (name "A") (number "1"))\n'
+            b"      (pin input line (at 5 0 180) (length 2)\n"
+            b'        (name "B") (number "2"))\n'
+            b"    )\n"
+            b'    (symbol "Part_1_2"\n'
+            b"      (pin passive line (at 1 1 90) (length 1)\n"
+            b'        (name "A") (number "1"))\n'
+            b"    )\n"
+            b"  )\n"
+            b")\n"
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        library.delete_pin("Part", 1, 1, "1")
+        expected = original.replace(
+            b"      (pin passive line (at 0 0 0) (length 1)\n"
+            b'        (name "A") (number "1"))\n',
+            b"",
+            1,
+        )
+        self.assertEqual(library.to_bytes(), expected)
+        self.assertEqual(self.path.read_bytes(), original)
+        body11 = next(b for b in library.symbol("Part").bodies if b.body_style == 1)
+        body12 = next(b for b in library.symbol("Part").bodies if b.body_style == 2)
+        self.assertEqual([p.number for p in body11.pins], ["2"])
+        self.assertEqual([p.number for p in body12.pins], ["1"])
+        self.assertEqual(library.symbol("Part").property("Description").value, "keep")
+
+    def test_pin_ops_do_not_touch_parent_or_create_bodies(self) -> None:
+        original = b"""(kicad_symbol_lib (version 20251024)
+          (symbol "Child" (extends "Root") (property "Note" "child"))
+          (symbol "Root" (property "Description" "parent")
+            (symbol "Root_1_1"
+              (pin input line (at 0 0 0) (length 1) (name "IN") (number "1")))))"""
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        with self.assertRaises(KeyError):
+            library.add_pin("Child", 1, 1, "2", "OUT", "output", x=0.0, y=0.0)
+        with self.assertRaises(KeyError):
+            library.set_pin("Root", 9, 9, "1", name="X")
+        with self.assertRaises(KeyError):
+            library.delete_pin("Root", 1, 1, "99")
+        self.assertEqual(library.to_bytes(), original)
+        library.set_pin("Root", 1, 1, "1", name="IN1")
+        self.assertEqual(library.symbol("Child").properties[0].value, "child")
+        self.assertEqual(library.resolve("Child").bodies[0].pins[0].name, "IN1")
+
+    def test_pin_ops_bad_selection_leave_memory_and_disk_unchanged(self) -> None:
+        cases = (
+            (
+                (
+                    '(symbol "A" (symbol "A_1_1"'
+                    ' (pin passive line (at 0 0 0) (length 1) (name "A") (number "1"))'
+                    ' (pin input line (at 1 1 0) (length 1) (name "B") (number "1"))))'
+                ),
+                "A",
+                1,
+                1,
+                "1",
+                AmbiguousPinError,
+                "set",
+            ),
+            ('(symbol "A") (symbol "A")', "A", 1, 1, "1", AmbiguousSymbolError, "add"),
+            ('(symbol "A")', "Missing", 1, 1, "1", KeyError, "add"),
+            (
+                (
+                    '(symbol "A" (symbol "A_1_1"'
+                    ' (pin passive line (at 0 0 0) (length 1) (name "A") (number "1"))))'
+                ),
+                "A",
+                1,
+                1,
+                "1",
+                UnsupportedOperationError,
+                "add",
+            ),
+            (
+                (
+                    '(symbol "A" (symbol "A_1_1"'
+                    ' (pin passive line (at 0 0 0) (length 1) (name "A") (number "1"))))'
+                ),
+                "A",
+                1,
+                1,
+                "missing",
+                KeyError,
+                "delete",
+            ),
+        )
+        for nodes, symbol, unit, style, number, error, action in cases:
+            with self.subTest(nodes=nodes, action=action):
+                original = f"(kicad_symbol_lib (version 20251024) {nodes})".encode()
+                self.path.write_bytes(original)
+                library = SymbolLibrary.open(self.path)
+                with self.assertRaises(error):
+                    if action == "add":
+                        library.add_pin(
+                            symbol, unit, style, number, "X", "passive", x=0.0, y=0.0
+                        )
+                    elif action == "set":
+                        library.set_pin(symbol, unit, style, number, name="Z")
+                    else:
+                        library.delete_pin(symbol, unit, style, number)
+                self.assertEqual(library.to_bytes(), original)
+                self.assertEqual(self.path.read_bytes(), original)
+
+    def test_pin_ops_reject_readonly_format_and_invalid_values(self) -> None:
+        original = (
+            b'(kicad_symbol_lib (version 20231618) (symbol "A"'
+            b' (symbol "A_1_1"'
+            b' (pin passive line (at 0 0 0) (length 1) (name "A") (number "1")))))'
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        with self.assertRaises(UnsupportedOperationError):
+            library.add_pin("A", 1, 1, "2", "B", "passive", x=0.0, y=0.0)
+        with self.assertRaises(UnsupportedOperationError):
+            library.set_pin("A", 1, 1, "1", name="Z")
+        with self.assertRaises(UnsupportedOperationError):
+            library.delete_pin("A", 1, 1, "1")
+        self.assertEqual(library.to_bytes(), original)
+
+        current = (
+            b'(kicad_symbol_lib (version 20251024) (symbol "A"'
+            b' (symbol "A_1_1"'
+            b' (pin passive line (at 0 0 0) (length 1) (name "A") (number "1")))))'
+        )
+        self.path.write_bytes(current)
+        library = SymbolLibrary.open(self.path)
+        with self.assertRaises(ValueError):
+            library.add_pin("A", 1, 1, "", "B", "passive", x=0.0, y=0.0)
+        with self.assertRaises(ValueError):
+            library.add_pin("A", 1, 1, "2", "B", "not a type", x=0.0, y=0.0)
+        with self.assertRaises(ValueError):
+            library.add_pin("A", 1, 1, "2", "B", "passive", x=float("nan"), y=0.0)
+        with self.assertRaises((ValueError, TypeError)):
+            library.set_pin("A", 1, 1, "1", name="\x00")
+        self.assertEqual(library.to_bytes(), current)

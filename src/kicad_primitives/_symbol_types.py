@@ -29,6 +29,10 @@ class AmbiguousSymbolError(SymbolLibraryError, ValueError):
     """More than one top-level symbol has the requested name."""
 
 
+class AmbiguousPinError(SymbolLibraryError, ValueError):
+    """More than one pin in the selected body matches the requested number."""
+
+
 class InheritanceError(SymbolLibraryError, ValueError):
     """An effective definition cannot be established safely."""
 
@@ -77,6 +81,15 @@ class SymbolBody:
     pins: tuple[SymbolPin, ...]
     origin_symbol: str
 
+    def pin(self, number: str) -> SymbolPin:
+        """Get one pin by number within this body; raise if missing or ambiguous."""
+        matches = tuple(p for p in self.pins if p.number == number)
+        if not matches:
+            raise KeyError(number)
+        if len(matches) != 1:
+            raise AmbiguousPinError(f"{self.name}: ambiguous pin number {number!r}")
+        return matches[0]
+
 
 @dataclass(frozen=True)
 class Symbol:
@@ -98,4 +111,17 @@ class Symbol:
             raise KeyError(name)
         if len(matches) != 1:
             raise AmbiguousPropertyError(f"{self.name}: ambiguous property {name!r}")
+        return matches[0]
+
+    def body(self, unit: int, body_style: int) -> SymbolBody:
+        """Get one body by unit and body-style identity; raise if missing."""
+        matches = tuple(
+            b for b in self.bodies if b.unit == unit and b.body_style == body_style
+        )
+        if not matches:
+            raise KeyError((unit, body_style))
+        if len(matches) != 1:
+            raise InvalidLibraryError(
+                f"{self.name}: duplicate unit/body style {(unit, body_style)!r}"
+            )
         return matches[0]

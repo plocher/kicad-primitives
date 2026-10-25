@@ -5,6 +5,7 @@ from pathlib import Path
 
 from . import _symbol_parse, _symbol_persist
 from ._symbol_types import (
+    AmbiguousPinError,
     AmbiguousPropertyError,
     AmbiguousSymbolError,
     FileConflictError,
@@ -19,6 +20,7 @@ from ._symbol_types import (
 )
 
 __all__ = [
+    "AmbiguousPinError",
     "AmbiguousPropertyError",
     "AmbiguousSymbolError",
     "FileConflictError",
@@ -113,6 +115,101 @@ class SymbolLibrary:
         """
         updated = _symbol_parse.delete_property(
             self._source, symbol_name, property_name
+        )
+        self._source = updated
+
+    def add_pin(
+        self,
+        symbol_name: str,
+        unit: int,
+        body_style: int,
+        number: str,
+        name: str,
+        electrical_type: str,
+        *,
+        x: float,
+        y: float,
+        rotation: float = 0.0,
+        length: float = 2.54,
+        shape: str = "line",
+        hidden: bool = False,
+    ) -> None:
+        """Insert one pin on an existing body without collapsing body styles.
+
+        Targets `(unit, body_style)` on the selected symbol only. Does not create
+        bodies or edit a parent. Duplicate pin numbers, missing bodies, invalid
+        values, and read-only formats fail without changing memory or disk.
+        """
+        updated = _symbol_parse.insert_pin(
+            self._source,
+            symbol_name,
+            unit,
+            body_style,
+            number,
+            name,
+            electrical_type,
+            x=x,
+            y=y,
+            rotation=rotation,
+            length=length,
+            shape=shape,
+            hidden=hidden,
+        )
+        self._source = updated
+
+    def set_pin(
+        self,
+        symbol_name: str,
+        unit: int,
+        body_style: int,
+        number: str,
+        *,
+        name: str | None = None,
+        electrical_type: str | None = None,
+        x: float | None = None,
+        y: float | None = None,
+        rotation: float | None = None,
+        length: float | None = None,
+        shape: str | None = None,
+        hidden: bool | None = None,
+    ) -> None:
+        """Update selected fields of one existing pin on a body.
+
+        Unspecified fields stay unchanged. Missing or ambiguous targets and
+        read-only formats fail without changing memory or disk. Equal values are
+        a lexical no-op. Query again for a fresh snapshot.
+        """
+        updated = _symbol_parse.replace_pin(
+            self._source,
+            symbol_name,
+            unit,
+            body_style,
+            number,
+            name=name,
+            electrical_type=electrical_type,
+            x=x,
+            y=y,
+            rotation=rotation,
+            length=length,
+            shape=shape,
+            hidden=hidden,
+        )
+        self._source = updated
+
+    def delete_pin(
+        self,
+        symbol_name: str,
+        unit: int,
+        body_style: int,
+        number: str,
+    ) -> None:
+        """Remove one unambiguous pin from an existing body.
+
+        Does not edit a parent or other body styles. Missing or ambiguous
+        targets and read-only formats fail without changing memory or disk.
+        """
+        updated = _symbol_parse.delete_pin(
+            self._source, symbol_name, unit, body_style, number
         )
         self._source = updated
 
