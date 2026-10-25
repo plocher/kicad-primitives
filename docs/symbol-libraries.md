@@ -80,6 +80,8 @@ library.export_svgs("/tmp/symbol-svgs")  # kicad-cli inspection hook; optional k
 library.create_symbol("Empty")
 library.create_symbol("Child", extends="Part")
 library.copy_symbol("Part", "PartCopy")
+other = SymbolLibrary.open("Other.kicad_sym")
+other.copy_symbol_from(library, "Part", "Imported")  # parent must exist if extends
 library.rename_symbol("PartCopy", "Part2")
 library.delete_symbol("Empty")
 preview = library.to_bytes()  # No disk write.
@@ -115,7 +117,10 @@ Edits are all-or-nothing in memory, not a public multi-edit transaction.
 No parent is edited implicitly. Deleting a local override leaves any inherited effective value visible through `resolve()`.
 Same-library create/rename/delete/copy are supported; rename rewrites body names and in-library `extends`.
 Delete refuses when another symbol still extends the target.
-Cross-library `copy_symbol_from` fails explicitly until library-table resolution exists.
+Cross-library `copy_symbol_from` copies a declared definition into this library;
+`extends` is kept and the parent must already exist in the destination (copy
+parents first). Path discovery may use library tables; this method takes opened
+libraries only.
 Unit restructuring beyond `ensure_body` remains outside this surface.
 Changing a declared empty mandatory field changes its declared value; inspect `resolve()` separately to understand the effective inherited value.
 Generic field values are not validated against Railroad or procurement policy.
@@ -130,7 +135,7 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 
 - No library discovery, project open, or schematic cache edit on this surface.
 - No unit split/restructure beyond `ensure_body` on this surface.
-- Cross-library symbol copy waits on library tables; use `copy_symbol` in-library only.
+- `copy_symbol_from` does not open tables or resolve nicknames; pass opened libraries.
 - `ensure_body` creates empty bodies only; it does not restructure multi-unit definitions.
 - Rectangle/text inserts are minimal geometry; stroke/fill and full text-effects authoring stay out of scope.
 - `export_svgs` needs a resolvable `kicad-cli`; pure file edits do not.
