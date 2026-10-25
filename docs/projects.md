@@ -63,10 +63,32 @@ Absence, `{}`, and `null` are normal and yield an empty map—not a diagnostic.
 Non-string entries are skipped.
 Malformed project JSON raises `InvalidProjectError` on open.
 
+## Write lock and guards
+
+KiCad creates ``<basename>.lck`` while a project is open.
+
+```python
+project = Project.open("/path/to/board")
+print(project.lock_file, project.is_locked)
+if project.write_is_permitted():
+    project.ensure_writes_allowed()  # raises ProjectWriteBlockedError if locked
+# Preview-only callers:
+project.ensure_writes_allowed(dry_run=True)  # locked still OK; do not write
+# In-KiCad plugin hosts:
+project.ensure_writes_allowed(inside_kicad=True)
+```
+
+`is_locked` is presence of the lock file only. Reads are always allowed.
+`ensure_writes_allowed` implements the package write policy: bypass inside
+KiCad, allow dry-run previews when locked, otherwise raise
+`ProjectWriteBlockedError` (a `PermissionError`). The package does not print
+to stderr.
+
 ## Errors
 
 - `InvalidProjectError`: missing project file, wrong open target, or unreadable
   project JSON.
+- `ProjectWriteBlockedError`: KiCad lock blocks non-dry-run writes outside KiCad.
 - Ordinary `OSError` subclasses still apply to underlying filesystem failures.
 
 ## Tests
