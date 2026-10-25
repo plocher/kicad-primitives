@@ -1,4 +1,4 @@
-# Symbol libraries: first-slice usage
+# Symbol libraries
 
 ## Scope
 
@@ -54,7 +54,6 @@ There is intentionally no lossy, flattened `.pins` adapter.
 ## Edit, preview, save
 
 Work on a disposable copy while trying the recipe.
-The named symbol must already declare the selected property:
 
 ```python
 from kicad_primitives.symbols import SymbolLibrary
@@ -62,17 +61,28 @@ from kicad_primitives.symbols import SymbolLibrary
 library = SymbolLibrary.open("Example.kicad_sym")
 library.set_property("Part", "Description", 'Updated description with "quotes"')
 assert library.symbol("Part").property("Description").value == 'Updated description with "quotes"'
+library.add_property("Part", "Role", "DEVICE")
+library.add_property("Part", "KLC_S3.3", "reason", private=True)
+library.delete_property("Part", "Role")
 preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
 ```
 
-Only the selected value token changes. Private modifiers, field placement/effects, other definitions, newline spelling, and unrelated bytes survive unchanged.
+`set_property` changes one existing declared value token.
+`add_property` inserts a new declared field after the last property (or after `extends`/name when none exist).
+Optional `private=True` writes the KiCad private modifier.
+Inserted nodes use a minimal `(at 0 0 0)` body and match the symbol's newline and indent style when the definition is multi-line; compact single-line symbols stay single-line.
+`delete_property` removes one unambiguous declared property and its leading separator.
+
+Private modifiers, field placement/effects on untouched fields, other definitions, newline spelling, and unrelated bytes survive unchanged.
 Setting an already equal value is a lexical no-op, even if its source escape spelling is noncanonical.
 Each changed edit reparses before further queries/edits; callers never manage spans.
 Edits are all-or-nothing in memory, not a public multi-edit transaction.
 
-An inherited-only or absent property is not silently inserted.
-No parent is edited implicitly. Renames, property insertion/deletion, pin edits, unit restructuring, and cross-library copying are outside this slice.
+`set_property` does not insert a missing field; use `add_property`.
+`add_property` fails when the identity already exists (including mandatory case-insensitive clashes).
+No parent is edited implicitly. Deleting a local override leaves any inherited effective value visible through `resolve()`.
+Renames, pin edits, unit restructuring, and cross-library copying remain outside this surface.
 Changing a declared empty mandatory field changes its declared value; inspect `resolve()` separately to understand the effective inherited value.
 Generic field values are not validated against Railroad or procurement policy.
 
@@ -85,7 +95,8 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 ## Limits
 
 - No library discovery, project open, or schematic cache edit on this surface.
-- No property insert/delete, pin edit, rename, unit split, or cross-library copy in this slice.
+- No pin edit, rename, unit split, or cross-library copy on this surface.
+- Inserted properties get a minimal position node only; full text-effects authoring is out of scope.
 - No public parser, span, or node types.
 - Graphics and full text-effects models are out of scope here.
 
@@ -108,7 +119,7 @@ Do not save concurrently with KiCad's symbol editor or another writer.
 
 Errors exported from `kicad_primitives.symbols`:
 - `InvalidLibraryError`: invalid syntax or required structure.
-- `UnsupportedOperationError`: unsupported format/operation, absent declared edit property, or unsafe replacement target.
+- `UnsupportedOperationError`: unsupported format/operation, absent declared `set_property` target, duplicate `add_property` identity, or unsafe replacement target.
 - `AmbiguousSymbolError` / `AmbiguousPropertyError`: non-unique identity.
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
