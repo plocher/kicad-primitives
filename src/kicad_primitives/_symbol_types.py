@@ -72,6 +72,26 @@ class SymbolPin:
 
 
 @dataclass(frozen=True)
+class SymbolRectangle:
+    """Minimal rectangle geometry on a body (stroke/fill remain opaque source)."""
+
+    start_x: float
+    start_y: float
+    end_x: float
+    end_y: float
+
+
+@dataclass(frozen=True)
+class SymbolText:
+    """Minimal body text; full effects remain opaque source."""
+
+    text: str
+    x: float
+    y: float
+    rotation: float
+
+
+@dataclass(frozen=True)
 class SymbolBody:
     """A declared body; zero unit/style means common, not an extra placed unit."""
 
@@ -80,6 +100,8 @@ class SymbolBody:
     body_style: int
     pins: tuple[SymbolPin, ...]
     origin_symbol: str
+    rectangles: tuple[SymbolRectangle, ...] = ()
+    texts: tuple[SymbolText, ...] = ()
 
     def pin(self, number: str) -> SymbolPin:
         """Get one pin by number within this body; raise if missing or ambiguous."""

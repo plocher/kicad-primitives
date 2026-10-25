@@ -595,3 +595,99 @@ class PinEditTests(unittest.TestCase):
         with self.assertRaises((ValueError, TypeError)):
             library.set_pin("A", 1, 1, "1", name="\x00")
         self.assertEqual(library.to_bytes(), current)
+
+
+class GraphicsAnchorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "Example.kicad_sym"
+
+    def test_unit0_shared_rectangle_and_text_not_copied_to_other_units(self) -> None:
+        original = (
+            b"(kicad_symbol_lib (version 20251024)\n"
+            b'  (symbol "Part"\n'
+            b'    (symbol "Part_1_1"\n'
+            b"      (pin passive line (at 0 0 0) (length 1)\n"
+            b'        (name "A") (number "1"))\n'
+            b"    )\n"
+            b"  )\n"
+            b")\n"
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        library.ensure_body("Part", 0, 1)
+        library.add_rectangle("Part", 0, 1, start=(-2.54, 2.54), end=(2.54, -2.54))
+        library.add_body_text("Part", 0, 1, "SHARED", x=0.0, y=3.0)
+        # Pin placement stays on the unit body (not copied into unit 0).
+        library.add_pin("Part", 1, 1, "2", "B", "input", x=5.08, y=0.0, rotation=180.0)
+        part = library.symbol("Part")
+        unit0 = part.body(0, 1)
+        unit1 = part.body(1, 1)
+        self.assertEqual(len(unit0.rectangles), 1)
+        self.assertEqual(unit0.rectangles[0].start_x, -2.54)
+        self.assertEqual(unit0.texts[0].text, "SHARED")
+        self.assertEqual(unit0.pins, ())
+        self.assertEqual([p.number for p in unit1.pins], ["1", "2"])
+        self.assertEqual(unit1.rectangles, ())
+        self.assertEqual(unit1.texts, ())
+        # Shared label lives only on the unit-0 body source span.
+        rendered = library.to_bytes()
+        self.assertIn(b'(text "SHARED"', rendered)
+        self.assertEqual(rendered.count(b"SHARED"), 1)
+        library.ensure_body("Part", 0, 1)  # no-op
+        self.assertEqual(len(library.symbol("Part").bodies), 2)
+
+    def test_ensure_body_and_graphics_reject_readonly(self) -> None:
+        original = (
+            b'(kicad_symbol_lib (version 20231618) (symbol "A" (symbol "A_1_1")))'
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        with self.assertRaises(UnsupportedOperationError):
+            library.ensure_body("A", 0, 1)
+        with self.assertRaises(UnsupportedOperationError):
+            library.add_rectangle("A", 1, 1, start=(0.0, 0.0), end=(1.0, 1.0))
+        with self.assertRaises(UnsupportedOperationError):
+            library.add_body_text("A", 1, 1, "X", x=0.0, y=0.0)
+        self.assertEqual(library.to_bytes(), original)
+
+    def test_export_svgs_uses_in_memory_bytes_and_cli(self) -> None:
+        from unittest.mock import patch
+
+        from kicad_primitives.symbols import KicadCliNotFoundError
+
+        original = (
+            b'(kicad_symbol_lib (version 20251024) (symbol "A"'
+            b' (symbol "A_1_1"'
+            b" (pin passive line (at 0 0 0) (length 1)"
+            b' (name "A") (number "1")))))'
+        )
+        self.path.write_bytes(original)
+        library = SymbolLibrary.open(self.path)
+        library.ensure_body("A", 0, 1)
+        library.add_rectangle("A", 0, 1, start=(0.0, 1.0), end=(1.0, 0.0))
+        out = Path(self.temp.name) / "svg-out"
+        fake_cli = Path(self.temp.name) / "fake-kicad-cli"
+        fake_cli.write_text("#!/bin/sh\nexit 0\n")
+        fake_cli.chmod(0o755)
+
+        def fake_run(command, check, capture_output, text, timeout):  # type: ignore[no-untyped-def]
+            self.assertEqual(command[0], str(fake_cli.resolve()))
+            self.assertEqual(command[1:4], ["sym", "export", "svg"])
+            # Temp library must include the unit-0 rectangle from memory.
+            lib = Path(command[-1])
+            self.assertTrue(lib.is_file())
+            self.assertIn(b"(rectangle", lib.read_bytes())
+            self.assertIn(b"A_0_1", lib.read_bytes())
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "A_unit1.svg").write_text("<svg/>")
+            return type("R", (), {"returncode": 0})()
+
+        with patch("kicad_primitives.symbols.subprocess.run", side_effect=fake_run):
+            result = library.export_svgs(out, kicad_cli=fake_cli)
+        self.assertEqual(result, out)
+        self.assertTrue((out / "A_unit1.svg").is_file())
+
+        with self.assertRaises(KicadCliNotFoundError):
+            library.export_svgs(out / "missing", kicad_cli=out / "no-such-cli")
