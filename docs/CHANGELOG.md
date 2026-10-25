@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add schematic geometry/electrical structure read on `Schematic` (wires, junctions, labels, global/hierarchical labels, no-connects, sheet edges) for FieldUnit-style ingest (#35).
 - Add schematic placed-symbol and title-block read via `Project.schematic` / `Project.schematics` (`kicad_primitives.schematics`): merged fields, uuid, transform, unit, flags; top-level placements only; hierarchy-gated paths (#28).
 - Add `kicad_primitives.projects.Project`: open a project directory or `.kicad_pro`, discover optional schematic/PCB companions, list hierarchical schematic files with parent-relative `Sheetfile` resolution, and expose read-only `text_variables` (jBOM donor gates; sheet-walk defect corrected).
 - Accept private `kicad-cli` path discovery in ADR 0007: explicit path, then `KICAD_CLI`, platform defaults, `PATH`; lazy hard discovery error; no public `cli` module; `pcbnew` runtime out of scope.

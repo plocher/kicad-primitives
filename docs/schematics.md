@@ -4,8 +4,8 @@
 project context (ADR 0002).
 They return `kicad_primitives.schematics.Schematic` snapshots: title block and
 **merged** placed symbols (fields, identity, transform, unit, flags).
-This slice is read-only. Geometry (wires/labels), field edit, and embedded
-restore are later tickets.
+Placed-symbol and geometry structure are read-only. Field edit and embedded
+restore remain later tickets.
 
 ## Open via a project
 
@@ -55,6 +55,30 @@ print(dict(tb.comments))  # keys 1..9 when present; empty string values kept
 
 Missing title blocks yield empty strings and an empty comments map.
 
+## Geometry and electrical structure
+
+```python
+for wire in root.wires:
+    print(wire.points, wire.uuid)
+for j in root.junctions:
+    print(j.x, j.y)
+for lab in root.labels:
+    print(lab.text, lab.x, lab.y, lab.rotation)
+for g in root.global_labels:
+    print(g.text, g.shape)
+for h in root.hierarchical_labels:
+    print(h.text, h.shape)
+for nc in root.no_connects:
+    print(nc.x, nc.y)
+for sheet in root.sheets:
+    print(sheet.name, sheet.filename, sheet.x, sheet.y, sheet.width, sheet.height)
+```
+
+Wires keep polyline points in file order. Sheet edges expose `Sheetname` /
+`Sheetfile` and the sheet rectangle. Child path resolution for opening content
+still goes through `Project.schematic_files()` / `Project.schematic(path)`
+(parent-relative), not a second walker.
+
 ## Errors
 
 - `InvalidSchematicError`: bad path, syntax, or required structure.
@@ -65,3 +89,4 @@ Missing title blocks yield empty strings and an empty comments map.
 
 Donor gates from jBOM schematic/title-block tests and Subdivision placement
 fields are ported in `tests/functional/test_schematic_placed_symbols.py`.
+Geometry gates live in `tests/functional/test_schematic_geometry.py`.
