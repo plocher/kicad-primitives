@@ -221,6 +221,50 @@ class SymbolLibrary:
         )
         self._source = updated
 
+    def create_symbol(self, name: str, *, extends: str | None = None) -> None:
+        """Insert a new empty top-level symbol in this library.
+
+        Optional ``extends`` must name an existing symbol in the same library.
+        Duplicate names and read-only formats fail without changing memory or disk.
+        """
+        self._source = _symbol_parse.create_symbol(self._source, name, extends=extends)
+
+    def rename_symbol(self, old_name: str, new_name: str) -> None:
+        """Rename one symbol, rewrite body names, and update in-library extends.
+
+        Equal names are a no-op. Missing/duplicate targets and read-only formats
+        fail without changing memory or disk.
+        """
+        self._source = _symbol_parse.rename_symbol(self._source, old_name, new_name)
+
+    def delete_symbol(self, name: str) -> None:
+        """Remove one top-level symbol from this library.
+
+        Refuses when another symbol still extends it. Missing targets and
+        read-only formats fail without changing memory or disk.
+        """
+        self._source = _symbol_parse.delete_symbol(self._source, name)
+
+    def copy_symbol(self, source_name: str, new_name: str) -> None:
+        """Duplicate one symbol inside this library under a new name.
+
+        Preserves properties, bodies, and extends. Cross-library copy is not
+        supported until library-table resolution exists; pass only same-library
+        names here.
+        """
+        self._source = _symbol_parse.copy_symbol(self._source, source_name, new_name)
+
+    def copy_symbol_from(
+        self,
+        _source_library: "SymbolLibrary",
+        _source_name: str,
+        _new_name: str,
+    ) -> None:
+        """Cross-library symbol copy — unsupported until library tables resolve."""
+        raise UnsupportedOperationError(
+            "Cross-library copy_symbol_from requires library table resolution (#32)"
+        )
+
     def ensure_body(self, symbol_name: str, unit: int, body_style: int) -> None:
         """Create an empty body when missing; no-op when already present.
 

@@ -77,6 +77,11 @@ library.ensure_body("Part", 0, 1)  # shared unit-0 body; do not copy into every 
 library.add_rectangle("Part", 0, 1, start=(-2.54, 2.54), end=(2.54, -2.54))
 library.add_body_text("Part", 0, 1, "LABEL", x=0.0, y=3.81)
 library.export_svgs("/tmp/symbol-svgs")  # kicad-cli inspection hook; optional kicad_cli=
+library.create_symbol("Empty")
+library.create_symbol("Child", extends="Part")
+library.copy_symbol("Part", "PartCopy")
+library.rename_symbol("PartCopy", "Part2")
+library.delete_symbol("Empty")
 preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
 ```
@@ -108,7 +113,10 @@ Edits are all-or-nothing in memory, not a public multi-edit transaction.
 `set_property` does not insert a missing field; use `add_property`.
 `add_property` fails when the identity already exists (including mandatory case-insensitive clashes).
 No parent is edited implicitly. Deleting a local override leaves any inherited effective value visible through `resolve()`.
-Symbol rename, unit restructuring, body delete, and cross-library copying remain outside this surface.
+Same-library create/rename/delete/copy are supported; rename rewrites body names and in-library `extends`.
+Delete refuses when another symbol still extends the target.
+Cross-library `copy_symbol_from` fails explicitly until library-table resolution exists.
+Unit restructuring beyond `ensure_body` remains outside this surface.
 Changing a declared empty mandatory field changes its declared value; inspect `resolve()` separately to understand the effective inherited value.
 Generic field values are not validated against Railroad or procurement policy.
 
@@ -121,7 +129,8 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 ## Limits
 
 - No library discovery, project open, or schematic cache edit on this surface.
-- No symbol rename, body delete, unit split, or cross-library copy on this surface.
+- No unit split/restructure beyond `ensure_body` on this surface.
+- Cross-library symbol copy waits on library tables; use `copy_symbol` in-library only.
 - `ensure_body` creates empty bodies only; it does not restructure multi-unit definitions.
 - Rectangle/text inserts are minimal geometry; stroke/fill and full text-effects authoring stay out of scope.
 - `export_svgs` needs a resolvable `kicad-cli`; pure file edits do not.
