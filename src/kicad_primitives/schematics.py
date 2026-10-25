@@ -1,7 +1,7 @@
-"""Read schematic placed symbols and title blocks within project context.
+"""Read schematic content within project context: symbols, title block, geometry.
 
 Parsing uses the private lossless S-expression foundation (ADR 0003).
-This slice is read-only: no localized schematic edits.
+This module is read-only: no localized schematic edits.
 """
 
 from __future__ import annotations
@@ -17,12 +17,19 @@ from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse
 
 __all__ = [
     "AmbiguousPlacedSymbolError",
+    "GlobalLabel",
+    "HierarchicalLabel",
     "InvalidSchematicError",
+    "Junction",
+    "Label",
+    "NoConnect",
     "PlacedProperty",
     "PlacedSymbol",
     "Schematic",
     "SchematicError",
+    "SheetInstance",
     "TitleBlock",
+    "Wire",
     "open_schematic",
 ]
 
@@ -93,13 +100,95 @@ class PlacedSymbol:
 
 
 @dataclass(frozen=True)
+class Wire:
+    """A wire polyline in schematic space."""
+
+    points: tuple[tuple[float, float], ...]
+    uuid: str = ""
+
+
+@dataclass(frozen=True)
+class Junction:
+    """A junction point."""
+
+    x: float
+    y: float
+    uuid: str = ""
+
+
+@dataclass(frozen=True)
+class Label:
+    """A local net label."""
+
+    text: str
+    x: float
+    y: float
+    rotation: float = 0.0
+    uuid: str = ""
+    kind: str = "label"
+
+
+@dataclass(frozen=True)
+class GlobalLabel:
+    """A global net label."""
+
+    text: str
+    x: float
+    y: float
+    rotation: float = 0.0
+    shape: str = ""
+    uuid: str = ""
+
+
+@dataclass(frozen=True)
+class HierarchicalLabel:
+    """A hierarchical sheet pin label."""
+
+    text: str
+    x: float
+    y: float
+    rotation: float = 0.0
+    shape: str = ""
+    uuid: str = ""
+
+
+@dataclass(frozen=True)
+class NoConnect:
+    """A no-connect marker."""
+
+    x: float
+    y: float
+    uuid: str = ""
+
+
+@dataclass(frozen=True)
+class SheetInstance:
+    """A hierarchical sheet block (edge to a child schematic file)."""
+
+    name: str
+    filename: str
+    x: float
+    y: float
+    width: float
+    height: float
+    uuid: str = ""
+
+
+@dataclass(frozen=True)
 class Schematic:
-    """One schematic file's placed symbols and title block (read-only)."""
+    """One schematic file: symbols, title block, and electrical geometry."""
 
     path: Path
     version: int
     title_block: TitleBlock
     symbols: tuple[PlacedSymbol, ...]
+    wires: tuple[Wire, ...] = ()
+    junctions: tuple[Junction, ...] = ()
+    labels: tuple[Label, ...] = ()
+    global_labels: tuple[GlobalLabel, ...] = ()
+    hierarchical_labels: tuple[HierarchicalLabel, ...] = ()
+    no_connects: tuple[NoConnect, ...] = ()
+    sheets: tuple[SheetInstance, ...] = ()
 
     def symbol(self, reference: str) -> PlacedSymbol:
         """Return the unique placed symbol with this reference."""
@@ -156,6 +245,15 @@ def _schematic_from_document(path: Path, document: Document) -> Schematic:
         version=version,
         title_block=title_block,
         symbols=symbols,
+        wires=tuple(_wire(n) for n in root.child_lists("wire")),
+        junctions=tuple(_junction(n) for n in root.child_lists("junction")),
+        labels=tuple(_label(n) for n in root.child_lists("label")),
+        global_labels=tuple(_global_label(n) for n in root.child_lists("global_label")),
+        hierarchical_labels=tuple(
+            _hierarchical_label(n) for n in root.child_lists("hierarchical_label")
+        ),
+        no_connects=tuple(_no_connect(n) for n in root.child_lists("no_connect")),
+        sheets=tuple(_sheet(n) for n in root.child_lists("sheet")),
     )
 
 
@@ -264,6 +362,114 @@ def _placed_symbol(node: ListNode, path: Path) -> PlacedSymbol | None:
         exclude_from_sim=_flag(node, "exclude_from_sim", default=False),
         path=path,
     )
+
+
+def _wire(node: ListNode) -> Wire:
+    pts_nodes = node.child_lists("pts")
+    if len(pts_nodes) != 1:
+        raise InvalidSchematicError("wire: expected one pts list")
+    points = tuple(
+        (_number(xy, 1), _number(xy, 2)) for xy in pts_nodes[0].child_lists("xy")
+    )
+    if len(points) < 2:
+        raise InvalidSchematicError("wire: expected at least two points")
+    return Wire(points=points, uuid=_optional_uuid(node))
+
+
+def _junction(node: ListNode) -> Junction:
+    x, y, _rot = _at(node)
+    return Junction(x=x, y=y, uuid=_optional_uuid(node))
+
+
+def _label(node: ListNode) -> Label:
+    text = _atom(node, 1).value
+    x, y, rotation = _at(node)
+    return Label(text=text, x=x, y=y, rotation=rotation, uuid=_optional_uuid(node))
+
+
+def _global_label(node: ListNode) -> GlobalLabel:
+    text = _atom(node, 1).value
+    x, y, rotation = _at(node)
+    return GlobalLabel(
+        text=text,
+        x=x,
+        y=y,
+        rotation=rotation,
+        shape=_optional_shape(node),
+        uuid=_optional_uuid(node),
+    )
+
+
+def _hierarchical_label(node: ListNode) -> HierarchicalLabel:
+    text = _atom(node, 1).value
+    x, y, rotation = _at(node)
+    return HierarchicalLabel(
+        text=text,
+        x=x,
+        y=y,
+        rotation=rotation,
+        shape=_optional_shape(node),
+        uuid=_optional_uuid(node),
+    )
+
+
+def _no_connect(node: ListNode) -> NoConnect:
+    x, y, _rot = _at(node)
+    return NoConnect(x=x, y=y, uuid=_optional_uuid(node))
+
+
+def _sheet(node: ListNode) -> SheetInstance:
+    x, y, _rot = _at(node)
+    size_nodes = node.child_lists("size")
+    if len(size_nodes) != 1:
+        raise InvalidSchematicError("sheet: expected one size")
+    width = _number(size_nodes[0], 1)
+    height = _number(size_nodes[0], 2)
+    name = ""
+    filename = ""
+    for prop in node.child_lists("property"):
+        key = _atom(prop, 1).value
+        value = _atom(prop, 2).value
+        if key == "Sheetname":
+            name = value
+        elif key == "Sheetfile":
+            filename = value
+    if not filename:
+        raise InvalidSchematicError("sheet: missing Sheetfile")
+    return SheetInstance(
+        name=name,
+        filename=filename,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        uuid=_optional_uuid(node),
+    )
+
+
+def _at(node: ListNode) -> tuple[float, float, float]:
+    at_nodes = node.child_lists("at")
+    if len(at_nodes) != 1:
+        raise InvalidSchematicError(f"{node.head}: expected one at")
+    at = at_nodes[0]
+    x = _number(at, 1)
+    y = _number(at, 2)
+    rotation = _number(at, 3) if len(at.children()) >= 4 else 0.0
+    return x, y, rotation
+
+
+def _optional_uuid(node: ListNode) -> str:
+    uuid_nodes = node.child_lists("uuid")
+    if len(uuid_nodes) != 1:
+        return ""
+    return _atom(uuid_nodes[0], 1).value
+
+
+def _optional_shape(node: ListNode) -> str:
+    shapes = node.child_lists("shape")
+    if len(shapes) != 1:
+        return ""
+    return _atom(shapes[0], 1).value
 
 
 def _property(node: ListNode) -> PlacedProperty:
