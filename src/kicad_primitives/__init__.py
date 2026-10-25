@@ -2,8 +2,8 @@
 
 Package identity is locked in docs/PACKAGE_IDENTITY.md and ADRs 0001/0003.
 Public services today: symbols, projects, schematics (placed-symbol read),
-and library tables/resolution. Other functional areas remain unimplemented;
-this package is pre-alpha.
+library tables/resolution, and netlist exchange parse/obtain. Other functional
+areas remain unimplemented; this package is pre-alpha.
 """
 
 from __future__ import annotations

@@ -1,0 +1,126 @@
+(export
+  (version "E")
+  (design
+    (source "minimal_plant.kicad_sch")
+    (date "2026-01-01")
+    (tool "fieldunit_test")
+  )
+  (components
+    (comp
+      (ref "B1")
+      (value "~")
+      (libsource
+        (lib "Railroad")
+        (part "IRJ-Signal")
+        (description "")
+      )
+    )
+    (comp
+      (ref "SW783")
+      (value "783")
+      (libsource
+        (lib "Railroad")
+        (part "Switch_Powered")
+        (description "")
+      )
+    )
+    (comp
+      (ref "DOT1")
+      (value "MT")
+      (fields
+        (field
+          (name "Rulebook")
+          "261"
+        )
+      )
+      (libsource
+        (lib "Railroad")
+        (part "Direction_BOTH")
+        (description "")
+      )
+    )
+    (comp
+      (ref "S784S1")
+      (value "784SAB")
+      (libsource
+        (lib "Railroad")
+        (part "Mast_Double")
+        (description "")
+      )
+    )
+    (comp
+      (ref "H1")
+      (value "A")
+      (libsource
+        (lib "Railroad")
+        (part "Signal Head - CL")
+        (description "")
+      )
+    )
+  )
+  (nets
+    (net
+      (code "1")
+      (name "/MT_WEST")
+      (node
+        (ref "B1")
+        (pin "1")
+        (pinfunction "A_1")
+        (pintype "bidirectional")
+      )
+      (node
+        (ref "DOT1")
+        (pin "2")
+        (pintype "passive")
+      )
+    )
+    (net
+      (code "2")
+      (name "Net-(B1-A)")
+      (node
+        (ref "B1")
+        (pin "2")
+        (pinfunction "B_2")
+        (pintype "bidirectional")
+      )
+      (node
+        (ref "SW783")
+        (pin "1")
+        (pinfunction "C_1")
+        (pintype "passive")
+      )
+    )
+    (net
+      (code "3")
+      (name "Net-(B1-SIGNAL)")
+      (node
+        (ref "B1")
+        (pin "3")
+        (pinfunction "SIGNAL_3")
+        (pintype "passive")
+      )
+      (node
+        (ref "S784S1")
+        (pin "1")
+        (pinfunction "SIGNAL_1")
+        (pintype "passive")
+      )
+    )
+    (net
+      (code "4")
+      (name "Net-(H1-M)")
+      (node
+        (ref "H1")
+        (pin "1")
+        (pinfunction "M_1")
+        (pintype "passive")
+      )
+      (node
+        (ref "S784S1")
+        (pin "3")
+        (pinfunction "H1_3")
+        (pintype "passive")
+      )
+    )
+  )
+)
