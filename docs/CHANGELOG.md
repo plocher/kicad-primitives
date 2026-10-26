@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject duplicate mandatory schematic attributes at intake. Validate raw electrical evidence without collapsing duplicate component references, and preflight all changed destination-directory permissions before replacing any source (#36).
+
 - Add source-backed `PlacedSymbol.set_attribute`: create, localized update, exact no-op, and explicit ambiguity/unsafe-edit failures. Project-owned document and symbol identity retain pending edits across accesses. Add `is_modified`, byte previews, and explicit same-location schematic/project saves with strict source/guard preflight and staged-hierarchy electrical verification. Document bounded lifecycle and staging limits (`docs/schematics.md`, `docs/projects.md`; #36).
 
 - Record the artifact-object library model in ADR 0008: focused in-memory edits, client-owned workflows, observable changes, and explicit persistence choices. Schematic object editing now implements a bounded part of that direction.

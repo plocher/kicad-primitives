@@ -195,3 +195,52 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
         self.assertEqual(list(self.directory.glob(".*.tmp")), [])
         self.project.save(kicad_cli=self.cli)
         self.assertFalse(self.project.is_modified)
+
+    def test_incomplete_or_collapsed_export_evidence_cannot_authorize_save(
+        self,
+    ) -> None:
+        for body in (
+            "'(export (version E))'",
+            """'(export (version E) (components '
+            + ('(comp (ref R1) (libsource (lib Device) (part C)))'
+               if '"22K"' in source else
+               '(comp (ref R1) (libsource (lib Device) (part R)))'
+               '(comp (ref R1) (libsource (lib Device) (part C)))')
+            + ') (nets))'""",
+        ):
+            with self.subTest(body=body):
+                self.cli.write_text(
+                    "#!/usr/bin/env python3\nimport pathlib,sys\n"
+                    "source = pathlib.Path(sys.argv[-1]).read_text()\n"
+                    f"output = ({body})\n"
+                    "pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)\n",
+                    encoding="utf-8",
+                )
+                self.path.write_bytes(SOURCE)
+                self.project = Project.open(self.directory)
+                self.schematic = self.project.schematic()
+                self.schematic.symbol("R1").set_attribute("Value", "22K")
+                inode = self.path.stat().st_ino
+                with self.assertRaises(SchematicVerificationError):
+                    self.project.save(kicad_cli=self.cli)
+                self.assertEqual(self.path.read_bytes(), SOURCE)
+                self.assertEqual(self.path.stat().st_ino, inode)
+                self.assertTrue(self.project.is_modified)
+
+    def test_readonly_child_directory_preflights_before_any_replacement(self) -> None:
+        project, child_path = self.hierarchy("sub/child.kicad_sch")
+        root, child = project.schematics()
+        originals = [
+            (sheet.path.read_bytes(), sheet.path.stat().st_ino)
+            for sheet in (root, child)
+        ]
+        root.symbol("R1").set_attribute("Value", "22K")
+        child.symbol("R2").set_attribute("Value", "33K")
+        child_path.parent.chmod(0o555)
+        self.addCleanup(child_path.parent.chmod, 0o755)
+        with self.assertRaises(PermissionError):
+            project.save(kicad_cli=self.cli)
+        for sheet, (raw, inode) in zip((root, child), originals, strict=True):
+            self.assertEqual(sheet.path.read_bytes(), raw)
+            self.assertEqual(sheet.path.stat().st_ino, inode)
+        self.assertTrue(project.is_modified)
