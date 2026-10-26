@@ -96,6 +96,8 @@ library.rename_symbol("PartCopy", "Part2")
 library.delete_symbol("Empty")
 preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
+library.close()              # No write. Requires a successful current decision.
+other.discard()              # Abandon the unsaved Other import and exit.
 ```
 
 `Symbol.set_attribute(name, value)` creates a missing declared attribute, updates a different value, or preserves equal-value bytes exactly.
@@ -155,13 +157,42 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 
 ## Persistence and errors
 
+### Explicit decisions and terminal exit
+`path` reports the artifact's current destination. `is_modified` compares pending bytes with the successful open/save baseline.
+`save()` and `save_as(path)` settle the current state only after successful persistence.
+`close()` initially errors even for a clean, never-edited library.
+A successful save/save-as authorizes close for that current state.
+Later edits invalidate the decision. Exact no-op edits do not.
+Every failed save/save-as clears the decision, including a failed clean preflight after a previous success.
+
+`discard()` is terminal exit without writing. It is not rollback, reload, or a baseline reset for continued editing.
+Close and discard invalidate owned Symbol/Body/Pin handles.
+Operational access then raises an explicit lifecycle or stale-handle error.
+`path`, `is_closed`, and previously captured immutable inspection values remain diagnostic data.
+Close is idempotent after terminal exit. There is no implicit persistence or finalizer.
+Open a new artifact to start another editing lifetime.
+
+### Same-location save and native backup
+
 `save()` compares disk bytes with the last successful open/save baseline.
 External changes or deletion raise `FileConflictError`, even for a no-op save.
 Reopen and reconcile external edits; do not blindly retry with a new baseline.
 Current-format no-op saves perform no replacement.
 
 Changed saves use a same-directory temporary file, preserve permission mode, flush/fsync output, recheck the baseline, and atomically replace the original.
-Symlinks and multiply linked files are readable but cannot be saved through this service.
+Before that replacement, changed symbol libraries capture the prior source as native `Foo.bak`.
+The backup replaces the extension. It does not append `.bak` to `Foo.kicad_sym`.
+Exact no-op saves replace neither source nor backup.
+Backup links, multiply linked files, unwritable targets, and source/backup collisions fail before the original write.
+Backup failure aborts the original save.
+The [ADR 0008 native source record](adr/0008-artifact-objects-and-explicit-persistence.md#native-single-file-symbol-backup) pins the KiCad 10.0.1 behavior.
+
+When the source replacement fails, recovery restores the prior backup or removes the new backup only if its installed identity/version is unchanged.
+Recovery never overwrites or deletes a concurrent third-party backup version.
+If safe recovery cannot complete, `FileConflictError` identifies any retained `.recovery.*.tmp` prior-backup file.
+Keep that file for manual reconciliation. This is not a crash-atomic two-file transaction.
+Same-location `save()` refuses symlinks and multiply linked files.
+They remain readable and can be forked with `save_as()`.
 The writer does not bypass a source file with no write permission bits.
 This preserves permission mode, not every platform-specific ACL, extended attribute, ownership detail, or inode identity.
 
@@ -170,6 +201,19 @@ These are optimistic single-file safeguards, not a filesystem transaction, crash
 There is still a final check/replace race with an arbitrary external writer.
 Do not save concurrently with KiCad's symbol editor or another writer.
 
+### Safe single-file save-as
+`save_as(path)` writes one new destination, then rebinds the existing artifact and handles only after success.
+Original bytes and permissions remain unchanged. The new file retains the source permission mode.
+The destination must not exist, even as a symlink. A racing destination is not overwritten.
+Its existing parent directories must not be symlinks, and its destination directory must permit writing.
+No parent directories are created. Use a canonical destination directory.
+
+Save-as can fork a read-only library or readable linked source because it does not overwrite that source.
+It still checks the captured source-byte baseline and rejects external changes or deletion without refreshing pending content.
+A failed save-as retains the prior path, baseline, and pending changes. It does not authorize close.
+A new destination needs no backup. A subsequent changed `save()` there creates its own `.bak`.
+Project multi-file backup/history and project-name-dependent relocation remain separate pending work, not part of this single-file operation.
+
 Errors exported from `kicad_primitives.symbols`:
 - `InvalidLibraryError`: invalid syntax or required structure.
 - `UnsupportedOperationError`: unsupported format/operation, duplicate `add_attribute` / `add_pin` identity, or unsafe replacement target.
@@ -177,6 +221,7 @@ Errors exported from `kicad_primitives.symbols`:
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
 - `StaleSymbolError`: an editable symbol, body, or pin no longer belongs to live source.
+- `LibraryLifecycleError`: closed library or missing current successful close decision.
 - `KicadCliNotFoundError`: `export_svgs` could not resolve `kicad-cli`.
 - `SymbolLibraryError`: shared base for the package errors.
 

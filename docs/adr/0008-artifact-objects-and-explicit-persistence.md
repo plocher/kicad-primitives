@@ -2,9 +2,10 @@
 
 Date: 2026-10-26
 
-Status: Architectural direction accepted by the owner on 2026-10-26. Detailed lifecycle interfaces remain to be designed.
+Status: Architectural direction and independent-artifact lifecycle accepted by the owner on 2026-10-26.
 
 Related work: [Schematic symbol attribute editing](https://github.com/plocher/kicad-primitives/issues/36).
+Alignment: [Editable library and table nouns with explicit lifecycle](https://github.com/plocher/kicad-primitives/issues/54).
 
 ## Problem
 
@@ -123,18 +124,66 @@ That ownership does not require every content edit to become a project method.
 Independent libraries retain their own artifact context.
 
 Clients need explicit persistence choices and observable pending changes.
-Exact names, save-as relocation rules, close/discard behavior, and multi-file failure handling require bounded designs before implementation.
+The independent-artifact lifecycle below records the owner's accepted definitions.
+Project relocation and multi-file backup/failure behavior remain separate bounded work.
 Do not infer crash-atomic project saves, a universal session framework, or automatic file-lock acquisition from this lifecycle.
 
 Reports and exports remain library capabilities on the relevant artifacts.
 Producing a requested output is an explicit operation, not permission to save pending source edits implicitly.
 
+### Independent-artifact lifecycle clarification
+These definitions apply to independent symbol libraries and physical library-table files.
+They share meanings, not a generic session, workflow, or transaction base class.
+
+- `save()` explicitly persists current content at the current destination.
+- `save_as(path)` explicitly persists one new file and rebinds this artifact only after success.
+- `close()` initially errors, even for a clean artifact that has never been edited.
+- Successful save/save-as authorizes close only for the current state.
+- Later edits invalidate that decision. Exact no-op edits do not.
+- Every failed save/save-as invalidates the decision, including a failed clean preflight after a previous success.
+- `discard()` is terminal exit without writing. It is not rollback, reload, or a baseline reset for continued use.
+- Close and discard invalidate owned editable handles. A later close is idempotent.
+- No mutation, close, discard, or finalizer implicitly persists.
+
+Save-as refuses an existing destination, including a symlink or racing file.
+It requires existing, non-symlink, writable destination parents and does not create parent directories.
+The original bytes and permissions remain unchanged.
+Read-only or readable linked sources can be forked because save-as does not overwrite the source.
+Independent roots still check source-byte freshness before save-as. Conflicts do not refresh pending state.
+Failed persistence retains pending source and the prior path/baseline for inspection or retry.
+Save-as for one physical table does not invent a combined layout for same-named global and project files.
+
+### Native single-file symbol backup
+KiCad 10.0.1 saves a changed symbol library through `saveLibrary` and `backupFile` before the library write.
+The backup replaces the extension: `Foo.kicad_sym` becomes `Foo.bak`, not `Foo.kicad_sym.bak`.
+A backup failure aborts the original save. A new destination has no previous file to back up.
+Source evidence is pinned to commit `2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f`:
+[symbol editor save](https://github.com/KiCad/kicad-source-mirror/blob/2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f/eeschema/symbol_editor/symbol_editor.cpp)
+and [backup helper](https://github.com/KiCad/kicad-source-mirror/blob/2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f/eeschema/symbol_editor/symbol_edit_frame.cpp).
+No GPL implementation code is copied.
+
+Changed independent symbol-library overwrites follow that `.bak` rule with source-preserving single-file safeguards.
+Exact no-op saves need no replacement or backup.
+Backups reject links, unwritable destinations, and source/destination collisions.
+Prior backup content remains recoverable during a failed original save.
+Recovery must not overwrite or delete a concurrent third-party backup version.
+These are optimistic bounded safeguards, not a crash-atomic two-file transaction.
+Native table saves have no corresponding backup hook. Do not invent a table backup.
+
+### Project persistence remains pending
+Project multi-file backup/history and project-name-dependent save-as relocation remain subsequent work.
+Native KiCad has timestamped ZIP backups and Git-backed `.history`.
+The owner has not selected the required backend.
+This alignment does not choose one, add a Git dependency, or claim that Project backup/save-as has shipped.
+Independent file persistence does not depend on that pending Project decision.
+
 ## Current gaps and consequences
 
-- `SymbolLibrary` already separates in-memory edits from `save()`, but edits are library commands over immutable symbol snapshots.
-- Schematic and placed-symbol objects are currently read-only snapshots.
-- `LibraryTables` mutations use `apply` and can write directly. They do not yet follow the pending-edit lifecycle.
-- General project change tracking, save-as, discard, and close interfaces are not implemented.
+- `SymbolLibrary` owns live Symbol/Body/Pin nouns, declared attribute upsert, source previews, explicit persistence, and the independent lifecycle.
+- Resolved inheritance remains immutable inspection data, not an implicit parent-editing target.
+- Physical `LibraryTable` artifacts own buffered TableEntry edits. Context resolution sees nested pending source. No `apply` or dry-run aliases remain.
+- Project-owned live schematic/placed-symbol objects support attribute edits, selected embedded restore, aggregate change state, and explicit same-location verified saves.
+- General Project save-as, native backup/history, discard, and close remain unimplemented.
 - The proposed `Project.set_symbol_attribute(...)` batch workflow is superseded by object-level editing.
 
 Align these areas through bounded implementation milestones with their existing behavioral tests.

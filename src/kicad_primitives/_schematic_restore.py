@@ -269,6 +269,7 @@ def restore_definition(
 ) -> None:
     if not isinstance(parent_library, SymbolLibrary):
         raise TypeError("parent_library must be an opened SymbolLibrary")
+    parent_library._check_open()
     if not isinstance(parent_name, str) or not parent_name:
         raise ValueError("parent_name must be a nonempty string")
     if schematic.version != 20260306 or parent_library.version != 20251024:
