@@ -83,6 +83,8 @@ An equal value is an exact byte no-op.
 The setter rejects ambiguous attributes or symbol UUIDs.
 Editing requires a nonempty, unique placed-symbol UUID.
 Mandatory names use KiCad's case-insensitive identity. Custom names are case-sensitive.
+Duplicate mandatory attributes fail when the schematic opens, rather than supplying first-wins convenience values.
+Repeated custom attributes remain in `attributes`. Their named lookup and mutation reject ambiguity.
 Names must be nonempty strings. Values must be strings. Neither may contain NUL.
 Empty values are valid.
 
@@ -115,6 +117,7 @@ Unchanged saves preserve bytes and do not replace files or invoke KiCad.
 Before writing, save checks the project guard, project settings baseline, and every reachable schematic baseline.
 It requires regular, non-symlink, singly linked files.
 Changed files must have write permission bits. Replacement preserves their permission bits.
+All changed destination directories must permit file creation and search before the first replacement.
 An external edit or deletion fails rather than overwriting or recreating a file.
 
 Verification stages only the complete schematic hierarchy and the opened `.kicad_pro` bytes.
@@ -122,6 +125,8 @@ It exports the root before and after pending changes, at the same staged locatio
 Comparison retains net names, singleton and empty nets, duplicate occurrences, and all pin attachments.
 Pin attachments include reference, pin, pin function, and electrical type.
 Component reference, library identity, and sheet path must remain unchanged.
+Verification validates raw export structure and component identity before comparison.
+Missing required evidence sections, duplicate component references, and incomplete pin attachments fail explicitly.
 Value and custom attributes may change. Reparsing establishes their required source deltas.
 Net codes and export order do not define electrical identity.
 This is connectivity verification, not ERC or simulation.

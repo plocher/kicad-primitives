@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import os
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
+from lossless_sexpr import ListNode, ParseError, parse
+
 from . import _symbol_persist
-from .netlist import Netlist, obtain_netlist
+from .netlist import export_netlist
 from .schematics import (
     Schematic,
     SchematicConflictError,
@@ -97,31 +100,103 @@ def _preflight(
                 raise PermissionError(
                     f"Schematic has no write permission bits: {document.path}"
                 )
+            parent = document.path.parent
+            mode = stat.S_IMODE(parent.stat().st_mode)
+            if (
+                not mode & 0o222
+                or not mode & 0o111
+                or not os.access(parent, os.W_OK | os.X_OK)
+            ):
+                raise PermissionError(
+                    f"Schematic destination directory is not writable: {parent}"
+                )
 
 
-def _electrically_equal(before: Netlist, after: Netlist) -> bool:
-    # Do not use connectivity_sets: it drops singleton nets and all names.
-    before_nets = sorted(
-        (
-            net.name,
-            sorted((n.reference, n.pin, n.pinfunction, n.pintype) for n in net.nodes),
+@dataclass(frozen=True)
+class _ElectricalSignature:
+    components: tuple[tuple[str, str, str, str], ...]
+    nets: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...]
+
+
+def _required_list(node: ListNode, head: str) -> ListNode:
+    matches = node.child_lists(head)
+    if len(matches) != 1:
+        raise SchematicVerificationError(
+            f"Incomplete or ambiguous netlist evidence: {head}"
         )
-        for net in before.nets
-    )
-    after_nets = sorted(
-        (
-            net.name,
-            sorted((n.reference, n.pin, n.pinfunction, n.pintype) for n in net.nodes),
-        )
-        for net in after.nets
-    )
-    before_components = sorted(
-        (c.reference, c.lib, c.part, c.sheetpath) for c in before.components.values()
-    )
-    after_components = sorted(
-        (c.reference, c.lib, c.part, c.sheetpath) for c in after.components.values()
-    )
-    return before_nets == after_nets and before_components == after_components
+    return matches[0]
+
+
+def _evidence_value(node: ListNode, head: str, *, optional: bool = False) -> str:
+    matches = node.child_lists(head)
+    if optional and not matches:
+        return ""
+    item = _required_list(node, head)
+    value = item.atom(1)
+    if value is None or len(item.children()) != 2:
+        raise SchematicVerificationError(f"Invalid netlist evidence value: {head}")
+    return value.value
+
+
+def _electrical_signature(path: Path) -> _ElectricalSignature:
+    """Validate raw proof before any model can discard ambiguous occurrences."""
+    try:
+        document = parse(path.read_bytes().decode("utf-8"))
+    except (UnicodeError, ParseError, RecursionError) as exc:
+        raise SchematicVerificationError(f"Invalid netlist evidence: {exc}") from exc
+    roots = document.roots()
+    if (
+        len(roots) != 1
+        or not isinstance(roots[0], ListNode)
+        or roots[0].head != "export"
+    ):
+        raise SchematicVerificationError("Expected one netlist export root")
+    root = roots[0]
+    if not _evidence_value(root, "version"):
+        raise SchematicVerificationError("Missing netlist evidence version")
+    components = _required_list(root, "components")
+    nets = _required_list(root, "nets")
+    identities: list[tuple[str, str, str, str]] = []
+    references: set[str] = set()
+    for component in components.children()[1:]:
+        if not isinstance(component, ListNode) or component.head != "comp":
+            raise SchematicVerificationError("Invalid component evidence")
+        reference = _evidence_value(component, "ref")
+        if not reference or reference in references:
+            raise SchematicVerificationError(
+                f"Missing or duplicate component reference: {reference!r}"
+            )
+        references.add(reference)
+        library = _required_list(component, "libsource")
+        part = _evidence_value(library, "part")
+        if not part:
+            raise SchematicVerificationError("Missing component part identity")
+        paths = component.child_lists("sheetpath")
+        if len(paths) > 1:
+            raise SchematicVerificationError("Ambiguous component sheet path")
+        sheetpath = _evidence_value(paths[0], "names") if paths else ""
+        identities.append((reference, _evidence_value(library, "lib"), part, sheetpath))
+    named_nets: list[tuple[str, tuple[tuple[str, str, str, str], ...]]] = []
+    for net in nets.children()[1:]:
+        if not isinstance(net, ListNode) or net.head != "net":
+            raise SchematicVerificationError("Invalid net evidence")
+        name = _evidence_value(net, "name")
+        nodes: list[tuple[str, str, str, str]] = []
+        for node in net.child_lists("node"):
+            reference = _evidence_value(node, "ref")
+            pin = _evidence_value(node, "pin")
+            if not reference or not pin or reference not in references:
+                raise SchematicVerificationError("Incomplete pin attachment evidence")
+            nodes.append(
+                (
+                    reference,
+                    pin,
+                    _evidence_value(node, "pinfunction", optional=True),
+                    _evidence_value(node, "pintype", optional=True),
+                )
+            )
+        named_nets.append((name, tuple(sorted(nodes))))
+    return _ElectricalSignature(tuple(sorted(identities)), tuple(sorted(named_nets)))
 
 
 def _verify(
@@ -144,13 +219,19 @@ def _verify(
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(document._baseline)
         staged_root = stage / root.relative_to(project.directory)
-        before = obtain_netlist(staged_root, kicad_cli=kicad_cli)
+        before_path = export_netlist(
+            staged_root, stage / "before.net", kicad_cli=kicad_cli
+        )
+        before = _electrical_signature(before_path)
         for document in changed:
             (stage / document.path.relative_to(project.directory)).write_bytes(
                 document.to_bytes()
             )
-        after = obtain_netlist(staged_root, kicad_cli=kicad_cli)
-        if not _electrically_equal(before, after):
+        after_path = export_netlist(
+            staged_root, stage / "after.net", kicad_cli=kicad_cli
+        )
+        after = _electrical_signature(after_path)
+        if before != after:
             raise SchematicVerificationError(
                 "Pending attributes change named nets, pin memberships or component identity; "
                 "electrical edits are not supported by set_attribute"

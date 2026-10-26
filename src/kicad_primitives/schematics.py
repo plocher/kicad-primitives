@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quote
 
-from ._symbol_types import _attribute_key
+from ._symbol_types import _MANDATORY, _attribute_key
 
 if TYPE_CHECKING:
     from .projects import Project
@@ -499,7 +499,8 @@ def _placed_symbol(node: ListNode, path: Path) -> PlacedSymbol | None:
     rotation = _number(at, 3) if len(at.children()) >= 4 else 0.0
 
     attributes = tuple(_attribute(p) for p in node.child_lists("property"))
-    reference = _named_value(attributes, "Reference")
+    mandatory = {name: _named_value(attributes, name) for name in _MANDATORY}
+    reference = mandatory["reference"]
     if not reference:
         return None
 
@@ -518,8 +519,8 @@ def _placed_symbol(node: ListNode, path: Path) -> PlacedSymbol | None:
         reference=reference,
         lib_id=lib_id,
         uuid=uuid,
-        value=_named_value(attributes, "Value"),
-        footprint=_named_value(attributes, "Footprint"),
+        value=mandatory["value"],
+        footprint=mandatory["footprint"],
         attributes=attributes,
         x=x,
         y=y,
@@ -652,10 +653,12 @@ def _attribute(node: ListNode) -> PlacedAttribute:
 
 
 def _named_value(attributes: tuple[PlacedAttribute, ...], name: str) -> str:
-    for prop in attributes:
-        if _attribute_key(prop.name) == _attribute_key(name):
-            return prop.value
-    return ""
+    matches = tuple(
+        prop for prop in attributes if _attribute_key(prop.name) == _attribute_key(name)
+    )
+    if len(matches) > 1:
+        raise AmbiguousPlacedSymbolError(f"Ambiguous mandatory attribute {name!r}")
+    return matches[0].value if matches else ""
 
 
 def _flag(node: ListNode, head: str, *, default: bool) -> bool:

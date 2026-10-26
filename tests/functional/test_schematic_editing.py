@@ -83,11 +83,45 @@ class SchematicEditingTests(unittest.TestCase):
                 b'(property "Value" "10K") (property "Manufacturer" ""',
             )
         )
-        schematic = Project.open(self.directory).schematic()
-        before = schematic.to_bytes()
         with self.assertRaises(AmbiguousPlacedSymbolError):
-            schematic.symbol("R1").set_attribute("Value", "10K")
-        self.assertEqual(schematic.to_bytes(), before)
+            Project.open(self.directory).schematic()
+
+    def test_mandatory_duplicates_fail_intake_without_first_wins_or_skipping(
+        self,
+    ) -> None:
+        for name, first, second in (
+            ("Value", "10K", "20K"),
+            ("Reference", "", "R2"),
+            ("Description", "first", "second"),
+        ):
+            with self.subTest(name=name):
+                source = SOURCE.replace(
+                    b'(property "Manufacturer" ""',
+                    f'(property "{name}" "{first}") (property "{name.lower()}" "{second}") '
+                    '(property "Manufacturer" ""'.encode(),
+                )
+                self.path.write_bytes(source)
+                with self.assertRaises(AmbiguousPlacedSymbolError):
+                    Project.open(self.directory).schematic()
+                self.assertEqual(self.path.read_bytes(), source)
+
+    def test_custom_repeated_attributes_remain_inspectable_without_first_wins(
+        self,
+    ) -> None:
+        source = SOURCE.replace(
+            b'(property "Manufacturer" ""',
+            b'(property "MPN" "first") (property "MPN" "second") '
+            b'(property "Manufacturer" ""',
+        )
+        self.path.write_bytes(source)
+        symbol = Project.open(self.directory).schematic().symbol("R1")
+        self.assertEqual(
+            [p.value for p in symbol.attributes if p.name == "MPN"], ["first", "second"]
+        )
+        with self.assertRaises(AmbiguousPlacedSymbolError):
+            symbol.attribute("MPN")
+        symbol.set_attribute("Value", "22K")
+        self.assertEqual(symbol.value, "22K")
 
     def test_unsafe_reference_power_flags_and_missing_uuid_fail_without_edits(
         self,
