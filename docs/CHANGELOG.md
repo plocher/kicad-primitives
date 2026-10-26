@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Record the artifact-object library model in ADR 0008: focused in-memory edits, client-owned workflows, observable changes, and explicit persistence choices. Runtime alignment remains implementation work.
+- Add source-backed `PlacedSymbol.set_attribute`: create, localized update, exact no-op, and explicit ambiguity/unsafe-edit failures. Project-owned document and symbol identity retain pending edits across accesses. Add `is_modified`, byte previews, and explicit same-location schematic/project saves with strict source/guard preflight and staged-hierarchy electrical verification. Document bounded lifecycle and staging limits (`docs/schematics.md`, `docs/projects.md`; #36).
+
+- Record the artifact-object library model in ADR 0008: focused in-memory edits, client-owned workflows, observable changes, and explicit persistence choices. Schematic object editing now implements a bounded part of that direction.
 
 - Rename symbol and placed-symbol APIs directly to the canonical Attribute vocabulary: `SymbolAttribute`, `PlacedAttribute`, `attributes`, `attribute()`, `AmbiguousAttributeError`, and `SymbolLibrary.set_attribute` / `add_attribute` / `delete_attribute`. No old-name aliases remain. Behavior and KiCad `(property …)` syntax stay unchanged (`docs/symbol-libraries.md`, `docs/schematics.md`).
 - Lock KiCad domain vocabulary in `CONTEXT.md`: flags, attributes, settings, text variables, title-block fields, drawing-sheet fields, and reference annotation.

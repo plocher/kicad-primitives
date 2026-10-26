@@ -1,0 +1,22 @@
+Native KiCad 10 schematic attribute-edit fixture
+
+Source: owner project projects/MRCS/cpNode-IOX/cpNode-IOX.kicad_sch
+Original SHA-256: bac7d47f0b84bc7dee605b45baa74fba2719b529824123b0602d426431fef20b
+Project SHA-256: 289ff07521fee5bbadc0d56b52fa048ed756b5fdcb201ee21a3cc8102404b841
+Captured: 2026-10-26
+Format: 20260306; generator_version 10.0
+
+Reduction: retained exact source blocks for R3, R9, R12, #PWR01 and their
+SPCoast:R / power:+5V cached definitions. Retained root identity, generator,
+paper, title-block and embedded_fonts nodes. Removed other items and definitions;
+assembled the root/cache wrappers only. No geometry or placement identities
+were changed. The project file is an unmodified copy.
+
+The reduced circuit deliberately has six singleton resistor-pin nets. This
+exercises preservation that connectivity_sets would omit. Power placement and
+opaque embedded definition/presentation content remain part of source gates.
+The original design was not edited or automatically re-saved.
+
+Donor behavioral anchors: jBOM/tests/unit/test_annotate_repairs.py Value edits,
+multiple attribute edits, missing UUID failures, previews and idempotency.
+CSV policy and normalization are not part of this package capability.
