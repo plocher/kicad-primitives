@@ -41,7 +41,7 @@ def main() -> None:
         ).read_bytes()
         assert schematic.to_bytes() == expected_source
         assert schematic.path.read_bytes() == original
-        parent.set_pin("R", 1, 0, "1", electrical_type="input")
+        parent.symbol("R").body(1, 0).pin("1").set(electrical_type="input")
         project.save(kicad_cli=args.kicad_cli)
         after = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         expected_after = {key: "passive" for key in expected_before}

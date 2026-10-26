@@ -310,7 +310,8 @@ The snapshot represents effective registrations, not parity with native repeated
 It expands variables from the explicitly selected project's captured settings, not a discovered sibling project.
 Both relative table includes and leaf URIs use the original project directory as their common logical native working directory.
 The backend receives that CWD explicitly. The package does not change the caller's working directory.
-Public `LibraryTables` path/expansion deviations remain separate [debt #52](https://github.com/plocher/kicad-primitives/issues/52).
+Public `LibraryTables` now uses the same URI resolution and ordered repeated-include rules ([#52](https://github.com/plocher/kicad-primitives/issues/52)).
+Its project base is the opened project directory. Standalone resolution captures an explicit base or process CWD.
 Only library URI atoms change to absolute original-context `.kicad_sym` or `.pretty` paths.
 Whole winning leaf rows retain disabled/hidden flags, options, descriptions, and opaque metadata.
 Missing winning libraries remain registered. The package does not remove them or fall back to a global library.

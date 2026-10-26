@@ -94,7 +94,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.assertIs(self.schematic.embedded_symbol("Test:Part"), embedded)
         self.assertEqual(self.path.read_bytes(), SOURCE.encode())
         self.assertTrue(self.project.is_modified)
-        self.parent.set_attribute("Parent", "Value", "later")
+        self.parent.symbol("Parent").set_attribute("Value", "later")
         self.assertEqual(
             self.schematic.to_bytes(), SOURCE.replace(CACHE, EXPECTED, 1).encode()
         )
@@ -233,13 +233,13 @@ class EmbeddedRestoreTests(unittest.TestCase):
     def test_unsupported_formats_and_parent_pin_add_remove_are_nonmutating(
         self,
     ) -> None:
-        self.parent.add_pin("Parent", 1, 1, "3", "C", "passive", x=5, y=0)
+        self.parent.symbol("Parent").body(1, 1).add_pin("3", "C", "passive", x=5, y=0)
         with self.assertRaises(UnsupportedSchematicOperationError):
             self.schematic.embedded_symbol("Test:Part").restore_from(
                 self.parent, "Parent"
             )
         self.parent = SymbolLibrary.open(self.parent_path)
-        self.parent.delete_pin("Parent", 1, 1, "2")
+        self.parent.symbol("Parent").body(1, 1).pin("2").delete()
         with self.assertRaises(UnsupportedSchematicOperationError):
             self.schematic.embedded_symbol("Test:Part").restore_from(
                 self.parent, "Parent"
@@ -361,7 +361,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         embedded = self.schematic.embedded_symbol("Test:Part")
         embedded.restore_from(self.parent, "Parent")
         self.schematic.symbol("R1").set_attribute("MPN", "mixed edit")
-        self.parent.set_pin("Parent", 1, 1, "1", electrical_type="input")
+        self.parent.symbol("Parent").body(1, 1).pin("1").set(electrical_type="input")
         cli = self.verifier()
         self.project.save(kicad_cli=cli)
         self.assertEqual(self.path.read_bytes(), self.schematic.to_bytes())

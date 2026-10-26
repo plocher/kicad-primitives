@@ -22,14 +22,20 @@ from ._symbol_types import (
     AmbiguousSymbolError,
     InheritanceError,
     InvalidLibraryError,
-    Symbol,
     SymbolAttribute,
-    SymbolBody,
-    SymbolPin,
     SymbolRectangle,
     SymbolText,
     UnsupportedOperationError,
     _attribute_key,
+)
+from ._symbol_types import (
+    BodyDefinition as SymbolBody,
+)
+from ._symbol_types import (
+    PinDefinition as SymbolPin,
+)
+from ._symbol_types import (
+    SymbolDefinition as Symbol,
 )
 
 WRITE_VERSION = 20251024
