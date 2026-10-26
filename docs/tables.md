@@ -3,8 +3,8 @@
 ## Scope
 
 [ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) requires in-memory edits and explicit persistence.
-The current `apply`-based mutations described here do not yet follow that lifecycle.
-They are implementation gaps, not the pattern for new editing interfaces.
+Physical `LibraryTable` artifacts now own buffered source and editable `TableEntry` objects.
+Edits do not write files. Clients choose save, save as, or terminal discard.
 
 `kicad_primitives.tables.LibraryTables` discovers, reads, resolves, and edits
 KiCad **symbol** and **footprint** library table files (`sym-lib-table`,
@@ -95,49 +95,71 @@ Project-native checks run from the opened project directory.
 The native control in `tests/verify_schematic_erc.py` checks this behavior and repeated
 lookup without changing original designs.
 
-### Add, remove, rename
-
-Mutations target the **primary** table file for a scope (global config home or
-project directory). They do not rewrite nested child table files unless you open
-that path as the project/global table.
+### Select and edit physical tables
+`table(library_type, scope)` returns a stable physical primary artifact.
+`entries` includes all direct registrations, including nested table links and repeated names.
+`entry(nickname)` selects one direct registration and rejects missing or ambiguous names.
+Resolved `LibraryEntry` values from `libraries()` and `resolve()` remain immutable inspection values.
 
 ```python
-tables.add_library(
-    library_type="symbol",
-    scope="project",
-    nickname="Local",
-    uri="${KIPRJMOD}/Local.kicad_sym",
-    apply=True,  # False = plan only, no disk write
-)
-tables.rename_library(
-    library_type="symbol",
-    scope="project",
-    old_nickname="Local",
-    new_nickname="BoardLocal",
-    apply=True,
-)
-tables.remove_library(
-    library_type="symbol",
-    scope="project",
-    nickname="BoardLocal",
-    apply=True,
-)
+table = tables.table("symbol", "project")
+entry = table.add_entry("Local", "${KIPRJMOD}/Local.kicad_sym")
+entry.rename("BoardLocal")
+entry.set_uri("${KIPRJMOD}/BoardLocal.kicad_sym")
+assert table.entry("BoardLocal") is entry
+assert table.is_modified and tables.is_modified
+preview = table.to_bytes()  # Full pending source. No disk write.
+table.save()              # Persist this physical file only.
+entry.delete()            # Pending removal. This handle becomes stale.
+table.discard()           # Terminal exit. Pending removal is not written.
+table.close()             # Idempotent after discard.
 ```
 
-- `apply=False` validates and returns a `LibraryMutationResult` without writing.
-- Add creates a minimal table file when missing.
-- Add refuses duplicate **direct** nicknames in that file (nested leaves are not
-  collision-checked).
-- Rename changes only the name token span of the matching direct row.
-- Remove deletes only that direct `lib` node (and its leading separator).
-- Untouched rows keep their source bytes; version headers and other fields stay
-  in place for localized edits.
+`add_entry` buffers a new direct row and returns its live handle.
+It accepts `entry_type`, `options`, and `descr`. It rejects duplicate direct names.
+`rename` and `set_uri` replace only their target atoms. Equal values preserve exact bytes.
+`delete` removes only the selected row and its leading separator.
+Raw rows retain disabled/hidden flags, opaque structured metadata, and original newline spelling.
+A deleted handle never rebinds to a new row with the same nickname.
+There are no context mutation commands, `apply` switches, or dry-run aliases.
+
+A missing primary file has an empty buffered table. Neither access nor edits create that file.
+An explicit `save()` creates the file without overwriting a racing destination.
+For a nested `Table` row, `entry.included_table` returns its physical artifact through the same context.
+For a leaf, it returns `None`.
+Pending changes in a nested physical table affect this context's `libraries()` and `resolve()` results.
+Each nested artifact saves or discards independently. Saving a root does not save its includes.
+The context retains opened table snapshots. Open a new context to read external changes.
+
+### Persistence and terminal exit
+Each physical table has `path`, `to_bytes()`, `is_modified`, `save()`, `save_as(path)`, `discard()`, and `close()`.
+`table_path(type, scope)` reports the discovered primary location. `table.path` reports that artifact's current destination.
+`tables.is_modified` aggregates pending state from open physical artifacts, not files that the context has never opened.
+
+`close()` requires an explicit successful save decision, even for a clean, never-edited artifact.
+A successful `save()` or `save_as()` authorizes close only for that current state.
+Later edits invalidate that decision. Exact no-op edits do not.
+Every failed save attempt invalidates the decision, even when pending bytes equal the baseline.
+`discard()` is terminal exit without writing, not rollback or reload.
+Close and discard invalidate the artifact's editable entries. A later `close()` is harmless.
+There is no implicit persistence on mutation, close, discard, or finalization.
+
+`save()` checks the disk baseline, including for no-op saves.
+Changed saves retain the existing single-file optimistic conflict, link, and permission safeguards.
+Table saves do not create an invented backup.
+`save_as(path)` writes one new file, then rebinds this artifact only after success.
+It refuses existing destinations, symlinks, missing parent directories, and symlink or unwritable destination parents.
+Use an existing canonical destination directory. The operation does not create parents.
+It leaves the original bytes and permissions unchanged and preserves the source permission mode on the new file.
+Read-only sources and readable linked sources can be copied because save-as does not overwrite them.
+Save-as still rejects an external source-byte change or deletion since the captured baseline.
+Failures retain the prior path, pending source, and baseline for inspection or retry.
+Global and project tables can have the same basename. There is no combined context save-as layout.
 
 ## Limits
 
 - `design_block_lib_table` stays thin/optional and is not a first-class surface.
-- Mutations edit one primary scope file; they are not a multi-file transaction
-  with KiCad’s UI.
+- Each physical artifact writes one file. Includes and global/project tables do not form a multi-file transaction.
 - Remote / plugin library types beyond ordinary path URIs are stored and
   returned, but path resolution still treats `uri` as a filesystem path after
   expansion.
@@ -147,9 +169,10 @@ tables.remove_library(
 ## Errors
 
 - `InvalidLibraryTableError`: unreadable or malformed table structure.
-- `MissingLibraryError`: nickname not found for resolve/remove/rename.
-- `AmbiguousLibraryError`: reserved for future same-scope conflicts (resolve
-  currently takes the last leaf in the winning scope).
+- `MissingLibraryError`: nickname not found for direct selection or resolution.
+- `AmbiguousLibraryError`: repeated direct nickname on an editing target. Effective resolution still takes the last winning leaf.
+- `LibraryTableConflictError`: physical source changed or disappeared since open/save.
+- `LibraryTableLifecycleError`: closed artifact, stale entry, or missing current explicit close decision.
 - `LibraryTablesError`: shared base.
 - Ordinary `ValueError` for empty nicknames/URIs and duplicate add/rename targets.
 - Ordinary `OSError` subclasses for filesystem failures.

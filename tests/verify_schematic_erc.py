@@ -37,11 +37,18 @@ def main() -> None:
             assert isinstance(baseline, ErcReport)
             # Native Table links and leaves both resolve against process CWD.
             second = root / "second-table"
-            second.write_bytes(
-                (root / "sym-lib-table")
-                .read_bytes()
-                .replace(b"${KIPRJMOD}/local.kicad_sym", b"local.kicad_sym")
+            original_table = (root / "sym-lib-table").read_bytes()
+            physical = LibraryTables.open(
+                config_home=config, project_directory=root
+            ).table("symbol", "project")
+            for entry in physical.entries:
+                entry.set_uri("local.kicad_sym")
+            assert (root / "sym-lib-table").read_bytes() == original_table
+            physical.save_as(second)
+            assert second.read_bytes() == original_table.replace(
+                b"${KIPRJMOD}/local.kicad_sym", b"local.kicad_sym"
             )
+            physical.close()
             first = root / "nested/first-table"
             first.parent.mkdir()
             first.write_text(

@@ -387,40 +387,21 @@ class MutationTests(TablesCase):
         self.assertIn('(name "Keep")', baseline)
 
         tables = LibraryTables.open(config_home=config_home)
-        planned = tables.add_library(
-            library_type="symbol",
-            scope="global",
-            nickname="New",
-            uri="/new/New.kicad_sym",
-            descr="fresh",
-            apply=False,
-        )
-        self.assertFalse(planned.applied)
+        table = tables.table("symbol", "global")
+        table.add_entry("New", "/new/New.kicad_sym", descr="fresh")
+        self.assertTrue(table.is_modified)
         self.assertEqual(table_path.read_text(encoding="utf-8"), baseline)
-
-        added = tables.add_library(
-            library_type="symbol",
-            scope="global",
-            nickname="New",
-            uri="/new/New.kicad_sym",
-            descr="fresh",
-            apply=True,
-        )
-        self.assertTrue(added.applied)
+        table.save()
+        self.assertFalse(table.is_modified)
         after_add = table_path.read_text(encoding="utf-8")
         self.assertIn('(name "Keep")', after_add)
         self.assertIn('(name "Old")', after_add)
         self.assertIn('(name "New")', after_add)
         self.assertIn('(uri "/new/New.kicad_sym")', after_add)
 
-        renamed = tables.rename_library(
-            library_type="symbol",
-            scope="global",
-            old_nickname="Old",
-            new_nickname="Renamed",
-            apply=True,
-        )
-        self.assertTrue(renamed.applied)
+        table.entry("Old").rename("Renamed")
+        self.assertTrue(table.is_modified)
+        table.save()
         after_rename = table_path.read_text(encoding="utf-8")
         self.assertIn('(name "Keep")', after_rename)
         self.assertIn('(name "Renamed")', after_rename)
@@ -431,13 +412,9 @@ class MutationTests(TablesCase):
             "/keep/Keep.kicad_sym", after_rename[keep_index : keep_index + 80]
         )
 
-        removed = tables.remove_library(
-            library_type="symbol",
-            scope="global",
-            nickname="New",
-            apply=True,
-        )
-        self.assertTrue(removed.applied)
+        table.entry("New").delete()
+        self.assertTrue(table.is_modified)
+        table.save()
         after_remove = table_path.read_text(encoding="utf-8")
         self.assertNotIn('(name "New")', after_remove)
         self.assertIn('(name "Keep")', after_remove)
@@ -450,15 +427,12 @@ class MutationTests(TablesCase):
         config_home = self.root / "empty-home"
         config_home.mkdir()
         tables = LibraryTables.open(config_home=config_home)
-        result = tables.add_library(
-            library_type="footprint",
-            scope="global",
-            nickname="Mods",
-            uri="${KIPRJMOD}/Mods.pretty",
-            apply=True,
-        )
-        self.assertTrue(result.table_path.is_file())
-        text = result.table_path.read_text(encoding="utf-8")
+        table = tables.table("footprint", "global")
+        table.add_entry("Mods", "${KIPRJMOD}/Mods.pretty")
+        self.assertFalse(table.path.exists())
+        table.save()
+        self.assertTrue(table.path.is_file())
+        text = table.path.read_text(encoding="utf-8")
         self.assertIn("fp_lib_table", text)
         self.assertIn('(name "Mods")', text)
 
@@ -473,13 +447,7 @@ class MutationTests(TablesCase):
         baseline = table_path.read_bytes()
         tables = LibraryTables.open(config_home=config_home)
         with self.assertRaises(ValueError):
-            tables.add_library(
-                library_type="symbol",
-                scope="global",
-                nickname="A",
-                uri="/other.kicad_sym",
-                apply=True,
-            )
+            tables.table("symbol", "global").add_entry("A", "/other.kicad_sym")
         self.assertEqual(table_path.read_bytes(), baseline)
 
 
