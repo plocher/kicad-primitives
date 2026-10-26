@@ -1,0 +1,26 @@
+Selected embedded restore: native KiCad 10 fixture
+
+Derived from ../attribute-edit/cpNode-IOX.kicad_sch.
+Source fixture SHA-256: 512582acf9f1733b2c8cc688bf5db65aa751361af26db80239234a18e0b59f5e
+The original design provenance is recorded in ../attribute-edit/PROVENANCE.txt.
+Captured: 2026-10-27.
+
+Only the SPCoast:R cache changed for this fixture:
+- Pin 1 type changed from passive to output.
+- Pin 2 type changed from passive to input.
+- Default Value changed from Ω to DRIFTED.
+The three resistor placements R3/R9/R12, their instance values, and the
+unrelated power:+5V cache/placement remain exact native source.
+All six resistor pins are unconnected singleton nets in the KiCad export.
+
+parent.kicad_sym contains the original native SPCoast:R definition with only
+its outer name adapted to standalone-library R and a 20251024 wrapper.
+The nested body name remains the native short R_1_0, not SPCoast:R_1_0.
+The copied .kicad_pro is unchanged.
+
+Independent expected result:
+- Restoring R must recover the exact original attribute-edit schematic bytes.
+- R3/R9/R12 pin 1 exports output before restore and passive after restore.
+- R3/R9/R12 pin 2 exports input before restore and passive after restore.
+- All six net names, pin functions, endpoints and placement attributes stay unchanged.
+No expected result was obtained by exporting a replay of the restored source.
