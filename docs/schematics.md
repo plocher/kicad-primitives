@@ -1,5 +1,17 @@
 # Schematics: placed symbols, title block, and geometry
 
+## Vocabulary
+
+Symbol **attributes** are named values such as Reference, Value, Footprint, and MPN.
+Symbol **flags** control behavior, such as DNP and exclusion from BOM or simulation.
+**Reference annotation** assigns or updates reference designators and associated instance records.
+It does not mean general attribute editing.
+
+The existing read API uses `PlacedProperty`, `properties`, and `property()`.
+These names remain available. They describe attributes in the package vocabulary.
+KiCad stores these attributes in `(property …)` nodes.
+The glossary in `CONTEXT.md` defines settings, text variables, and drawing-sheet terminology.
+
 ## Scope
 
 `Project.schematic()` and `Project.schematics()` open schematic **content** inside

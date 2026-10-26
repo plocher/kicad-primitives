@@ -1,5 +1,37 @@
 # Domain glossary
 
+## KiCad data and operations
+
+**Flag**:
+A typed behavior switch on a symbol or footprint, such as DNP or exclusion from BOM, board, or simulation.
+_Avoid_: Attribute or text field for these switches.
+
+**Attribute**:
+A named value on a symbol or footprint, such as Reference, Value, Footprint, MPN, or a custom name=value item.
+_Avoid_: Property or field as the canonical package term for these values.
+
+**Setting**:
+Project-wide configuration.
+_Avoid_: Property or metadata as an unqualified name for project configuration.
+
+**Text variable**:
+A user-defined project name and substitution value, referenced with syntax such as `${PART_FAMILY}`.
+
+**Title-block field**:
+A title, revision, date, company, or comment value belonging to a schematic sheet or board.
+
+**Drawing-sheet field**:
+A field displayed by a drawing-sheet template.
+It can reference title-block values, text variables, and built-in values.
+_Avoid_: Keyword, which also names symbol-library search terms.
+
+**Reference annotation**:
+Assignment or update of reference designators, including consistent associated instance records.
+Reference is an attribute, but its update requires reference annotation semantics.
+_Avoid_: Annotation for general attribute editing.
+
+## Package capabilities
+
 - **Functional area:** A group of client-facing responsibilities organized around projects, documents, collections, or connectivity.
 - **Project context:** The owning design scope and the settings, hierarchy, and resolution information needed to operate on its documents.
 - **Used capability:** An implemented capability consumed by a current client.
