@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lock KiCad domain vocabulary in `CONTEXT.md`: flags, attributes, settings, text variables, title-block fields, drawing-sheet fields, and reference annotation.
+
 - Add `kicad_primitives.netlist`: parse kicadsexpr `.net` exchange files, `connectivity_sets` compare helper, and obtain/export via private ADR 0007 `kicad-cli` discovery—distinct from project-owned Connectivity (`docs/netlist.md`; #33).
 - Enable cross-library `SymbolLibrary.copy_symbol_from` (declared definition + body rename; `extends` parent must already exist in the destination) (`docs/symbol-libraries.md`).
 - Add `kicad_primitives.tables.LibraryTables`: global/project symbol and footprint table discover/read/resolve/write with `${VAR}` expansion, nested `Table` rows, project-over-global nickname resolve, and localized add/remove/rename (`docs/tables.md`; #32).
