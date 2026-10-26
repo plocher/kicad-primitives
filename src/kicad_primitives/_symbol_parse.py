@@ -17,19 +17,19 @@ from lossless_sexpr import (
 
 from ._symbol_types import (
     _MANDATORY,
+    AmbiguousAttributeError,
     AmbiguousPinError,
-    AmbiguousPropertyError,
     AmbiguousSymbolError,
     InheritanceError,
     InvalidLibraryError,
     Symbol,
+    SymbolAttribute,
     SymbolBody,
     SymbolPin,
-    SymbolProperty,
     SymbolRectangle,
     SymbolText,
     UnsupportedOperationError,
-    _property_key,
+    _attribute_key,
 )
 
 WRITE_VERSION = 20251024
@@ -76,22 +76,22 @@ def flag(node: ListNode, head: str, default: bool = False) -> bool:
     )
 
 
-def property_value_node(node: ListNode) -> AtomNode:
+def attribute_value_node(node: ListNode) -> AtomNode:
     return atom(node, 3 if atom(node, 1).raw == "private" else 2)
 
 
-def property_view(node: ListNode, origin: str, version: int) -> SymbolProperty:
+def attribute_view(node: ListNode, origin: str, version: int) -> SymbolAttribute:
     private = atom(node, 1).raw == "private"
     name = atom(node, 2 if private else 1).value
     if not name:
-        raise InvalidLibraryError("Empty property name")
-    value = property_value_node(node).value
+        raise InvalidLibraryError("Empty attribute name")
+    value = attribute_value_node(node).value
     if version < 20250318 and value == "~":
         value = ""
     at = one(node, "at")
     effects = one(node, "effects")
     hidden = flag(node, "hide") or (effects is not None and flag(effects, "hide"))
-    return SymbolProperty(
+    return SymbolAttribute(
         name=name,
         value=value,
         origin_symbol=origin,
@@ -175,8 +175,8 @@ def symbol_view(node: ListNode, version: int) -> Symbol:
     if not name:
         raise InvalidLibraryError("Empty symbol name")
     parent = one(node, "extends")
-    properties = tuple(
-        property_view(p, name, version) for p in node.child_lists("property")
+    attributes = tuple(
+        attribute_view(p, name, version) for p in node.child_lists("property")
     )
     bodies = tuple(body_view(b, name) for b in node.child_lists("symbol"))
     if len({(b.unit, b.body_style) for b in bodies}) != len(bodies):
@@ -184,9 +184,9 @@ def symbol_view(node: ListNode, version: int) -> Symbol:
     return Symbol(
         name=name,
         extends=atom(parent, 1).value if parent else None,
-        properties=properties,
+        attributes=attributes,
         bodies=bodies,
-        units_locked=any(p.name == "ki_locked" for p in properties),
+        units_locked=any(p.name == "ki_locked" for p in attributes),
     )
 
 
@@ -249,15 +249,15 @@ def resolve(source: ParsedLibrary, name: str) -> Symbol:
             raise InheritanceError(f"{name}: missing parent {current!r}") from exc
         chain.append(symbol)
         current = symbol.extends
-    fields: dict[str, SymbolProperty] = {}
+    attributes: dict[str, SymbolAttribute] = {}
     root = chain[-1]
     for symbol in reversed(chain):
         local: set[str] = set()
-        for prop in symbol.properties:
-            key = _property_key(prop.name)
+        for prop in symbol.attributes:
+            key = _attribute_key(prop.name)
             if key in local:
-                raise AmbiguousPropertyError(
-                    f"{symbol.name}: ambiguous property {prop.name!r}"
+                raise AmbiguousAttributeError(
+                    f"{symbol.name}: ambiguous attribute {prop.name!r}"
                 )
             local.add(key)
             if symbol is not root and key == "ki_fp_filters" and not prop.value.split():
@@ -271,14 +271,14 @@ def resolve(source: ParsedLibrary, name: str) -> Symbol:
             # ki_locked is a legacy structural marker, not an inherited text override.
             if prop.name == "ki_locked" and symbol is not root:
                 continue
-            fields[key] = prop
+            attributes[key] = prop
         if symbol is not root and symbol.bodies:
             raise InheritanceError(
                 f"{symbol.name}: derived symbol with local bodies is unsupported"
             )
     return replace(
         chain[0],
-        properties=tuple(fields.values()),
+        attributes=tuple(attributes.values()),
         bodies=root.bodies,
         units_locked=root.units_locked,
         resolved=True,
@@ -290,24 +290,24 @@ def _require_writeable(source: ParsedLibrary) -> None:
         raise UnsupportedOperationError(f"Format {source.version} is read-only")
 
 
-def _require_property_value(value: object) -> str:
+def _require_attribute_value(value: object) -> str:
     if not isinstance(value, str):
-        raise TypeError("Property value must be a string")
+        raise TypeError("Attribute value must be a string")
     if "\x00" in value:
-        raise ValueError("Property value cannot contain NUL")
+        raise ValueError("Attribute value cannot contain NUL")
     value.encode("utf-8")
     return value
 
 
-def _require_property_name(property_name: str) -> str:
-    if not isinstance(property_name, str):
-        raise TypeError("Property name must be a string")
-    if not property_name:
-        raise ValueError("Property name cannot be empty")
-    if "\x00" in property_name:
-        raise ValueError("Property name cannot contain NUL")
-    property_name.encode("utf-8")
-    return property_name
+def _require_attribute_name(attribute_name: str) -> str:
+    if not isinstance(attribute_name, str):
+        raise TypeError("Attribute name must be a string")
+    if not attribute_name:
+        raise ValueError("Attribute name cannot be empty")
+    if "\x00" in attribute_name:
+        raise ValueError("Attribute name cannot contain NUL")
+    attribute_name.encode("utf-8")
+    return attribute_name
 
 
 def _apply_source_edit(before: str, span: SourceSpan, replacement: str) -> str:
@@ -315,7 +315,7 @@ def _apply_source_edit(before: str, span: SourceSpan, replacement: str) -> str:
     expected = before[: span.start] + replacement + before[span.end :]
     if edited != expected:
         raise InvalidLibraryError(
-            "Property edit did not preserve the required source delta"
+            "Attribute edit did not preserve the required source delta"
         )
     return edited
 
@@ -341,17 +341,17 @@ def _indent_step(indent: str, sample: str) -> str:
 
 
 def _insertion_anchor(symbol_node: ListNode) -> tuple[int, ListNode | None]:
-    """Return (insert_at, style_anchor) after the last property or prelude node."""
-    properties = symbol_node.child_lists("property")
-    if properties:
-        return properties[-1].span.end, properties[-1]
+    """Return (insert_at, style_anchor) after the last attribute or prelude node."""
+    attributes = symbol_node.child_lists("property")
+    if attributes:
+        return attributes[-1].span.end, attributes[-1]
     extends = one(symbol_node, "extends")
     if extends is not None:
         return extends.span.end, extends
     return atom(symbol_node, 1).span.end, None
 
 
-def _property_fragment(
+def _attribute_fragment(
     source: str,
     symbol_node: ListNode,
     style_anchor: ListNode | None,
@@ -360,7 +360,7 @@ def _property_fragment(
     *,
     private: bool,
 ) -> str:
-    """Build inserted property text matching the symbol's existing layout."""
+    """Build inserted attribute text matching the symbol's existing layout."""
     sample = source[symbol_node.span.start : symbol_node.span.end]
     compact = "\n" not in sample
     head = "property private" if private else "property"
@@ -397,100 +397,108 @@ def _leading_separator_start(source: str, node_start: int) -> int:
     return index
 
 
-def replace_property(
-    source: ParsedLibrary, symbol_name: str, property_name: str, value: str
+def replace_attribute(
+    source: ParsedLibrary, symbol_name: str, attribute_name: str, value: str
 ) -> ParsedLibrary:
     _require_writeable(source)
-    value = _require_property_value(value)
+    value = _require_attribute_value(value)
     symbol = source.symbol(symbol_name)
     try:
-        target = symbol.property(property_name)
+        target = symbol.attribute(attribute_name)
     except KeyError as exc:
         raise UnsupportedOperationError(
-            f"{symbol_name}: property {property_name!r} is not declared; "
-            "use add_property to insert"
+            f"{symbol_name}: attribute {attribute_name!r} is not declared; "
+            "use add_attribute to insert"
         ) from exc
     if target.value == value:
         return source
     symbol_node = source.nodes[source.symbols.index(symbol)]
-    prop_node = symbol_node.child_lists("property")[symbol.properties.index(target)]
-    token = property_value_node(prop_node)
+    prop_node = symbol_node.child_lists("property")[symbol.attributes.index(target)]
+    token = attribute_value_node(prop_node)
     before = source.document.source
     replacement = quote(value)
     edited = _apply_source_edit(before, token.span, replacement)
     updated = read_source(edited.encode("utf-8"))
-    if updated.symbol(symbol_name).property(property_name).value != value:
-        raise InvalidLibraryError("Property edit did not establish the requested value")
+    if updated.symbol(symbol_name).attribute(attribute_name).value != value:
+        raise InvalidLibraryError(
+            "Attribute edit did not establish the requested value"
+        )
     return updated
 
 
-def insert_property(
+def insert_attribute(
     source: ParsedLibrary,
     symbol_name: str,
-    property_name: str,
+    attribute_name: str,
     value: str,
     *,
     private: bool = False,
 ) -> ParsedLibrary:
     _require_writeable(source)
-    property_name = _require_property_name(property_name)
-    value = _require_property_value(value)
+    attribute_name = _require_attribute_name(attribute_name)
+    value = _require_attribute_value(value)
     if not isinstance(private, bool):
         raise TypeError("private must be a bool")
     symbol = source.symbol(symbol_name)
     try:
-        symbol.property(property_name)
+        symbol.attribute(attribute_name)
     except KeyError:
         pass
     else:
         raise UnsupportedOperationError(
-            f"{symbol_name}: property {property_name!r} already declared"
+            f"{symbol_name}: attribute {attribute_name!r} already declared"
         )
     symbol_node = source.nodes[source.symbols.index(symbol)]
     before = source.document.source
     insert_at, style_anchor = _insertion_anchor(symbol_node)
-    fragment = _property_fragment(
+    fragment = _attribute_fragment(
         before,
         symbol_node,
         style_anchor,
-        property_name,
+        attribute_name,
         value,
         private=private,
     )
     edited = _apply_source_edit(before, SourceSpan(insert_at, insert_at), fragment)
     updated = read_source(edited.encode("utf-8"))
-    inserted = updated.symbol(symbol_name).property(property_name)
+    inserted = updated.symbol(symbol_name).attribute(attribute_name)
     if inserted.value != value or inserted.is_private != private:
         raise InvalidLibraryError(
-            "Property insert did not establish the requested field"
+            "Attribute insert did not establish the requested attribute"
         )
-    if len(updated.symbol(symbol_name).properties) != len(symbol.properties) + 1:
-        raise InvalidLibraryError("Property insert changed unexpected property counts")
+    if len(updated.symbol(symbol_name).attributes) != len(symbol.attributes) + 1:
+        raise InvalidLibraryError(
+            "Attribute insert changed unexpected attribute counts"
+        )
     return updated
 
 
-def delete_property(
-    source: ParsedLibrary, symbol_name: str, property_name: str
+def delete_attribute(
+    source: ParsedLibrary, symbol_name: str, attribute_name: str
 ) -> ParsedLibrary:
     _require_writeable(source)
-    property_name = _require_property_name(property_name)
+    attribute_name = _require_attribute_name(attribute_name)
     symbol = source.symbol(symbol_name)
-    target = symbol.property(property_name)
+    target = symbol.attribute(attribute_name)
     symbol_node = source.nodes[source.symbols.index(symbol)]
-    prop_node = symbol_node.child_lists("property")[symbol.properties.index(target)]
+    prop_node = symbol_node.child_lists("property")[symbol.attributes.index(target)]
     before = source.document.source
     start = _leading_separator_start(before, prop_node.span.start)
     edited = _apply_source_edit(before, SourceSpan(start, prop_node.span.end), "")
     updated = read_source(edited.encode("utf-8"))
     remaining = updated.symbol(symbol_name)
     try:
-        remaining.property(property_name)
+        remaining.attribute(attribute_name)
     except KeyError:
         pass
     else:
-        raise InvalidLibraryError("Property delete did not remove the requested field")
-    if len(remaining.properties) != len(symbol.properties) - 1:
-        raise InvalidLibraryError("Property delete changed unexpected property counts")
+        raise InvalidLibraryError(
+            "Attribute delete did not remove the requested attribute"
+        )
+    if len(remaining.attributes) != len(symbol.attributes) - 1:
+        raise InvalidLibraryError(
+            "Attribute delete changed unexpected attribute counts"
+        )
     return updated
 
 
@@ -921,9 +929,9 @@ def _body_insertion_anchor(symbol_node: ListNode) -> tuple[int, ListNode | None]
     bodies = symbol_node.child_lists("symbol")
     if bodies:
         return bodies[-1].span.end, bodies[-1]
-    properties = symbol_node.child_lists("property")
-    if properties:
-        return properties[-1].span.end, properties[-1]
+    attributes = symbol_node.child_lists("property")
+    if attributes:
+        return attributes[-1].span.end, attributes[-1]
     extends = one(symbol_node, "extends")
     if extends is not None:
         return extends.span.end, extends
@@ -1369,8 +1377,8 @@ def _copy_symbol_into(
     copied = updated.symbol(new_name)
     if len(copied.bodies) != len(symbol.bodies):
         raise InvalidLibraryError("Symbol copy changed body counts")
-    if len(copied.properties) != len(symbol.properties):
-        raise InvalidLibraryError("Symbol copy changed property counts")
+    if len(copied.attributes) != len(symbol.attributes):
+        raise InvalidLibraryError("Symbol copy changed attribute counts")
     if copied.extends != symbol.extends:
         raise InvalidLibraryError("Symbol copy did not preserve extends")
     if len(updated.symbols) != len(dest.symbols) + 1:

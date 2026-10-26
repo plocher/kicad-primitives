@@ -18,11 +18,11 @@ for symbol in library.symbols:
     print(symbol.name, symbol.extends)
 
 declared = library.symbol("Part")
-for prop in declared.properties:
+for prop in declared.attributes:
     print(prop.name, prop.value, prop.is_private)
 
 effective = library.resolve("Part")
-for prop in effective.properties:
+for prop in effective.attributes:
     print(prop.name, prop.value, prop.origin_symbol)
 for body in effective.bodies:
     print(body.unit, body.body_style, body.origin_symbol)
@@ -34,21 +34,23 @@ for body in effective.bodies:
         print(text.text, text.x, text.y, text.rotation)
 ```
 
-Symbols, properties, bodies, pins, rectangles, and body texts are immutable dataclass snapshots.
+`SymbolAttribute` holds one named value and its declaration provenance.
+Symbols, attributes, bodies, pins, rectangles, and body texts are immutable dataclass snapshots.
+KiCad stores attributes in `(property …)` nodes.
 Query again after editing; previous snapshots do not become live handles.
 Stroke/fill, fonts, unrelated metadata, and unrecognized nodes remain in the source without a public parser escape hatch.
-The service exposes property visibility/autoplace/position, pin position/orientation/length/shape/hidden state, and minimal rectangle/text geometry—not a full graphics or text-effects model.
+The service exposes attribute visibility/autoplace/position, pin position/orientation/length/shape/hidden state, and minimal rectangle/text geometry—not a full graphics or text-effects model.
 
 `symbol(name)` is declared content, including empty values.
-`resolve(name)` follows same-library parents in either file order and retains the origin of inherited fields and bodies.
-KiCad's empty mandatory-field and keyword/filter inheritance rules are not a generic dictionary update.
-Resolution fails explicitly for missing parents, cycles, duplicate effective field identities, or unsupported derived definitions with their own bodies.
+`resolve(name)` follows same-library parents in either file order and retains the origin of inherited attributes and bodies.
+KiCad's empty mandatory-attribute and keyword/filter inheritance rules are not a generic dictionary update.
+Resolution fails explicitly for missing parents, cycles, duplicate effective attribute identities, or unsupported derived definitions with their own bodies.
 Declared inspection remains available when effective resolution fails.
 
-Properties are an ordered tuple, not a dictionary: repeated names remain visible.
-`symbol.property(name)` returns one occurrence, raises `KeyError` if absent, and raises `AmbiguousPropertyError` if ambiguous.
+Attributes are an ordered tuple, not a dictionary: repeated names remain visible.
+`symbol.attribute(name)` returns one occurrence, raises `KeyError` if absent, and raises `AmbiguousAttributeError` if ambiguous.
 Mandatory names (Reference, Value, Footprint, Datasheet, Description) use KiCad's case-insensitive identity; custom names are case-sensitive.
-The `private` modifier is distinct from a property literally named `"private"`.
+The `private` modifier is distinct from an attribute literally named `"private"`.
 
 Bodies retain their `(unit, body_style)` identity.
 Zero means common content, not an additional placed unit/style.
@@ -63,11 +65,11 @@ Work on a disposable copy while trying the recipe.
 from kicad_primitives.symbols import SymbolLibrary
 
 library = SymbolLibrary.open("Example.kicad_sym")
-library.set_property("Part", "Description", 'Updated description with "quotes"')
-assert library.symbol("Part").property("Description").value == 'Updated description with "quotes"'
-library.add_property("Part", "Role", "DEVICE")
-library.add_property("Part", "KLC_S3.3", "reason", private=True)
-library.delete_property("Part", "Role")
+library.set_attribute("Part", "Description", 'Updated description with "quotes"')
+assert library.symbol("Part").attribute("Description").value == 'Updated description with "quotes"'
+library.add_attribute("Part", "Role", "DEVICE")
+library.add_attribute("Part", "KLC_S3.3", "reason", private=True)
+library.delete_attribute("Part", "Role")
 library.add_pin(
     "Part", 1, 1, "2", "OUT", "output", x=5.08, y=0.0, rotation=180.0, length=2.54
 )
@@ -88,11 +90,11 @@ preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
 ```
 
-`set_property` changes one existing declared value token.
-`add_property` inserts a new declared field after the last property (or after `extends`/name when none exist).
+`set_attribute` changes one existing declared value token.
+`add_attribute` inserts a new declared attribute after the last attribute (or after `extends`/name when none exist).
 Optional `private=True` writes the KiCad private modifier.
 Inserted nodes use a minimal `(at 0 0 0)` body and match the symbol's newline and indent style when the definition is multi-line; compact single-line symbols stay single-line.
-`delete_property` removes one unambiguous declared property and its leading separator.
+`delete_attribute` removes one unambiguous declared attribute and its leading separator.
 
 `add_pin` / `set_pin` / `delete_pin` target one existing body by `(unit, body_style)` and pin number.
 They do not create bodies, collapse alternate body styles, or edit a parent.
@@ -107,13 +109,13 @@ Prefer **unit 0** for shared boxes/text instead of copying the same artwork into
 `add_rectangle` / `add_body_text` insert minimal geometry/text on an existing body.
 `export_svgs` writes SVG via private `kicad-cli` discovery (explicit path, `KICAD_CLI`, platform defaults, `PATH`); it exports current in-memory bytes through a temp file. It is an inspection hook for contact-sheet style checks, not an HTML product.
 
-Private modifiers, field placement/effects on untouched fields, other definitions, newline spelling, and unrelated bytes survive unchanged.
+Private modifiers, placement/effects on untouched attributes, other definitions, newline spelling, and unrelated bytes survive unchanged.
 Setting an already equal value is a lexical no-op, even if its source escape spelling is noncanonical.
 Each changed edit reparses before further queries/edits; callers never manage spans.
 Edits are all-or-nothing in memory, not a public multi-edit transaction.
 
-`set_property` does not insert a missing field; use `add_property`.
-`add_property` fails when the identity already exists (including mandatory case-insensitive clashes).
+`set_attribute` does not insert a missing attribute; use `add_attribute`.
+`add_attribute` fails when the identity already exists (including mandatory case-insensitive clashes).
 No parent is edited implicitly. Deleting a local override leaves any inherited effective value visible through `resolve()`.
 Same-library create/rename/delete/copy are supported; rename rewrites body names and in-library `extends`.
 Delete refuses when another symbol still extends the target.
@@ -122,8 +124,8 @@ Cross-library `copy_symbol_from` copies a declared definition into this library;
 parents first). Path discovery may use library tables; this method takes opened
 libraries only.
 Unit restructuring beyond `ensure_body` remains outside this surface.
-Changing a declared empty mandatory field changes its declared value; inspect `resolve()` separately to understand the effective inherited value.
-Generic field values are not validated against Railroad or procurement policy.
+Changing a declared empty mandatory attribute changes its declared value; inspect `resolve()` separately to understand the effective inherited value.
+Generic attribute values are not validated against Railroad or procurement policy.
 
 Writes support library format `20251024` (KiCad 10), not the generator-version string.
 Older compatible structures can be inspected read-only; the older donor fixture is covered, not every historical variation.
@@ -160,14 +162,14 @@ Do not save concurrently with KiCad's symbol editor or another writer.
 
 Errors exported from `kicad_primitives.symbols`:
 - `InvalidLibraryError`: invalid syntax or required structure.
-- `UnsupportedOperationError`: unsupported format/operation, absent declared `set_property` target, duplicate `add_property` / `add_pin` identity, or unsafe replacement target.
-- `AmbiguousSymbolError` / `AmbiguousPropertyError` / `AmbiguousPinError`: non-unique identity.
+- `UnsupportedOperationError`: unsupported format/operation, absent declared `set_attribute` target, duplicate `add_attribute` / `add_pin` identity, or unsafe replacement target.
+- `AmbiguousSymbolError` / `AmbiguousAttributeError` / `AmbiguousPinError`: non-unique identity.
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
 - `KicadCliNotFoundError`: `export_svgs` could not resolve `kicad-cli`.
 - `SymbolLibraryError`: shared base for the package errors.
 
-Missing symbol/property/body/pin lookup raises `KeyError`; filesystem errors remain ordinary `OSError` subclasses.
+Missing symbol/attribute/body/pin lookup raises `KeyError`; filesystem errors remain ordinary `OSError` subclasses.
 No public signature or error requires dependency node/span types.
 
 ## Tests

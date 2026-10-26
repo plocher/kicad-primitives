@@ -7,8 +7,6 @@ Symbol **flags** control behavior, such as DNP and exclusion from BOM or simulat
 **Reference annotation** assigns or updates reference designators and associated instance records.
 It does not mean general attribute editing.
 
-The existing read API uses `PlacedProperty`, `properties`, and `property()`.
-These names remain available. They describe attributes in the package vocabulary.
 KiCad stores these attributes in `(property …)` nodes.
 The glossary in `CONTEXT.md` defines settings, text variables, and drawing-sheet terminology.
 
@@ -17,8 +15,8 @@ The glossary in `CONTEXT.md` defines settings, text variables, and drawing-sheet
 `Project.schematic()` and `Project.schematics()` open schematic **content** inside
 project context (ADR 0002).
 They return `kicad_primitives.schematics.Schematic` snapshots: title block and
-**merged** placed symbols (fields, identity, transform, unit, flags).
-Placed-symbol and geometry structure are read-only. Field edit and embedded
+**merged** placed symbols (attributes, identity, transform, unit, flags).
+Placed-symbol and geometry structure are read-only. Attribute edit and embedded
 restore remain later tickets.
 
 ## Open via a project
@@ -41,6 +39,10 @@ The free function exists for already-validated hierarchy paths and tests.
 
 ## Placed symbols
 
+`PlacedAttribute` holds one named value. `PlacedSymbol.attributes` keeps occurrences in file order.
+`attribute(name)` returns one occurrence and raises `KeyError` if absent.
+It raises `AmbiguousPlacedSymbolError` if ambiguous.
+
 ```python
 for symbol in root.symbols:
     print(symbol.reference, symbol.lib_id, symbol.uuid)
@@ -48,7 +50,7 @@ for symbol in root.symbols:
     print(symbol.value, symbol.footprint, symbol.in_bom, symbol.dnp)
 
 j22 = root.symbol("J22")
-print(j22.property("MPN").value)
+print(j22.attribute("MPN").value)
 ```
 
 Only **top-level** `(symbol …)` nodes with `lib_id`, `at`, and a non-empty
@@ -95,7 +97,7 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 
 ## Limits
 
-- Read-only. No localized field annotate and no geometry edit on this surface.
+- Read-only. No localized attribute edit and no geometry edit on this surface.
 - Embedded `lib_symbols` restore is later work.
 - Sheet instance path / multi-instance models are not first-class here.
 - Prefer `Project.schematic` over free `open_schematic` in application code.
@@ -103,7 +105,7 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 ## Errors
 
 - `InvalidSchematicError`: bad path, syntax, or required structure.
-- `AmbiguousPlacedSymbolError`: non-unique reference (or property) lookup.
+- `AmbiguousPlacedSymbolError`: non-unique reference (or attribute) lookup.
 - `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
 
 ## Tests

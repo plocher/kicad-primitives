@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rename symbol and placed-symbol APIs directly to the canonical Attribute vocabulary: `SymbolAttribute`, `PlacedAttribute`, `attributes`, `attribute()`, `AmbiguousAttributeError`, and `SymbolLibrary.set_attribute` / `add_attribute` / `delete_attribute`. No old-name aliases remain. Behavior and KiCad `(property …)` syntax stay unchanged (`docs/symbol-libraries.md`, `docs/schematics.md`).
 - Lock KiCad domain vocabulary in `CONTEXT.md`: flags, attributes, settings, text variables, title-block fields, drawing-sheet fields, and reference annotation.
 
 - Add `kicad_primitives.netlist`: parse kicadsexpr `.net` exchange files, `connectivity_sets` compare helper, and obtain/export via private ADR 0007 `kicad-cli` discovery—distinct from project-owned Connectivity (`docs/netlist.md`; #33).

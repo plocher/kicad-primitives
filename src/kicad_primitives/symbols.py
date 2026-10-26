@@ -8,36 +8,36 @@ from pathlib import Path
 from . import _symbol_parse, _symbol_persist
 from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
 from ._symbol_types import (
+    AmbiguousAttributeError,
     AmbiguousPinError,
-    AmbiguousPropertyError,
     AmbiguousSymbolError,
     FileConflictError,
     InheritanceError,
     InvalidLibraryError,
     Symbol,
+    SymbolAttribute,
     SymbolBody,
     SymbolLibraryError,
     SymbolPin,
-    SymbolProperty,
     SymbolRectangle,
     SymbolText,
     UnsupportedOperationError,
 )
 
 __all__ = [
+    "AmbiguousAttributeError",
     "AmbiguousPinError",
-    "AmbiguousPropertyError",
     "AmbiguousSymbolError",
     "FileConflictError",
     "InheritanceError",
     "InvalidLibraryError",
     "KicadCliNotFoundError",
     "Symbol",
+    "SymbolAttribute",
     "SymbolBody",
     "SymbolLibrary",
     "SymbolLibraryError",
     "SymbolPin",
-    "SymbolProperty",
     "SymbolRectangle",
     "SymbolText",
     "UnsupportedOperationError",
@@ -80,49 +80,49 @@ class SymbolLibrary:
         """Preview current source bytes, including all opaque untouched content."""
         return self._source.document.render().encode("utf-8")
 
-    def set_property(self, symbol_name: str, property_name: str, value: str) -> None:
+    def set_attribute(self, symbol_name: str, attribute_name: str, value: str) -> None:
         """Update one existing declared value in memory, never a parent implicitly.
 
-        Missing properties, ambiguous targets and read-only formats fail without
+        Missing attributes, ambiguous targets and read-only formats fail without
         changing either memory or disk. Query again for a fresh snapshot.
         """
-        updated = _symbol_parse.replace_property(
-            self._source, symbol_name, property_name, value
+        updated = _symbol_parse.replace_attribute(
+            self._source, symbol_name, attribute_name, value
         )
         self._source = updated
 
-    def add_property(
+    def add_attribute(
         self,
         symbol_name: str,
-        property_name: str,
+        attribute_name: str,
         value: str,
         *,
         private: bool = False,
     ) -> None:
-        """Insert one new declared property on the selected symbol in memory.
+        """Insert one new declared attribute on the selected symbol in memory.
 
         Does not edit a parent or replace an existing identity. Ambiguous names,
         empty names, invalid values, and read-only formats fail without changing
         memory or disk. Query again for a fresh snapshot.
         """
-        updated = _symbol_parse.insert_property(
+        updated = _symbol_parse.insert_attribute(
             self._source,
             symbol_name,
-            property_name,
+            attribute_name,
             value,
             private=private,
         )
         self._source = updated
 
-    def delete_property(self, symbol_name: str, property_name: str) -> None:
-        """Remove one unambiguous declared property from the selected symbol.
+    def delete_attribute(self, symbol_name: str, attribute_name: str) -> None:
+        """Remove one unambiguous declared attribute from the selected symbol.
 
         Does not edit a parent. Missing or ambiguous targets and read-only
         formats fail without changing memory or disk. Query again for a fresh
         snapshot.
         """
-        updated = _symbol_parse.delete_property(
-            self._source, symbol_name, property_name
+        updated = _symbol_parse.delete_attribute(
+            self._source, symbol_name, attribute_name
         )
         self._source = updated
 
@@ -248,7 +248,7 @@ class SymbolLibrary:
     def copy_symbol(self, source_name: str, new_name: str) -> None:
         """Duplicate one symbol inside this library under a new name.
 
-        Preserves properties, bodies, and extends. For a second library use
+        Preserves attributes, bodies, and extends. For a second library use
         :meth:`copy_symbol_from`.
         """
         self._source = _symbol_parse.copy_symbol(self._source, source_name, new_name)
