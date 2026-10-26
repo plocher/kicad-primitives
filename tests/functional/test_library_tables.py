@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from contextlib import chdir
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -200,7 +201,7 @@ class ResolveTests(TablesCase):
         self.assertNotIn("Bundle", nicknames)
         self.assertEqual(
             nicknames["NestedLib"].resolved_path,
-            (nested_dir / "NestedLib.kicad_sym").resolve(),
+            (Path.cwd() / "NestedLib.kicad_sym").resolve(),
         )
         self.assertEqual(
             nicknames["AbsNested"].resolved_path, Path("/abs/Abs.kicad_sym")
@@ -230,6 +231,113 @@ class ResolveTests(TablesCase):
         tables = LibraryTables.open(config_home=config_home)
         nicknames = [entry.nickname for entry in tables.libraries("symbol")]
         self.assertEqual(nicknames, ["Leaf"])
+
+    def test_repeated_dag_replays_leaves_after_intervening_shadow(self) -> None:
+        config_home = self.root / "10.0"
+        nested = self.write_table(
+            "nested/shared-table",
+            root_name="sym_lib_table",
+            rows=[("Shared", "KiCad", "/winner.kicad_sym")],
+        )
+        self.write_table(
+            "10.0/sym-lib-table",
+            root_name="sym_lib_table",
+            rows=[
+                ("First", "Table", str(nested)),
+                ("Shared", "KiCad", "/missing.kicad_sym"),
+                ("Again", "Table", str(nested)),
+            ],
+        )
+        tables = LibraryTables.open(config_home=config_home)
+        self.assertEqual(
+            [entry.resolved_path for entry in tables.libraries("symbol")],
+            [
+                Path("/winner.kicad_sym"),
+                Path("/missing.kicad_sym"),
+                Path("/winner.kicad_sym"),
+            ],
+        )
+        self.assertEqual(
+            tables.resolve("Shared", library_type="symbol").resolved_path,
+            Path("/winner.kicad_sym"),
+        )
+
+    def test_relative_includes_and_leaves_use_one_captured_context_base(self) -> None:
+        config_home = self.root / "10.0"
+        project = self.root / "project"
+        project.mkdir()
+        self.write_table(
+            "10.0/sym-lib-table",
+            root_name="sym_lib_table",
+            rows=[("First", "Table", "nested/first-table")],
+        )
+        first = self.write_table(
+            "project/nested/first-table",
+            root_name="sym_lib_table",
+            rows=[("Second", "Table", "second-table")],
+        )
+        second = self.write_table(
+            "project/second-table",
+            root_name="sym_lib_table",
+            rows=[
+                ("Leaf", "KiCad", "local.kicad_sym"),
+                ("Cycle", "Table", str(first)),
+            ],
+        )
+        source = {path: path.read_bytes() for path in (first, second)}
+        with chdir(project):
+            captured = LibraryTables.open(config_home=config_home)
+        explicit = LibraryTables.open(config_home=config_home, base_directory=project)
+        owned = LibraryTables.open(config_home=config_home, project_directory=project)
+        for tables in (captured, explicit, owned):
+            with self.subTest(tables=tables):
+                self.assertEqual(tables.base_directory, project.resolve())
+                self.assertEqual(
+                    tables.resolve("Leaf", library_type="symbol").resolved_path,
+                    (project / "local.kicad_sym").resolve(),
+                )
+                self.assertEqual(len(tables.libraries("symbol")), 1)
+        self.assertEqual({p: p.read_bytes() for p in source}, source)
+
+    def test_cycle_cut_does_not_suppress_a_later_completed_branch(self) -> None:
+        config_home = self.root / "10.0"
+        a = config_home / "a"
+        b = config_home / "b"
+        self.write_table(
+            "10.0/a",
+            root_name="sym_lib_table",
+            rows=[("B", "Table", str(b)), ("Leaf", "KiCad", "/leaf.kicad_sym")],
+        )
+        self.write_table(
+            "10.0/b",
+            root_name="sym_lib_table",
+            rows=[("A", "Table", str(a))],
+        )
+        self.write_table(
+            "10.0/sym-lib-table",
+            root_name="sym_lib_table",
+            rows=[("First", "Table", str(a)), ("Again", "Table", str(b))],
+        )
+        tables = LibraryTables.open(config_home=config_home)
+        self.assertEqual(
+            [e.nickname for e in tables.libraries("symbol")], ["Leaf", "Leaf"]
+        )
+
+    def test_missing_winning_path_is_not_replaced_by_an_existing_loser(self) -> None:
+        present = self.write("exists.kicad_sym", "")
+        self.write_table(
+            "10.0/sym-lib-table",
+            root_name="sym_lib_table",
+            rows=[
+                ("Shared", "KiCad", str(present)),
+                ("Shared", "KiCad", "/genuinely-missing.kicad_sym"),
+            ],
+        )
+        tables = LibraryTables.open(config_home=self.root / "10.0")
+        self.assertEqual(
+            tables.resolve("Shared", library_type="symbol").resolved_path,
+            Path("/genuinely-missing.kicad_sym"),
+        )
 
     def test_missing_nickname_raises(self) -> None:
         config_home = self.root / "10.0"

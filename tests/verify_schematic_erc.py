@@ -13,6 +13,7 @@ from unittest.mock import patch
 from kicad_primitives._kicad_cli import resolve_kicad_cli
 from kicad_primitives.projects import Project
 from kicad_primitives.schematics import ErcReport, UnsupportedSchematicOperationError
+from kicad_primitives.tables import LibraryTables
 
 
 def main() -> None:
@@ -84,6 +85,10 @@ def main() -> None:
                     raw["included_severities"]
                 )
             relative_report = project.erc(kicad_cli=args.kicad_cli)
+            resolved = LibraryTables.open(
+                config_home=config, project_directory=root
+            ).resolve("SPCoast", library_type="symbol")
+            assert resolved.resolved_path == root / "local.kicad_sym"
             assert not any(
                 finding.type == "lib_symbol_issues"
                 for sheet in relative_report.sheets
@@ -109,6 +114,18 @@ def main() -> None:
                 f' (lib (name "Again") (type "Table") (uri "{dag}")))',
                 encoding="utf-8",
             )
+            tables = LibraryTables.open(config_home=config, project_directory=root)
+            assert (
+                tables.resolve("SPCoast", library_type="symbol").resolved_path
+                == root / "local.kicad_sym"
+            )
+            assert [e.nickname for e in tables.libraries("symbol")] == [
+                "SPCoast",
+                "power",
+                "SPCoast",
+                "SPCoast",
+                "power",
+            ]
             schematic.symbol("R3").set_attribute("Value", "22K")
             original = {
                 p: (p.read_bytes(), p.stat().st_ino)
@@ -121,6 +138,10 @@ def main() -> None:
             root.chmod(0o555)
             try:
                 report = project.erc(kicad_cli=args.kicad_cli)
+                rerun = project.erc(kicad_cli=args.kicad_cli)
+                assert rerun.snapshot.symbol_table_sha256 == (
+                    report.snapshot.symbol_table_sha256
+                )
                 assert report.schema == "https://schemas.kicad.org/erc.v1.json"
                 assert report.kicad_version.startswith("10.")
                 assert report.coordinate_units == "mm"

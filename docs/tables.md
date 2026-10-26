@@ -60,6 +60,8 @@ print(entry.resolved_path)
 `libraries(library_type)` returns **leaf** libraries after nested `Table`
 expansion, global rows then project rows. Nested table nicknames themselves are
 not leaves.
+Repeated includes expand again in row order. Only a table already on the active
+include branch stops a cycle. A completed include does not suppress later includes.
 
 `resolve(nickname, library_type=...)` selects one leaf path:
 
@@ -79,9 +81,19 @@ Effective `${VAR}` values (later wins on the same key):
 5. Process environment keys starting with `KICAD`, plus `KIPRJMOD`
 6. Aliases again so env-provided roots still fill companion symbol/footprint dirs
 
-URI expansion substitutes `${NAME}` up to eight times, then resolves relative
-paths against the **table file directory** (nested tables and kDoctor behavior).
-Absolute URIs stay absolute.
+URI expansion substitutes `${NAME}` up to 32 times.
+Relative include and leaf URIs use one context base, not the containing table directory.
+With `project_directory`, that base is the opened project directory.
+Standalone resolution captures process CWD at `open()`, or accepts an explicit
+`base_directory` argument. Later CWD changes do not change this captured base.
+The `base_directory` property shows the effective base.
+Do not supply both `project_directory` and `base_directory`.
+Absolute URIs stay absolute. A missing winning path remains the winner.
+
+KiCad 10.0.1 uses process CWD for both relative includes and leaf URIs.
+Project-native checks run from the opened project directory.
+The native control in `tests/verify_schematic_erc.py` checks this behavior and repeated
+lookup without changing original designs.
 
 ### Add, remove, rename
 

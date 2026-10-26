@@ -59,22 +59,14 @@ def _field(node: ListNode, head: str) -> AtomNode:
 
 
 def _path(uri: str, variables: dict[str, str], project: Project) -> Path:
-    expanded = uri
-    for _ in range(32):
-        replaced = tables._URI_VARIABLE_PATTERN.sub(
-            lambda m: variables.get(m.group(1), m.group(0)), expanded
-        )
-        if replaced == expanded:
-            break
-        expanded = replaced
+    expanded = tables._expand_library_uri(uri, variables)
     if not expanded.strip() or "${" in expanded or "$(" in expanded:
         raise ErcContextError("Unresolved or empty library URI in original context")
     if "://" in expanded:
         raise ErcContextError("ERC context supports local filesystem library URIs only")
-    location = Path(expanded).expanduser()
-    if not location.is_absolute():
-        location = project.directory / location
-    return location.resolve()
+    return tables._resolve_entry_path(
+        uri=expanded, base_directory=project.directory, path_variables={}
+    )
 
 
 def _snapshot_kind(

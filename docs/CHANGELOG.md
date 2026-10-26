@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix public table resolution to replay repeated includes in order and detect cycles only on the active branch. Resolve relative includes and leaves from the project directory or a captured standalone base. Share URI resolution with native ERC projection without losing raw registration metadata (`docs/tables.md`; #52).
+
 - Require proof of all requested native ERC severities. Replay repeated nested-table includes in order, and anchor relative include/leaf URIs to the original project's explicit native working directory. Preserve strict cycle and acquisition failures (#40).
 
 - Add `Project.erc()` typed per-sheet reports over pending hierarchy snapshots. Preserve item coordinates/UUIDs, severities/exclusions, check metadata, and original-path/hash provenance. Project native symbol/footprint registrations with raw metadata and original-context paths. Reject report acquisition/context failures explicitly. Document-only ERC remains unsupported (`docs/schematics.md`, `docs/projects.md`; #40).
