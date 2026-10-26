@@ -33,21 +33,22 @@ class AttributeEditTests(unittest.TestCase):
         library = SymbolLibrary.open(self.path)
         snapshot = library.symbol("Café")
         value = 'Résumé "quoted" \\ path\nnext\tline'
-        library.set_attribute("Café", "Description", value)
+        library.symbol("Café").set_attribute("Description", value)
         expected = original.replace(
             b'"old"', '"Résumé \\"quoted\\" \\\\ path\\nnext\\tline"'.encode(), 1
         )
         self.assertEqual(library.to_bytes(), expected)
         self.assertEqual(self.path.read_bytes(), original)
-        self.assertEqual(snapshot.attribute("Description").value, "old")
+        self.assertIs(snapshot, library.symbol("Café"))
+        self.assertEqual(snapshot.attribute("Description").value, value)
         self.assertEqual(library.symbol("Café").attribute("Description").value, value)
-        library.set_attribute("Café", "Note", "new")
+        library.symbol("Café").set_attribute("Note", "new")
         expected = expected.replace(b'"untouched"', b'"new"', 1)
         self.assertEqual(library.to_bytes(), expected)
         self.assertTrue(library.symbol("Café").attribute("Note").is_private)
         library.save()
         self.assertEqual(self.path.read_bytes(), expected)
-        library.set_attribute("Café", "Note", "third")
+        library.symbol("Café").set_attribute("Note", "third")
         library.save()
         self.assertEqual(
             self.path.read_bytes(), expected.replace(b'"new"', b'"third"', 1)
@@ -62,25 +63,30 @@ class AttributeEditTests(unittest.TestCase):
         self.path.write_bytes(original)
         before = self.path.stat()
         library = SymbolLibrary.open(self.path)
-        library.set_attribute("A", "Note", "aq")
+        library.symbol("A").set_attribute("Note", "aq")
         library.save()
         self.assertEqual(library.to_bytes(), original)
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(self.path.stat().st_ino, before.st_ino)
         self.assertEqual(self.path.stat().st_mtime_ns, before.st_mtime_ns)
 
-    def test_declared_child_edit_never_changes_parent_or_adds_fields(self) -> None:
+    def test_declared_child_upsert_never_changes_parent(self) -> None:
         original = b"""(kicad_symbol_lib (version 20251024)
           (symbol "Child" (extends "Root") (property "Note" "child"))
           (symbol "Root" (property "Description" "parent") (property "Note" "base")))"""
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        with self.assertRaises(UnsupportedOperationError):
-            library.set_attribute("Child", "Description", "not declared")
-        self.assertEqual(library.to_bytes(), original)
-        library.set_attribute("Child", "Note", "local")
+        library.symbol("Child").set_attribute("Description", "local description")
         self.assertEqual(
-            library.to_bytes(), original.replace(b'"child"', b'"local"', 1)
+            library.symbol("Root").attribute("Description").value, "parent"
+        )
+        self.assertEqual(
+            library.symbol("Child").attribute("Description").value, "local description"
+        )
+        after_insert = library.to_bytes()
+        library.symbol("Child").set_attribute("Note", "local")
+        self.assertEqual(
+            library.to_bytes(), after_insert.replace(b'"child"', b'"local"', 1)
         )
         self.assertEqual(library.symbol("Root").attribute("Note").value, "base")
         self.assertEqual(
@@ -103,14 +109,14 @@ class AttributeEditTests(unittest.TestCase):
             ),
             ('(symbol "A") (symbol "A")', "A", "Note", AmbiguousSymbolError),
             ('(symbol "A")', "Missing", "Note", KeyError),
-            ('(symbol "A")', "A", "New", UnsupportedOperationError),
+            ('(symbol "A")', "A", "", ValueError),
         ):
             with self.subTest(nodes=nodes):
                 original = f"(kicad_symbol_lib (version 20251024) {nodes})".encode()
                 self.path.write_bytes(original)
                 library = SymbolLibrary.open(self.path)
                 with self.assertRaises(error):
-                    library.set_attribute(symbol, key, "replacement")
+                    library.symbol(symbol).set_attribute(key, "replacement")
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
 
@@ -123,7 +129,7 @@ class AttributeEditTests(unittest.TestCase):
                 self.subTest(value=repr(value)),
                 self.assertRaises((ValueError, TypeError)),
             ):
-                library.set_attribute("A", "Note", value)  # type: ignore[arg-type]
+                library.symbol("A").set_attribute("Note", value)  # type: ignore[arg-type]
             self.assertEqual(library.to_bytes(), original)
             self.assertEqual(self.path.read_bytes(), original)
 
@@ -148,7 +154,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
         ).encode()
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_attribute("Café", "Role", "DEVICE")
+        library.symbol("Café").add_attribute("Role", "DEVICE")
         expected = original.replace(
             b'(property "Description" "old")',
             b'(property "Description" "old")\r\n'
@@ -163,7 +169,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
         self.assertFalse(library.symbol("Café").attribute("Role").is_private)
         # Bodies and other symbols stay intact.
         self.assertEqual(library.symbol("Café").bodies[0].pins[0].number, "1")
-        library.add_attribute("Café", "KLC_S3.3", "reason", private=True)
+        library.symbol("Café").add_attribute("KLC_S3.3", "reason", private=True)
         self.assertTrue(library.symbol("Café").attribute("KLC_S3.3").is_private)
         self.assertEqual(library.symbol("Café").attribute("KLC_S3.3").value, "reason")
         library.save()
@@ -175,7 +181,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
         original = b'(kicad_symbol_lib (version 20251024) (symbol "A" (extends "B")))'
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_attribute("A", "Note", "fresh")
+        library.symbol("A").add_attribute("Note", "fresh")
         self.assertEqual(library.symbol("A").attribute("Note").value, "fresh")
         self.assertIn(b'(property "Note" "fresh"', library.to_bytes())
         self.assertIn(b'(extends "B")', library.to_bytes())
@@ -196,14 +202,14 @@ class AttributeInsertDeleteTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.delete_attribute("Part", "Note")
+        library.symbol("Part").delete_attribute("Note")
         expected = original.replace(b'\n    (property "Note" "drop")', b"", 1)
         self.assertEqual(library.to_bytes(), expected)
         self.assertEqual(self.path.read_bytes(), original)
         props = [p.name for p in library.symbol("Part").attributes]
         self.assertEqual(props, ["Description", "Secret"])
         self.assertEqual(library.symbol("Part").bodies[0].pins[0].name, "P")
-        library.delete_attribute("Part", "Secret")
+        library.symbol("Part").delete_attribute("Secret")
         self.assertEqual(
             [p.name for p in library.symbol("Part").attributes], ["Description"]
         )
@@ -219,7 +225,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
           (symbol "Root" (property "Description" "parent") (property "Note" "base")))"""
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_attribute("Child", "Description", "local")
+        library.symbol("Child").add_attribute("Description", "local")
         self.assertEqual(
             library.symbol("Root").attribute("Description").value, "parent"
         )
@@ -240,7 +246,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
               (pin input line (at 0 0 0) (length 1) (name "IN") (number "1")))))"""
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.delete_attribute("Child", "Description")
+        library.symbol("Child").delete_attribute("Description")
         with self.assertRaises(KeyError):
             library.symbol("Child").attribute("Description")
         resolved = library.resolve("Child")
@@ -291,9 +297,9 @@ class AttributeInsertDeleteTests(unittest.TestCase):
                 library = SymbolLibrary.open(self.path)
                 with self.assertRaises(error):
                     if action == "add":
-                        library.add_attribute(symbol, key, "replacement")
+                        library.symbol(symbol).add_attribute(key, "replacement")
                     else:
-                        library.delete_attribute(symbol, key)
+                        library.symbol(symbol).delete_attribute(key)
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
 
@@ -306,7 +312,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
                 self.subTest(value=repr(value)),
                 self.assertRaises((ValueError, TypeError)),
             ):
-                library.add_attribute("A", "Note", value)  # type: ignore[arg-type]
+                library.symbol("A").add_attribute("Note", value)  # type: ignore[arg-type]
             self.assertEqual(library.to_bytes(), original)
 
     def test_add_delete_reject_readonly_format(self) -> None:
@@ -316,9 +322,9 @@ class AttributeInsertDeleteTests(unittest.TestCase):
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(UnsupportedOperationError):
-            library.add_attribute("A", "Role", "X")
+            library.symbol("A").add_attribute("Role", "X")
         with self.assertRaises(UnsupportedOperationError):
-            library.delete_attribute("A", "Note")
+            library.symbol("A").delete_attribute("Note")
         self.assertEqual(library.to_bytes(), original)
 
 
@@ -346,18 +352,8 @@ class PinEditTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_pin(
-            "Part",
-            1,
-            1,
-            "2",
-            "B",
-            "input",
-            x=5.08,
-            y=0.0,
-            rotation=180.0,
-            length=2.54,
-            shape="line",
+        library.symbol("Part").body(1, 1).add_pin(
+            "2", "B", "input", x=5.08, y=0.0, rotation=180.0, length=2.54, shape="line"
         )
         expected = original.replace(
             b'(name "A") (number "1"))\r\n    )\r\n    (symbol "Part_1_2"',
@@ -405,16 +401,8 @@ class PinEditTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.set_pin(
-            "Part",
-            1,
-            1,
-            "1",
-            name="IN",
-            x=2.54,
-            y=-1.27,
-            rotation=90.0,
-            length=2.54,
+        library.symbol("Part").body(1, 1).pin("1").set(
+            name="IN", x=2.54, y=-1.27, rotation=90.0, length=2.54
         )
         expected = (
             original.replace(b"(at 0 0 0)", b"(at 2.54 -1.27 90)", 1)
@@ -429,26 +417,12 @@ class PinEditTests(unittest.TestCase):
         )
         # Lexical no-op when values already match.
         before = library.to_bytes()
-        library.set_pin(
-            "Part",
-            1,
-            1,
-            "1",
-            name="IN",
-            x=2.54,
-            y=-1.27,
-            rotation=90.0,
-            length=2.54,
+        library.symbol("Part").body(1, 1).pin("1").set(
+            name="IN", x=2.54, y=-1.27, rotation=90.0, length=2.54
         )
         self.assertEqual(library.to_bytes(), before)
-        library.set_pin(
-            "Part",
-            1,
-            1,
-            "1",
-            electrical_type="input",
-            shape="inverted",
-            hidden=True,
+        library.symbol("Part").body(1, 1).pin("1").set(
+            electrical_type="input", shape="inverted", hidden=True
         )
         pin = library.symbol("Part").bodies[0].pins[0]
         self.assertEqual(pin.electrical_type, "input")
@@ -475,7 +449,7 @@ class PinEditTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.delete_pin("Part", 1, 1, "1")
+        library.symbol("Part").body(1, 1).pin("1").delete()
         expected = original.replace(
             b"      (pin passive line (at 0 0 0) (length 1)\n"
             b'        (name "A") (number "1"))\n',
@@ -499,13 +473,15 @@ class PinEditTests(unittest.TestCase):
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(KeyError):
-            library.add_pin("Child", 1, 1, "2", "OUT", "output", x=0.0, y=0.0)
+            library.symbol("Child").body(1, 1).add_pin(
+                "2", "OUT", "output", x=0.0, y=0.0
+            )
         with self.assertRaises(KeyError):
-            library.set_pin("Root", 9, 9, "1", name="X")
+            library.symbol("Root").body(9, 9).pin("1").set(name="X")
         with self.assertRaises(KeyError):
-            library.delete_pin("Root", 1, 1, "99")
+            library.symbol("Root").body(1, 1).pin("99").delete()
         self.assertEqual(library.to_bytes(), original)
-        library.set_pin("Root", 1, 1, "1", name="IN1")
+        library.symbol("Root").body(1, 1).pin("1").set(name="IN1")
         self.assertEqual(library.symbol("Child").attributes[0].value, "child")
         self.assertEqual(library.resolve("Child").bodies[0].pins[0].name, "IN1")
 
@@ -558,13 +534,15 @@ class PinEditTests(unittest.TestCase):
                 library = SymbolLibrary.open(self.path)
                 with self.assertRaises(error):
                     if action == "add":
-                        library.add_pin(
-                            symbol, unit, style, number, "X", "passive", x=0.0, y=0.0
+                        library.symbol(symbol).body(unit, style).add_pin(
+                            number, "X", "passive", x=0.0, y=0.0
                         )
                     elif action == "set":
-                        library.set_pin(symbol, unit, style, number, name="Z")
+                        library.symbol(symbol).body(unit, style).pin(number).set(
+                            name="Z"
+                        )
                     else:
-                        library.delete_pin(symbol, unit, style, number)
+                        library.symbol(symbol).body(unit, style).pin(number).delete()
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
 
@@ -577,11 +555,11 @@ class PinEditTests(unittest.TestCase):
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(UnsupportedOperationError):
-            library.add_pin("A", 1, 1, "2", "B", "passive", x=0.0, y=0.0)
+            library.symbol("A").body(1, 1).add_pin("2", "B", "passive", x=0.0, y=0.0)
         with self.assertRaises(UnsupportedOperationError):
-            library.set_pin("A", 1, 1, "1", name="Z")
+            library.symbol("A").body(1, 1).pin("1").set(name="Z")
         with self.assertRaises(UnsupportedOperationError):
-            library.delete_pin("A", 1, 1, "1")
+            library.symbol("A").body(1, 1).pin("1").delete()
         self.assertEqual(library.to_bytes(), original)
 
         current = (
@@ -592,13 +570,15 @@ class PinEditTests(unittest.TestCase):
         self.path.write_bytes(current)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(ValueError):
-            library.add_pin("A", 1, 1, "", "B", "passive", x=0.0, y=0.0)
+            library.symbol("A").body(1, 1).add_pin("", "B", "passive", x=0.0, y=0.0)
         with self.assertRaises(ValueError):
-            library.add_pin("A", 1, 1, "2", "B", "not a type", x=0.0, y=0.0)
+            library.symbol("A").body(1, 1).add_pin("2", "B", "not a type", x=0.0, y=0.0)
         with self.assertRaises(ValueError):
-            library.add_pin("A", 1, 1, "2", "B", "passive", x=float("nan"), y=0.0)
+            library.symbol("A").body(1, 1).add_pin(
+                "2", "B", "passive", x=float("nan"), y=0.0
+            )
         with self.assertRaises((ValueError, TypeError)):
-            library.set_pin("A", 1, 1, "1", name="\x00")
+            library.symbol("A").body(1, 1).pin("1").set(name="\x00")
         self.assertEqual(library.to_bytes(), current)
 
 
@@ -621,11 +601,15 @@ class GraphicsAnchorTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.ensure_body("Part", 0, 1)
-        library.add_rectangle("Part", 0, 1, start=(-2.54, 2.54), end=(2.54, -2.54))
-        library.add_body_text("Part", 0, 1, "SHARED", x=0.0, y=3.0)
+        library.symbol("Part").ensure_body(0, 1)
+        library.symbol("Part").body(0, 1).add_rectangle(
+            start=(-2.54, 2.54), end=(2.54, -2.54)
+        )
+        library.symbol("Part").body(0, 1).add_text("SHARED", x=0.0, y=3.0)
         # Pin placement stays on the unit body (not copied into unit 0).
-        library.add_pin("Part", 1, 1, "2", "B", "input", x=5.08, y=0.0, rotation=180.0)
+        library.symbol("Part").body(1, 1).add_pin(
+            "2", "B", "input", x=5.08, y=0.0, rotation=180.0
+        )
         part = library.symbol("Part")
         unit0 = part.body(0, 1)
         unit1 = part.body(1, 1)
@@ -640,7 +624,7 @@ class GraphicsAnchorTests(unittest.TestCase):
         rendered = library.to_bytes()
         self.assertIn(b'(text "SHARED"', rendered)
         self.assertEqual(rendered.count(b"SHARED"), 1)
-        library.ensure_body("Part", 0, 1)  # no-op
+        library.symbol("Part").ensure_body(0, 1)  # no-op
         self.assertEqual(len(library.symbol("Part").bodies), 2)
 
     def test_ensure_body_and_graphics_reject_readonly(self) -> None:
@@ -650,11 +634,13 @@ class GraphicsAnchorTests(unittest.TestCase):
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(UnsupportedOperationError):
-            library.ensure_body("A", 0, 1)
+            library.symbol("A").ensure_body(0, 1)
         with self.assertRaises(UnsupportedOperationError):
-            library.add_rectangle("A", 1, 1, start=(0.0, 0.0), end=(1.0, 1.0))
+            library.symbol("A").body(1, 1).add_rectangle(
+                start=(0.0, 0.0), end=(1.0, 1.0)
+            )
         with self.assertRaises(UnsupportedOperationError):
-            library.add_body_text("A", 1, 1, "X", x=0.0, y=0.0)
+            library.symbol("A").body(1, 1).add_text("X", x=0.0, y=0.0)
         self.assertEqual(library.to_bytes(), original)
 
     def test_export_svgs_uses_in_memory_bytes_and_cli(self) -> None:
@@ -670,8 +656,8 @@ class GraphicsAnchorTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.ensure_body("A", 0, 1)
-        library.add_rectangle("A", 0, 1, start=(0.0, 1.0), end=(1.0, 0.0))
+        library.symbol("A").ensure_body(0, 1)
+        library.symbol("A").body(0, 1).add_rectangle(start=(0.0, 1.0), end=(1.0, 0.0))
         out = Path(self.temp.name) / "svg-out"
         fake_cli = Path(self.temp.name) / "fake-kicad-cli"
         fake_cli.write_text("#!/bin/sh\nexit 0\n")

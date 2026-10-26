@@ -30,7 +30,7 @@ class PersistenceTests(unittest.TestCase):
                 self.path.write_bytes(ORIGINAL)
                 library = SymbolLibrary.open(self.path)
                 if edit:
-                    library.set_attribute("A", "Note", "mine")
+                    library.symbol("A").set_attribute("Note", "mine")
                 foreign = ORIGINAL.replace(b'"old"', b'"someone else"')
                 self.path.write_bytes(foreign)
                 with self.assertRaises(FileConflictError):
@@ -39,18 +39,18 @@ class PersistenceTests(unittest.TestCase):
 
     def test_mode_is_preserved_and_baseline_updates_after_save(self) -> None:
         self.path.chmod(0o640)
-        self.library.set_attribute("A", "Note", "one")
+        self.library.symbol("A").set_attribute("Note", "one")
         self.library.save()
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         first = self.path.read_bytes()
         self.library.save()
         self.assertEqual(self.path.read_bytes(), first)
-        self.library.set_attribute("A", "Note", "two")
+        self.library.symbol("A").set_attribute("Note", "two")
         self.library.save()
         self.assertEqual(self.path.read_bytes(), ORIGINAL.replace(b'"old"', b'"two"'))
 
     def test_replacement_failure_preserves_original_and_can_retry(self) -> None:
-        self.library.set_attribute("A", "Note", "new")
+        self.library.symbol("A").set_attribute("Note", "new")
         with (
             patch(
                 "kicad_primitives._symbol_persist.os.replace",
@@ -65,7 +65,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), ORIGINAL.replace(b'"old"', b'"new"'))
 
     def test_flush_failure_does_not_truncate_source_or_leave_temp_file(self) -> None:
-        self.library.set_attribute("A", "Note", "new")
+        self.library.symbol("A").set_attribute("Note", "new")
         with (
             patch(
                 "kicad_primitives._symbol_persist.os.fsync",
@@ -78,7 +78,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
     def test_deleted_file_is_a_conflict_not_implicit_recreation(self) -> None:
-        self.library.set_attribute("A", "Note", "new")
+        self.library.symbol("A").set_attribute("Note", "new")
         self.path.unlink()
         with self.assertRaises(FileConflictError):
             self.library.save()
@@ -94,7 +94,7 @@ class PersistenceTests(unittest.TestCase):
                     os.link(self.path, link)
                 try:
                     library = SymbolLibrary.open(link)
-                    library.set_attribute("A", "Note", "new")
+                    library.symbol("A").set_attribute("Note", "new")
                     with self.assertRaises(UnsupportedOperationError):
                         library.save()
                     self.assertEqual(self.path.read_bytes(), ORIGINAL)
@@ -105,7 +105,7 @@ class PersistenceTests(unittest.TestCase):
     def test_readonly_permissions_are_not_bypassed_with_directory_replace(self) -> None:
         self.path.chmod(0o444)
         self.addCleanup(self.path.chmod, 0o644)
-        self.library.set_attribute("A", "Note", "new")
+        self.library.symbol("A").set_attribute("Note", "new")
         with self.assertRaises(PermissionError):
             self.library.save()
         self.assertEqual(self.path.read_bytes(), ORIGINAL)

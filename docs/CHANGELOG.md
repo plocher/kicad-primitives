@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Expose stable source-backed Symbol, SymbolBody, and SymbolPin objects. Move declared attribute upsert, body/pin edits, and graphics insertion onto those nouns without library-command aliases. Preserve authoring, inheritance inspection, source-local edits, and deleted-handle rejection (`docs/symbol-libraries.md`; #54).
+
 - Fix public table resolution to replay repeated includes in order and detect cycles only on the active branch. Resolve relative includes and leaves from the project directory or a captured standalone base. Share URI resolution with native ERC projection without losing raw registration metadata (`docs/tables.md`; #52).
 
 - Require proof of all requested native ERC severities. Replay repeated nested-table includes in order, and anchor relative include/leaf URIs to the original project's explicit native working directory. Preserve strict cycle and acquisition failures (#40).

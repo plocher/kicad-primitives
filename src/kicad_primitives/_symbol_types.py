@@ -57,7 +57,7 @@ class SymbolAttribute:
 
 
 @dataclass(frozen=True)
-class SymbolPin:
+class PinDefinition:
     """One pin within its containing body's unit and body style."""
 
     number: str
@@ -92,18 +92,18 @@ class SymbolText:
 
 
 @dataclass(frozen=True)
-class SymbolBody:
+class BodyDefinition:
     """A declared body; zero unit/style means common, not an extra placed unit."""
 
     name: str
     unit: int
     body_style: int
-    pins: tuple[SymbolPin, ...]
+    pins: tuple[PinDefinition, ...]
     origin_symbol: str
     rectangles: tuple[SymbolRectangle, ...] = ()
     texts: tuple[SymbolText, ...] = ()
 
-    def pin(self, number: str) -> SymbolPin:
+    def pin(self, number: str) -> PinDefinition:
         """Get one pin by number within this body; raise if missing or ambiguous."""
         matches = tuple(p for p in self.pins if p.number == number)
         if not matches:
@@ -114,13 +114,13 @@ class SymbolBody:
 
 
 @dataclass(frozen=True)
-class Symbol:
-    """Immutable declared or effective snapshot; graphics remain opaque source."""
+class SymbolDefinition:
+    """Immutable definition values for read-only inheritance inspection."""
 
     name: str
     extends: str | None
     attributes: tuple[SymbolAttribute, ...]
-    bodies: tuple[SymbolBody, ...]
+    bodies: tuple[BodyDefinition, ...]
     units_locked: bool = False
     resolved: bool = False
 
@@ -135,7 +135,7 @@ class Symbol:
             raise AmbiguousAttributeError(f"{self.name}: ambiguous attribute {name!r}")
         return matches[0]
 
-    def body(self, unit: int, body_style: int) -> SymbolBody:
+    def body(self, unit: int, body_style: int) -> BodyDefinition:
         """Get one body by unit and body-style identity; raise if missing."""
         matches = tuple(
             b for b in self.bodies if b.unit == unit and b.body_style == body_style

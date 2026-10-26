@@ -77,6 +77,51 @@ def _upgrade(cli: Path, path: Path) -> tuple[bool, bool]:
     return first == original, path.read_bytes() == first
 
 
+def _declared_semantics(
+    library: SymbolLibrary, replacement: tuple[str, str, str] | None = None
+) -> tuple[object, ...]:
+    """Capture declared public values without treating live handles as snapshots."""
+    return tuple(
+        (
+            s.name,
+            s.extends,
+            s.units_locked,
+            tuple(
+                replace(p, value=replacement[2])
+                if replacement is not None and (s.name, p.name) == replacement[:2]
+                else p
+                for p in s.attributes
+            ),
+            tuple(
+                (
+                    b.name,
+                    b.unit,
+                    b.body_style,
+                    b.origin_symbol,
+                    b.rectangles,
+                    b.texts,
+                    tuple(
+                        (
+                            p.number,
+                            p.name,
+                            p.electrical_type,
+                            p.x,
+                            p.y,
+                            p.rotation,
+                            p.length,
+                            p.shape,
+                            p.hidden,
+                        )
+                        for p in b.pins
+                    ),
+                )
+                for b in s.bodies
+            ),
+        )
+        for s in library.symbols
+    )
+
+
 def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
     original = path.read_bytes()
     digest = sha256(original).hexdigest()
@@ -118,22 +163,15 @@ def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
         edited_path.write_bytes(original)
         edited = SymbolLibrary.open(edited_path)
         old = edited.symbol(name).attribute(key).value
-        edited.set_attribute(name, key, old + " [first edit]")
+        edited.symbol(name).set_attribute(key, old + " [first edit]")
         value = (old + " " if old else "") + '[slice proof: "quoted" café \\ path]'
-        edited.set_attribute(name, key, value)
+        edited.symbol(name).set_attribute(key, value)
         changed = edited.to_bytes()
         assert _only_delta(original, changed, old, value), "Unexpected source delta"
-        expected_symbols = tuple(
-            replace(
-                s,
-                attributes=tuple(
-                    replace(p, value=value) if s.name == name and p.name == key else p
-                    for p in s.attributes
-                ),
-            )
-            for s in library.symbols
+        expected_symbols = _declared_semantics(library, (name, key, value))
+        assert _declared_semantics(edited) == expected_symbols, (
+            "Unexpected declared semantic delta"
         )
-        assert edited.symbols == expected_symbols, "Unexpected declared semantic delta"
         assert edited_path.read_bytes() == original, "Editing implicitly wrote to disk"
         edited.save()
         assert edited_path.read_bytes() == changed, "Save changed preview bytes"

@@ -3,11 +3,12 @@
 ## Scope
 
 [ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) sets the package-wide artifact-object editing direction.
-This page describes the current implementation, which still edits through library commands over immutable symbol snapshots.
-Its update-only `set_attribute` is an alignment gap, not the final setter contract.
+The library owns live editable Symbol, SymbolBody, and SymbolPin objects.
+Edits change pending source. Only an explicit `save()` writes that source.
 
 `kicad_primitives.symbols.SymbolLibrary` opens one explicit `.kicad_sym` path.
-It does not discover libraries, open a project, edit schematic caches, or invoke KiCad.
+It does not discover libraries, open a project, or edit schematic caches.
+The optional SVG export invokes KiCad on a temporary copy.
 The package remains pre-alpha (`0.0.0` informational). This is not the whole functional TOC.
 Released donor dependencies wait for `1.0.0` on public PyPI ([ADR 0005](adr/0005-distribution-and-versioning.md)).
 
@@ -39,9 +40,12 @@ for body in effective.bodies:
 ```
 
 `SymbolAttribute` holds one named value and its declaration provenance.
-Symbols, attributes, bodies, pins, rectangles, and body texts are immutable dataclass snapshots.
+Symbol, SymbolBody, and SymbolPin are stable source-backed handles.
+Attributes, rectangles, and body texts are immutable inspection values.
 KiCad stores attributes in `(property …)` nodes.
-Query again after editing; previous snapshots do not become live handles.
+A live handle shows current values after edits and symbol renames.
+A deleted symbol or pin handle raises `StaleSymbolError`, even after recreation under the same name or number.
+The read-only `SymbolDefinition` from `resolve()` is an immutable inheritance view, not an editing target.
 Stroke/fill, fonts, unrelated metadata, and unrecognized nodes remain in the source without a public parser escape hatch.
 The service exposes attribute visibility/autoplace/position, pin position/orientation/length/shape/hidden state, and minimal rectangle/text geometry—not a full graphics or text-effects model.
 
@@ -69,19 +73,19 @@ Work on a disposable copy while trying the recipe.
 from kicad_primitives.symbols import SymbolLibrary
 
 library = SymbolLibrary.open("Example.kicad_sym")
-library.set_attribute("Part", "Description", 'Updated description with "quotes"')
-assert library.symbol("Part").attribute("Description").value == 'Updated description with "quotes"'
-library.add_attribute("Part", "Role", "DEVICE")
-library.add_attribute("Part", "KLC_S3.3", "reason", private=True)
-library.delete_attribute("Part", "Role")
-library.add_pin(
-    "Part", 1, 1, "2", "OUT", "output", x=5.08, y=0.0, rotation=180.0, length=2.54
-)
-library.set_pin("Part", 1, 1, "2", name="Y", hidden=True)
-library.delete_pin("Part", 1, 1, "2")
-library.ensure_body("Part", 0, 1)  # shared unit-0 body; do not copy into every unit
-library.add_rectangle("Part", 0, 1, start=(-2.54, 2.54), end=(2.54, -2.54))
-library.add_body_text("Part", 0, 1, "LABEL", x=0.0, y=3.81)
+part = library.symbol("Part")
+part.set_attribute("Description", 'Updated description with "quotes"')
+assert part.attribute("Description").value == 'Updated description with "quotes"'
+part.set_attribute("Role", "DEVICE")
+part.add_attribute("KLC_S3.3", "reason", private=True)
+part.delete_attribute("Role")
+body = part.body(1, 1)
+pin = body.add_pin("2", "OUT", "output", x=5.08, y=0.0, rotation=180.0, length=2.54)
+pin.set(name="Y", hidden=True)
+pin.delete()
+shared = part.ensure_body(0, 1)  # shared body, not artwork copied into every unit
+shared.add_rectangle(start=(-2.54, 2.54), end=(2.54, -2.54))
+shared.add_text("LABEL", x=0.0, y=3.81)
 library.export_svgs("/tmp/symbol-svgs")  # kicad-cli inspection hook; optional kicad_cli=
 library.create_symbol("Empty")
 library.create_symbol("Child", extends="Part")
@@ -94,23 +98,24 @@ preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
 ```
 
-`set_attribute` changes one existing declared value token.
+`Symbol.set_attribute(name, value)` creates a missing declared attribute, updates a different value, or preserves equal-value bytes exactly.
 `add_attribute` inserts a new declared attribute after the last attribute (or after `extends`/name when none exist).
 Optional `private=True` writes the KiCad private modifier.
 Inserted nodes use a minimal `(at 0 0 0)` body and match the symbol's newline and indent style when the definition is multi-line; compact single-line symbols stay single-line.
 `delete_attribute` removes one unambiguous declared attribute and its leading separator.
 
-`add_pin` / `set_pin` / `delete_pin` target one existing body by `(unit, body_style)` and pin number.
+`Symbol.body(unit, body_style)` selects a declared body.
+`SymbolBody.add_pin` creates a pin there. `SymbolBody.pin(number)` selects a live pin for `set()` or `delete()`.
 They do not create bodies, collapse alternate body styles, or edit a parent.
 `add_pin` requires coordinates (`x`, `y`); optional `rotation` (default `0`), `length` (default `2.54`), `shape` (default `"line"`), and `hidden`.
-`set_pin` updates only the fields you pass; equal values are a lexical no-op.
+`SymbolPin.set()` updates only the fields you pass. Equal values are a lexical no-op.
 Pin electrical type and shape must be single sexpr tokens (no spaces).
 Duplicate pin numbers on the same body fail on insert; ambiguous numbers fail on edit/delete.
 
 Graphics **B anchors** (not full artwork-editor parity):
 `ensure_body` creates an empty `(unit, body_style)` body when missing (no-op when present).
 Prefer **unit 0** for shared boxes/text instead of copying the same artwork into every placed unit.
-`add_rectangle` / `add_body_text` insert minimal geometry/text on an existing body.
+`SymbolBody.add_rectangle` and `add_text` insert minimal geometry and text on that body.
 `export_svgs` writes SVG via private `kicad-cli` discovery (explicit path, `KICAD_CLI`, platform defaults, `PATH`); it exports current in-memory bytes through a temp file. It is an inspection hook for contact-sheet style checks, not an HTML product.
 
 Private modifiers, placement/effects on untouched attributes, other definitions, newline spelling, and unrelated bytes survive unchanged.
@@ -118,7 +123,8 @@ Setting an already equal value is a lexical no-op, even if its source escape spe
 Each changed edit reparses before further queries/edits; callers never manage spans.
 Edits are all-or-nothing in memory, not a public multi-edit transaction.
 
-`set_attribute` does not insert a missing attribute; use `add_attribute`.
+`set_attribute` always targets this symbol's declaration, including when a parent provides an inherited value.
+Use `add_attribute` for create-only behavior or a private modifier.
 `add_attribute` fails when the identity already exists (including mandatory case-insensitive clashes).
 No parent is edited implicitly. Deleting a local override leaves any inherited effective value visible through `resolve()`.
 Same-library create/rename/delete/copy are supported; rename rewrites body names and in-library `extends`.
@@ -166,10 +172,11 @@ Do not save concurrently with KiCad's symbol editor or another writer.
 
 Errors exported from `kicad_primitives.symbols`:
 - `InvalidLibraryError`: invalid syntax or required structure.
-- `UnsupportedOperationError`: unsupported format/operation, absent declared `set_attribute` target, duplicate `add_attribute` / `add_pin` identity, or unsafe replacement target.
+- `UnsupportedOperationError`: unsupported format/operation, duplicate `add_attribute` / `add_pin` identity, or unsafe replacement target.
 - `AmbiguousSymbolError` / `AmbiguousAttributeError` / `AmbiguousPinError`: non-unique identity.
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
+- `StaleSymbolError`: an editable symbol, body, or pin no longer belongs to live source.
 - `KicadCliNotFoundError`: `export_svgs` could not resolve `kicad-cli`.
 - `SymbolLibraryError`: shared base for the package errors.
 

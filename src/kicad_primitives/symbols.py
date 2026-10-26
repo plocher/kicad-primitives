@@ -1,5 +1,7 @@
 """Inspect and edit explicit-path symbol libraries; parsing stays private."""
 
+from __future__ import annotations
+
 import subprocess
 import tempfile
 from os import PathLike
@@ -7,6 +9,7 @@ from pathlib import Path
 
 from . import _symbol_parse, _symbol_persist
 from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
+from ._symbol_live import StaleSymbolError, Symbol, SymbolBody, SymbolPin
 from ._symbol_types import (
     AmbiguousAttributeError,
     AmbiguousPinError,
@@ -14,11 +17,9 @@ from ._symbol_types import (
     FileConflictError,
     InheritanceError,
     InvalidLibraryError,
-    Symbol,
     SymbolAttribute,
-    SymbolBody,
+    SymbolDefinition,
     SymbolLibraryError,
-    SymbolPin,
     SymbolRectangle,
     SymbolText,
     UnsupportedOperationError,
@@ -32,9 +33,11 @@ __all__ = [
     "InheritanceError",
     "InvalidLibraryError",
     "KicadCliNotFoundError",
+    "StaleSymbolError",
     "Symbol",
     "SymbolAttribute",
     "SymbolBody",
+    "SymbolDefinition",
     "SymbolLibrary",
     "SymbolLibraryError",
     "SymbolPin",
@@ -45,15 +48,44 @@ __all__ = [
 
 
 class SymbolLibrary:
-    """One library with immutable inspection snapshots and explicit persistence."""
+    """One source library with stable editable symbols and explicit persistence."""
 
     def __init__(self, path: Path, raw: bytes) -> None:
         self._path = path
         self._source = _symbol_parse.read_source(raw)
         self._baseline = raw
+        self._symbols = tuple(Symbol(self, data) for data in self._source.symbols)
+
+    def _accept_source(
+        self,
+        updated: _symbol_parse.ParsedLibrary,
+        *,
+        renamed: tuple[str, str] | None = None,
+    ) -> None:
+        if updated is self._source:
+            return
+        old = list(self._symbols)
+        handles: list[Symbol] = []
+        for data in updated.symbols:
+            name = (
+                renamed[0]
+                if renamed is not None and data.name == renamed[1]
+                else data.name
+            )
+            handle = next((s for s in old if s._data.name == name), None)
+            if handle is None:
+                handle = Symbol(self, data)
+            else:
+                old.remove(handle)
+                handle._refresh(data)
+            handles.append(handle)
+        for handle in old:
+            handle._alive = False
+        self._source = updated
+        self._symbols = tuple(handles)
 
     @classmethod
-    def open(cls, path: str | PathLike[str]) -> "SymbolLibrary":
+    def open(cls, path: str | PathLike[str]) -> SymbolLibrary:
         """Read a library at an explicit path; no discovery or project is needed."""
         location = Path(path).absolute()
         return cls(location, location.read_bytes())
@@ -66,13 +98,14 @@ class SymbolLibrary:
     @property
     def symbols(self) -> tuple[Symbol, ...]:
         """Declared definitions in file order; repeated names are not discarded."""
-        return self._source.symbols
+        return self._symbols
 
     def symbol(self, name: str) -> Symbol:
-        """Inspect one declared snapshot; raise on missing or ambiguous identity."""
-        return self._source.symbol(name)
+        """Select one live declared symbol; reject missing or ambiguous identity."""
+        data = self._source.symbol(name)
+        return self._symbols[self._source.symbols.index(data)]
 
-    def resolve(self, name: str) -> Symbol:
+    def resolve(self, name: str) -> SymbolDefinition:
         """Inspect effective inheritance, retaining declaration provenance."""
         return _symbol_parse.resolve(self._source, name)
 
@@ -80,154 +113,15 @@ class SymbolLibrary:
         """Preview current source bytes, including all opaque untouched content."""
         return self._source.document.render().encode("utf-8")
 
-    def set_attribute(self, symbol_name: str, attribute_name: str, value: str) -> None:
-        """Update one existing declared value in memory, never a parent implicitly.
-
-        Missing attributes, ambiguous targets and read-only formats fail without
-        changing either memory or disk. Query again for a fresh snapshot.
-        """
-        updated = _symbol_parse.replace_attribute(
-            self._source, symbol_name, attribute_name, value
-        )
-        self._source = updated
-
-    def add_attribute(
-        self,
-        symbol_name: str,
-        attribute_name: str,
-        value: str,
-        *,
-        private: bool = False,
-    ) -> None:
-        """Insert one new declared attribute on the selected symbol in memory.
-
-        Does not edit a parent or replace an existing identity. Ambiguous names,
-        empty names, invalid values, and read-only formats fail without changing
-        memory or disk. Query again for a fresh snapshot.
-        """
-        updated = _symbol_parse.insert_attribute(
-            self._source,
-            symbol_name,
-            attribute_name,
-            value,
-            private=private,
-        )
-        self._source = updated
-
-    def delete_attribute(self, symbol_name: str, attribute_name: str) -> None:
-        """Remove one unambiguous declared attribute from the selected symbol.
-
-        Does not edit a parent. Missing or ambiguous targets and read-only
-        formats fail without changing memory or disk. Query again for a fresh
-        snapshot.
-        """
-        updated = _symbol_parse.delete_attribute(
-            self._source, symbol_name, attribute_name
-        )
-        self._source = updated
-
-    def add_pin(
-        self,
-        symbol_name: str,
-        unit: int,
-        body_style: int,
-        number: str,
-        name: str,
-        electrical_type: str,
-        *,
-        x: float,
-        y: float,
-        rotation: float = 0.0,
-        length: float = 2.54,
-        shape: str = "line",
-        hidden: bool = False,
-    ) -> None:
-        """Insert one pin on an existing body without collapsing body styles.
-
-        Targets `(unit, body_style)` on the selected symbol only. Does not create
-        bodies or edit a parent. Duplicate pin numbers, missing bodies, invalid
-        values, and read-only formats fail without changing memory or disk.
-        """
-        updated = _symbol_parse.insert_pin(
-            self._source,
-            symbol_name,
-            unit,
-            body_style,
-            number,
-            name,
-            electrical_type,
-            x=x,
-            y=y,
-            rotation=rotation,
-            length=length,
-            shape=shape,
-            hidden=hidden,
-        )
-        self._source = updated
-
-    def set_pin(
-        self,
-        symbol_name: str,
-        unit: int,
-        body_style: int,
-        number: str,
-        *,
-        name: str | None = None,
-        electrical_type: str | None = None,
-        x: float | None = None,
-        y: float | None = None,
-        rotation: float | None = None,
-        length: float | None = None,
-        shape: str | None = None,
-        hidden: bool | None = None,
-    ) -> None:
-        """Update selected fields of one existing pin on a body.
-
-        Unspecified fields stay unchanged. Missing or ambiguous targets and
-        read-only formats fail without changing memory or disk. Equal values are
-        a lexical no-op. Query again for a fresh snapshot.
-        """
-        updated = _symbol_parse.replace_pin(
-            self._source,
-            symbol_name,
-            unit,
-            body_style,
-            number,
-            name=name,
-            electrical_type=electrical_type,
-            x=x,
-            y=y,
-            rotation=rotation,
-            length=length,
-            shape=shape,
-            hidden=hidden,
-        )
-        self._source = updated
-
-    def delete_pin(
-        self,
-        symbol_name: str,
-        unit: int,
-        body_style: int,
-        number: str,
-    ) -> None:
-        """Remove one unambiguous pin from an existing body.
-
-        Does not edit a parent or other body styles. Missing or ambiguous
-        targets and read-only formats fail without changing memory or disk.
-        """
-        updated = _symbol_parse.delete_pin(
-            self._source, symbol_name, unit, body_style, number
-        )
-        self._source = updated
-
     def create_symbol(self, name: str, *, extends: str | None = None) -> None:
         """Insert a new empty top-level symbol in this library.
 
         Optional ``extends`` must name an existing symbol in the same library.
         Duplicate names and read-only formats fail without changing memory or disk.
         """
-        self._source = _symbol_parse.create_symbol(self._source, name, extends=extends)
+        self._accept_source(
+            _symbol_parse.create_symbol(self._source, name, extends=extends)
+        )
 
     def rename_symbol(self, old_name: str, new_name: str) -> None:
         """Rename one symbol, rewrite body names, and update in-library extends.
@@ -235,7 +129,8 @@ class SymbolLibrary:
         Equal names are a no-op. Missing/duplicate targets and read-only formats
         fail without changing memory or disk.
         """
-        self._source = _symbol_parse.rename_symbol(self._source, old_name, new_name)
+        updated = _symbol_parse.rename_symbol(self._source, old_name, new_name)
+        self._accept_source(updated, renamed=(old_name, new_name))
 
     def delete_symbol(self, name: str) -> None:
         """Remove one top-level symbol from this library.
@@ -243,7 +138,7 @@ class SymbolLibrary:
         Refuses when another symbol still extends it. Missing targets and
         read-only formats fail without changing memory or disk.
         """
-        self._source = _symbol_parse.delete_symbol(self._source, name)
+        self._accept_source(_symbol_parse.delete_symbol(self._source, name))
 
     def copy_symbol(self, source_name: str, new_name: str) -> None:
         """Duplicate one symbol inside this library under a new name.
@@ -251,11 +146,13 @@ class SymbolLibrary:
         Preserves attributes, bodies, and extends. For a second library use
         :meth:`copy_symbol_from`.
         """
-        self._source = _symbol_parse.copy_symbol(self._source, source_name, new_name)
+        self._accept_source(
+            _symbol_parse.copy_symbol(self._source, source_name, new_name)
+        )
 
     def copy_symbol_from(
         self,
-        source_library: "SymbolLibrary",
+        source_library: SymbolLibrary,
         source_name: str,
         new_name: str,
     ) -> None:
@@ -269,77 +166,13 @@ class SymbolLibrary:
         :class:`~kicad_primitives.tables.LibraryTables`); this method does not
         open tables itself.
         """
-        self._source = _symbol_parse.copy_symbol_from(
+        updated = _symbol_parse.copy_symbol_from(
             self._source,
             source_library._source,
             source_name,
             new_name,
         )
-
-    def ensure_body(self, symbol_name: str, unit: int, body_style: int) -> None:
-        """Create an empty body when missing; no-op when already present.
-
-        Prefer unit ``0`` for shared graphics instead of copying artwork into
-        every placed unit. Does not edit a parent. Read-only formats fail
-        without changing memory or disk.
-        """
-        self._source = _symbol_parse.ensure_body(
-            self._source, symbol_name, unit, body_style
-        )
-
-    def add_rectangle(
-        self,
-        symbol_name: str,
-        unit: int,
-        body_style: int,
-        *,
-        start: tuple[float, float],
-        end: tuple[float, float],
-    ) -> None:
-        """Insert a minimal rectangle on an existing body.
-
-        Stroke/fill stay out of scope. Missing bodies and read-only formats fail
-        without changing memory or disk. Put shared boxes on unit ``0``.
-        """
-        start_x, start_y = start
-        end_x, end_y = end
-        self._source = _symbol_parse.insert_rectangle(
-            self._source,
-            symbol_name,
-            unit,
-            body_style,
-            start_x=start_x,
-            start_y=start_y,
-            end_x=end_x,
-            end_y=end_y,
-        )
-
-    def add_body_text(
-        self,
-        symbol_name: str,
-        unit: int,
-        body_style: int,
-        text: str,
-        *,
-        x: float,
-        y: float,
-        rotation: float = 0.0,
-    ) -> None:
-        """Insert minimal body text on an existing body.
-
-        Full text-effects authoring is out of scope. Missing bodies and
-        read-only formats fail without changing memory or disk.
-        """
-        self._source = _symbol_parse.insert_body_text(
-            self._source,
-            symbol_name,
-            unit,
-            body_style,
-            text,
-            x=x,
-            y=y,
-            rotation=rotation,
-        )
+        self._accept_source(updated)
 
     def export_svgs(
         self,

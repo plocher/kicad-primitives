@@ -6,7 +6,7 @@ Only library behavior is ported; HTML and Railroad policy remain in the donor.
 """
 
 import unittest
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError
 from inspect import signature
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -37,15 +37,19 @@ class AttributeApiTests(unittest.TestCase):
                 self.assertFalse(hasattr(module, obsolete))
         for model in (symbols.Symbol, schematics.PlacedSymbol):
             with self.subTest(model=model.__name__):
-                self.assertIn("attributes", {field.name for field in fields(model)})
-                self.assertNotIn("properties", {field.name for field in fields(model)})
+                self.assertTrue(
+                    hasattr(model, "attributes")
+                    or "attributes" in model.__annotations__
+                )
+                self.assertFalse(hasattr(model, "properties"))
                 self.assertTrue(callable(model.attribute))
                 self.assertFalse(hasattr(model, "property"))
         for action in ("set", "add", "delete"):
             with self.subTest(action=action):
-                method = getattr(SymbolLibrary, f"{action}_attribute")
-                self.assertIn("attribute_name", signature(method).parameters)
+                method = getattr(symbols.Symbol, f"{action}_attribute")
+                self.assertIn("name", signature(method).parameters)
                 self.assertNotIn("property_name", signature(method).parameters)
+                self.assertFalse(hasattr(SymbolLibrary, f"{action}_attribute"))
                 self.assertFalse(hasattr(SymbolLibrary, f"{action}_property"))
 
 
@@ -80,7 +84,7 @@ class DonorInspectionTests(unittest.TestCase):
                     pins,
                 )
         with self.assertRaises(UnsupportedOperationError):
-            library.set_attribute("IRJ", "Reference", "X")
+            library.symbol("IRJ").set_attribute("Reference", "X")
         with self.assertRaises(UnsupportedOperationError):
             library.save()
 
