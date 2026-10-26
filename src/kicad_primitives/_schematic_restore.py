@@ -324,6 +324,11 @@ def _export_pins(pins: tuple[_PinFact, ...]) -> tuple[tuple[str, str, str], ...]
 
 
 def _check_placements(schematic: Schematic, intent: _RestoreIntent) -> tuple[str, ...]:
+    qualified = intent.lib_id.rsplit(":", 1)
+    if len(qualified) != 2 or not all(qualified):
+        raise UnsupportedSchematicOperationError(
+            "Type proof requires qualified cache identity"
+        )
     matches = tuple(s for s in schematic.symbols if s.lib_id == intent.lib_id)
     if not matches or len({s.reference for s in matches}) != len(matches):
         raise UnsupportedSchematicOperationError(
@@ -334,6 +339,7 @@ def _check_placements(schematic: Schematic, intent: _RestoreIntent) -> tuple[str
     for symbol in matches:
         if (
             symbol.unit != 1
+            or sum(s.reference == symbol.reference for s in schematic.symbols) != 1
             or not symbol.on_board
             or not symbol.in_bom
             or symbol.dnp

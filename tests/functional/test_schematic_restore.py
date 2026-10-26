@@ -256,6 +256,24 @@ class EmbeddedRestoreTests(unittest.TestCase):
         with self.assertRaises(UnsupportedSchematicOperationError):
             old.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
+
+    def test_cross_cache_placement_identity_ambiguity_is_nonmutating(self) -> None:
+        for old, ambiguous in (
+            ('"Reference" "C1"', '"Reference" "R1"'),
+            ('(uuid "unrelated")', '(uuid "first")'),
+        ):
+            with self.subTest(identity=ambiguous):
+                source = SOURCE.replace(old, ambiguous, 1).encode()
+                self.path.write_bytes(source)
+                project = Project.open(self.directory)
+                schematic = project.schematic()
+                with self.assertRaises(UnsupportedSchematicOperationError):
+                    schematic.embedded_symbol("Test:Part").restore_from(
+                        self.parent, "Parent"
+                    )
+                self.assertEqual(schematic.to_bytes(), source)
+                self.assertEqual(self.path.read_bytes(), source)
+                self.assertFalse(project.is_modified)
         with self.assertRaises(KeyError):
             self.schematic.embedded_symbol("Missing:Part")
         with self.assertRaises(KeyError):
@@ -295,6 +313,19 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         )
         cli.chmod(0o755)
         return cli
+
+    def test_unqualified_type_correction_fails_before_pending_source_changes(
+        self,
+    ) -> None:
+        source = SOURCE.replace("Test:Part", "Part").encode()
+        self.path.write_bytes(source)
+        project = Project.open(self.directory)
+        schematic = project.schematic()
+        with self.assertRaises(UnsupportedSchematicOperationError):
+            schematic.embedded_symbol("Part").restore_from(self.parent, "Parent")
+        self.assertEqual(schematic.to_bytes(), source)
+        self.assertEqual(self.path.read_bytes(), source)
+        self.assertFalse(project.is_modified)
 
     def test_exact_revert_clears_pending_restore_without_cli_or_replacement(
         self,
