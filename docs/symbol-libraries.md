@@ -2,6 +2,10 @@
 
 ## Scope
 
+[ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) sets the package-wide artifact-object editing direction.
+This page describes the current implementation, which still edits through library commands over immutable symbol snapshots.
+Its update-only `set_attribute` is an alignment gap, not the final setter contract.
+
 `kicad_primitives.symbols.SymbolLibrary` opens one explicit `.kicad_sym` path.
 It does not discover libraries, open a project, edit schematic caches, or invoke KiCad.
 The package remains pre-alpha (`0.0.0` informational). This is not the whole functional TOC.
