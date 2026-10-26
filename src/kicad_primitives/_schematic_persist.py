@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from lossless_sexpr import ListNode, ParseError, parse
 
 from . import _symbol_persist
+from ._schematic_restore import predict_restored_signature
 from .netlist import export_netlist
 from .schematics import (
     Schematic,
@@ -116,6 +117,7 @@ def _preflight(
 class _ElectricalSignature:
     components: tuple[tuple[str, str, str, str], ...]
     nets: tuple[tuple[str, tuple[tuple[str, str, str, str], ...]], ...]
+    libparts: tuple[tuple[str, str, tuple[tuple[str, str, str], ...]], ...] = ()
 
 
 def _required_list(node: ListNode, head: str) -> ListNode:
@@ -138,7 +140,9 @@ def _evidence_value(node: ListNode, head: str, *, optional: bool = False) -> str
     return value.value
 
 
-def _electrical_signature(path: Path) -> _ElectricalSignature:
+def _electrical_signature(
+    path: Path, *, include_libparts: bool = False
+) -> _ElectricalSignature:
     """Validate raw proof before any model can discard ambiguous occurrences."""
     try:
         document = parse(path.read_bytes().decode("utf-8"))
@@ -196,7 +200,35 @@ def _electrical_signature(path: Path) -> _ElectricalSignature:
                 )
             )
         named_nets.append((name, tuple(sorted(nodes))))
-    return _ElectricalSignature(tuple(sorted(identities)), tuple(sorted(named_nets)))
+    libparts: list[tuple[str, str, tuple[tuple[str, str, str], ...]]] = []
+    if include_libparts:
+        parts = _required_list(root, "libparts")
+        keys: set[tuple[str, str]] = set()
+        for part_node in parts.children()[1:]:
+            if not isinstance(part_node, ListNode) or part_node.head != "libpart":
+                raise SchematicVerificationError("Invalid library-part proof")
+            lib, name = (
+                _evidence_value(part_node, "lib"),
+                _evidence_value(part_node, "part"),
+            )
+            if (lib, name) in keys or not name:
+                raise SchematicVerificationError("Ambiguous library-part proof")
+            keys.add((lib, name))
+            pins: list[tuple[str, str, str]] = []
+            for pin_node in _required_list(part_node, "pins").children()[1:]:
+                if not isinstance(pin_node, ListNode) or pin_node.head != "pin":
+                    raise SchematicVerificationError("Invalid library pin proof")
+                number = _evidence_value(pin_node, "num")
+                electrical_type = _evidence_value(pin_node, "type")
+                if not number or not electrical_type:
+                    raise SchematicVerificationError("Incomplete library pin proof")
+                pins.append(
+                    (number, _evidence_value(pin_node, "name"), electrical_type)
+                )
+            libparts.append((lib, name, tuple(sorted(pins))))
+    return _ElectricalSignature(
+        tuple(sorted(identities)), tuple(sorted(named_nets)), tuple(sorted(libparts))
+    )
 
 
 def _verify(
@@ -222,7 +254,9 @@ def _verify(
         before_path = export_netlist(
             staged_root, stage / "before.net", kicad_cli=kicad_cli
         )
-        before = _electrical_signature(before_path)
+        include_libparts = any(document._restore_intents for document in changed)
+        before = _electrical_signature(before_path, include_libparts=include_libparts)
+        expected = predict_restored_signature(before, documents, changed)
         for document in changed:
             (stage / document.path.relative_to(project.directory)).write_bytes(
                 document.to_bytes()
@@ -230,11 +264,10 @@ def _verify(
         after_path = export_netlist(
             staged_root, stage / "after.net", kicad_cli=kicad_cli
         )
-        after = _electrical_signature(after_path)
-        if before != after:
+        after = _electrical_signature(after_path, include_libparts=include_libparts)
+        if expected != after:
             raise SchematicVerificationError(
-                "Pending attributes change named nets, pin memberships or component identity; "
-                "electrical edits are not supported by set_attribute"
+                "Pending content does not match the independently predicted electrical signature"
             )
 
 
@@ -268,3 +301,4 @@ def save_schematics(
             label="Schematic",
         )
         object.__setattr__(document, "_baseline", output)
+        document._restore_intents.clear()

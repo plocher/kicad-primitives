@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add stable `EmbeddedSymbol` objects and selected concrete `restore_from` in memory. Preserve placement source and unrelated cache definitions. Support bounded ordinary pin-type corrections with baseline-derived electrical predictions and full exported pin-inventory checks at explicit save. Inheritance, pin names, geometry, hidden/power edits, and ambiguous proof mappings fail explicitly (`docs/schematics.md`; #37).
+
 - Reject duplicate mandatory schematic attributes at intake. Validate raw electrical evidence without collapsing duplicate component references, and preflight all changed destination-directory permissions before replacing any source (#36).
 
 - Add source-backed `PlacedSymbol.set_attribute`: create, localized update, exact no-op, and explicit ambiguity/unsafe-edit failures. Project-owned document and symbol identity retain pending edits across accesses. Add `is_modified`, byte previews, and explicit same-location schematic/project saves with strict source/guard preflight and staged-hierarchy electrical verification. Document bounded lifecycle and staging limits (`docs/schematics.md`, `docs/projects.md`; #36).

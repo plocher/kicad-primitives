@@ -18,10 +18,14 @@ from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quot
 from ._symbol_types import _MANDATORY, _attribute_key
 
 if TYPE_CHECKING:
+    from ._schematic_restore import _RestoreIntent
     from .projects import Project
+    from .symbols import SymbolLibrary
 
 __all__ = [
+    "AmbiguousEmbeddedSymbolError",
     "AmbiguousPlacedSymbolError",
+    "EmbeddedSymbol",
     "GlobalLabel",
     "HierarchicalLabel",
     "InvalidSchematicError",
@@ -54,6 +58,10 @@ class AmbiguousPlacedSymbolError(SchematicError):
     """More than one placed symbol matches the requested reference."""
 
 
+class AmbiguousEmbeddedSymbolError(SchematicError):
+    """A cache container or embedded definition has ambiguous identity."""
+
+
 class UnsupportedSchematicOperationError(SchematicError):
     """The requested schematic operation cannot be performed safely."""
 
@@ -63,7 +71,7 @@ class SchematicConflictError(SchematicError):
 
 
 class SchematicVerificationError(SchematicError):
-    """Pending content could not be shown to preserve electrical connectivity."""
+    """Pending content did not satisfy its required electrical proof."""
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,25 @@ class PlacedSymbol:
                 f"Ambiguous attribute {name!r} on {self.reference!r}"
             )
         return matches[0]
+
+
+@dataclass(frozen=True, eq=False)
+class EmbeddedSymbol:
+    """One source-backed definition in a schematic's embedded symbol cache."""
+
+    lib_id: str
+    _owner: Schematic = field(repr=False, compare=False)
+
+    def restore_from(self, parent_library: SymbolLibrary, parent_name: str) -> None:
+        """Restore this concrete definition from captured parent source in memory.
+
+        Preserve placements and unrelated source. Ordinary visible pin-type
+        corrections require explicit-save electrical proof. Unsupported
+        inheritance or electrical changes fail before changing the schematic.
+        """
+        from ._schematic_restore import restore_definition
+
+        restore_definition(self._owner, self.lib_id, parent_library, parent_name)
 
 
 @dataclass(frozen=True)
@@ -232,6 +259,30 @@ class Schematic:
     _project: Project | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _embedded_handles: dict[str, EmbeddedSymbol] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    _restore_intents: dict[str, _RestoreIntent] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+
+    @property
+    def embedded_symbols(self) -> tuple[EmbeddedSymbol, ...]:
+        """Embedded definitions in source order, with stable object identity."""
+        from ._schematic_restore import cache_nodes
+
+        nodes = cache_nodes(self)
+        for lib_id in nodes:
+            if lib_id not in self._embedded_handles:
+                self._embedded_handles[lib_id] = EmbeddedSymbol(lib_id, self)
+        return tuple(self._embedded_handles[lib_id] for lib_id in nodes)
+
+    def embedded_symbol(self, lib_id: str) -> EmbeddedSymbol:
+        """Select one unambiguous embedded definition, or raise KeyError."""
+        for symbol in self.embedded_symbols:
+            if symbol.lib_id == lib_id:
+                return symbol
+        raise KeyError(lib_id)
 
     @property
     def is_modified(self) -> bool:
@@ -318,6 +369,9 @@ class Schematic:
             raise InvalidSchematicError(
                 "Edit did not establish the requested attribute"
             )
+        self._accept_document(updated)
+
+    def _accept_document(self, updated: Schematic) -> None:
         for old, new in zip(self.symbols, updated.symbols, strict=True):
             object.__setattr__(old, "attributes", new.attributes)
             object.__setattr__(old, "value", new.value)

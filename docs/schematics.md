@@ -1,4 +1,4 @@
-# Schematics: placed attributes, explicit saves, and geometry
+# Schematics: attributes, embedded restore, explicit saves, and geometry
 
 ## Vocabulary
 
@@ -20,7 +20,8 @@ The schematic owns their source and exposes pending changes, byte previews, and 
 project context (ADR 0002).
 They return owned `kicad_primitives.schematics.Schematic` documents: title block and
 **merged** placed symbols (attributes, identity, transform, unit, flags).
-Geometry and embedded definition edits remain unsupported.
+Selected concrete embedded definitions support source-backed restore.
+Geometry editing and general cache synchronization remain unsupported.
 
 ## Open via a project
 
@@ -100,6 +101,62 @@ Flags are not attributes. The setter rejects flag names such as `dnp` and `in_bo
 Power-symbol Value changes are electrical edits and fail explicitly.
 Other attributes can affect electrical names through substitutions. Save verification rejects such changes.
 
+## Restore one embedded definition
+
+```python
+from kicad_primitives.symbols import SymbolLibrary
+
+for definition in root.embedded_symbols:
+    print(definition.lib_id)
+
+embedded = root.embedded_symbol("Device:R")
+parent = SymbolLibrary.open("/path/to/Device.kicad_sym")
+embedded.restore_from(parent, "R")
+preview = root.to_bytes()
+# Later, when the client chooses:
+root.save()
+```
+
+Clients select the cache object and opened parent library.
+Existing [library tables and resolution](tables.md) can locate that library.
+The package does not select parents or run a cache-wide synchronization workflow.
+`embedded_symbols` follows source order and keeps stable `EmbeddedSymbol` handles.
+`embedded_symbol(lib_id)` raises `KeyError` for a missing identity.
+Missing or duplicate cache containers and duplicate cache identities fail explicitly.
+
+`restore_from(parent_library, parent_name)` captures the current concrete parent source.
+Later parent edits cannot change that pending restore.
+It replaces the whole selected definition, including supported graphics and default attributes.
+It adapts only the outer cache identity and the required nested body-name prefix.
+For cache `Lib:Part`, nested names use `Part_unit_style`, not `Lib:Part_unit_style`.
+Other parent source stays exact, including opaque payloads and quoted multiline strings.
+The implementation does not reindent or serialize the parent.
+Source outside the selected definition stays byte-identical.
+All placed symbols, attributes, flags, UUIDs, instances, and unrelated definitions remain unchanged.
+Reparsing keeps existing placed and embedded handles valid.
+Exact materialized equality and repeated identical restores are byte no-ops.
+Restore never runs KiCad or writes a file.
+
+### Supported electrical depth
+
+Parents must be concrete and use symbol-library format `20251024`.
+`extends` materialization is unsupported. Typed inheritance inspection is not a source-complete parent serializer.
+The schematic must use format `20260306`.
+
+Restore inventories every source pin occurrence by unit, body style, and number.
+Pin names, numbers, connection points, length, shape, visibility, alternates, and opaque pin structure must remain unchanged.
+Power behavior, jumpers, and unknown electrical definition content must remain unchanged.
+Changed unknown content fails explicitly rather than being discarded or copied without a proof.
+Body graphics and default attributes can change without changing those pin facts.
+
+Visible ordinary non-power pin electrical types can change under the explicit-save proof below.
+This includes the proven output/input-to-passive repair.
+Changed power types, hidden or alternate pin types, pin additions, deletions, moves, and renumbering are unsupported.
+Pin-name edits are unsupported because generated net names can depend on pin names.
+Type corrections require unique pin numbers, simple unit/body mapping, and unique normal placement references.
+Multi-unit, alternate-body, DNP, excluded, or unobservable placement corrections fail explicitly.
+These are bounded implementation limits, not complete donor parity or general electrical editing.
+
 ## Save explicitly
 
 ```python
@@ -130,6 +187,23 @@ Missing required evidence sections, duplicate component references, and incomple
 Value and custom attributes may change. Reparsing establishes their required source deltas.
 Net codes and export order do not define electrical identity.
 This is connectivity verification, not ERC or simulation.
+
+For a restore, save also checks the complete exported `libparts` pin inventory.
+This includes pins that have no connected peer.
+It predicts the expected electrical signature from the baseline export and captured parent pin-type facts.
+The prediction changes only requested type effects on every matching placement in the selected document.
+Every net name, pin function, endpoint occurrence, component identity, and unrelated pin type must stay unchanged.
+The actual pending hierarchy export must equal that prediction.
+Missing requested effects and unrelated electrical drift both fail.
+Save does not export a replay of the replacement to manufacture its expected result.
+It does not ignore selected references or provide an allow-electrical-change bypass.
+
+Type proof requires directly observable source-to-export mapping and complete baseline evidence.
+Every corrected placement pin needs exactly one exported occurrence.
+Conflicting sheet-local definitions with the same library identity can make global `libparts` evidence ambiguous.
+Such cases fail explicitly rather than treating one global definition as proof for every sheet.
+Attribute-only saves retain their unchanged-electrical contract.
+Mixed attribute and restore edits use the same explicit persistence safeguards.
 
 `root.save()` stages only that document's pending changes.
 Other documents remain pending and contribute their saved baselines.
@@ -182,7 +256,7 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 ## Limits
 
 - No reference annotation, flag editing, attribute deletion, or geometry editing.
-- Embedded `lib_symbols` restore is later work.
+- Only selected concrete embedded restore is implemented. General cache sync and inherited materialization remain later work.
 - Sheet instance path / multi-instance models are not first-class here.
 - Prefer `Project.schematic` over free `open_schematic` in application code.
 - Same-location saves require the root schematic and project to share a basename.
@@ -195,9 +269,11 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 
 - `InvalidSchematicError`: bad path, syntax, or required structure.
 - `AmbiguousPlacedSymbolError`: non-unique reference (or attribute) lookup.
+- `AmbiguousEmbeddedSymbolError`: duplicate cache containers, identities, or pin occurrences.
 - `UnsupportedSchematicOperationError`: unsupported format, identity, edit, or safe staging case.
 - `SchematicConflictError`: changed or missing source or project verification context.
-- `SchematicVerificationError`: pending content changes the electrical signature.
+- `SchematicVerificationError`: pending content does not match its required or predicted electrical signature.
+- Parent-library lookup errors propagate for missing or ambiguous parent definitions.
 - `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
 - `ProjectWriteBlockedError`: the project write guard blocks persistence.
 - `KicadCliNotFoundError`, netlist export/parse errors, and ordinary filesystem errors propagate from explicit saves.
@@ -222,3 +298,14 @@ uv run python tests/verify_schematic_editing.py --kicad-cli /path/to/kicad-cli
 ```
 
 This checks fresh exported Value and inserted attributes, six singleton nets, byte previews, explicit persistence, and no-op saves.
+
+Selected-restore gates are in `tests/functional/test_schematic_restore.py`.
+Native provenance and independently authored expected pin types are in `tests/fixtures/schematics/embedded-restore/PROVENANCE.txt`.
+The native restore gate uses only disposable fixture copies:
+
+```bash
+uv run python tests/verify_schematic_restore.py --kicad-cli /path/to/kicad-cli
+```
+
+It proves exact source recovery and output/input-to-passive corrections across three placements and six singleton pins.
+Expected types come from fixed fixture requirements, not another export of the requested replacement.
