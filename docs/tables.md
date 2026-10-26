@@ -2,6 +2,10 @@
 
 ## Scope
 
+[ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) requires in-memory edits and explicit persistence.
+The current `apply`-based mutations described here do not yet follow that lifecycle.
+They are implementation gaps, not the pattern for new editing interfaces.
+
 `kicad_primitives.tables.LibraryTables` discovers, reads, resolves, and edits
 KiCad **symbol** and **footprint** library table files (`sym-lib-table`,
 `fp-lib-table`) in global config and optional project directories.

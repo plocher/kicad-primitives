@@ -46,6 +46,23 @@ contract; older versions are supported read-only when possible.
 
 ## Scope: public functional areas
 
+### Artifact-object library model (locked)
+
+Canonical decision: [ADR 0008](docs/adr/0008-artifact-objects-and-explicit-persistence.md).
+This package is a library of KiCad capabilities, not a client application or workflow engine.
+Clients open an artifact, select its objects, inspect or change them, inspect pending changes, and choose save, save as, or discard.
+Expose focused operations on the relevant objects, such as `PlacedSymbol.set_attribute`, rather than project-level target-selection workflows.
+Mutations change in-memory content. Persistence is explicit. Do not silently save on mutation or close.
+Clients own selection, iteration, approvals, batch reports, and application dry-run behavior.
+The library owns KiCad invariants, source preservation, change tracking, and applicable persistence safeguards.
+Project ownership supplies schematic and PCB context. It does not force every edit onto `Project`.
+`set_attribute` means create if absent, update if different, and exact no-op if equal. Reject ambiguity.
+Reference annotation and flags have their own semantics.
+Lifecycle names, save-as relocation, and multi-file failure handling need bounded designs. Do not invent a universal session or transaction framework.
+Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.
+
+### Functional ownership
+
 Canonical TOC, responsibilities, donor basis, and exclusions: [ADR 0002](docs/adr/0002-functional-service-toc.md).
 Terms: [CONTEXT.md](CONTEXT.md).
 

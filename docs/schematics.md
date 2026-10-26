@@ -12,6 +12,10 @@ The glossary in `CONTEXT.md` defines settings, text variables, and drawing-sheet
 
 ## Scope
 
+[ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) selects artifact-owned editable objects and explicit persistence.
+The current schematic objects described here remain read-only snapshots.
+Object-level attribute editing and change tracking are implementation work, not available operations on this page.
+
 `Project.schematic()` and `Project.schematics()` open schematic **content** inside
 project context (ADR 0002).
 They return `kicad_primitives.schematics.Schematic` snapshots: title block and

@@ -66,6 +66,12 @@ Exact ranges belong in the donor migration PR. No jBOM (or other donor) version 
 
 ## Scope and implementation status
 
+The package supplies KiCad artifact objects and capabilities, not client application workflows.
+Clients select objects, inspect and edit them, then decide whether to save, save as, or discard.
+Edits belong on the relevant objects. Source persistence is explicit.
+[ADR 0008](docs/adr/0008-artifact-objects-and-explicit-persistence.md) records this package-wide direction and the current implementation gaps.
+General change tracking and lifecycle interfaces are not yet implemented.
+
 The accepted functional TOC includes projects, schematics, PCBs, symbol libraries, footprint libraries, library resolution, and connectivity.
 This is intended scope, not a list of shipped capabilities.
 Implemented services today:

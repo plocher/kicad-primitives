@@ -2,6 +2,21 @@
 
 ## KiCad data and operations
 
+**Artifact**:
+A KiCad project, document, library, table, drawing sheet, or other supported KiCad data object with its own content and context.
+
+**Pending changes**:
+In-memory changes to an artifact or its owned content that the client has not saved.
+
+**Save**:
+Explicit persistence of an artifact's pending changes to its current storage location.
+
+**Save as**:
+Explicit persistence of an artifact to a different destination.
+
+**Discard**:
+Abandon pending changes without saving them.
+
 **Flag**:
 A typed behavior switch on a symbol or footprint, such as DNP or exclusion from BOM, board, or simulation.
 _Avoid_: Attribute or text field for these switches.

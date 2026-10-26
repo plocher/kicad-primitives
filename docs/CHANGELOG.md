@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Record the artifact-object library model in ADR 0008: focused in-memory edits, client-owned workflows, observable changes, and explicit persistence choices. Runtime alignment remains implementation work.
+
 - Rename symbol and placed-symbol APIs directly to the canonical Attribute vocabulary: `SymbolAttribute`, `PlacedAttribute`, `attributes`, `attribute()`, `AmbiguousAttributeError`, and `SymbolLibrary.set_attribute` / `add_attribute` / `delete_attribute`. No old-name aliases remain. Behavior and KiCad `(property …)` syntax stay unchanged (`docs/symbol-libraries.md`, `docs/schematics.md`).
 - Lock KiCad domain vocabulary in `CONTEXT.md`: flags, attributes, settings, text variables, title-block fields, drawing-sheet fields, and reference annotation.
 
