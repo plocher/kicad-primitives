@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add physical `LibraryTable` and live `TableEntry` nouns. Buffer localized registration edits, expose pending nested resolution, remove `apply`/dry-run commands, and add explicit single-file save/save-as plus terminal discard/close with current-decision checks. Preserve full raw rows and flags (`docs/tables.md`; #54).
+
 - Expose stable source-backed Symbol, SymbolBody, and SymbolPin objects. Move declared attribute upsert, body/pin edits, and graphics insertion onto those nouns without library-command aliases. Preserve authoring, inheritance inspection, source-local edits, and deleted-handle rejection (`docs/symbol-libraries.md`; #54).
 
 - Fix public table resolution to replay repeated includes in order and detect cycles only on the active branch. Resolve relative includes and leaves from the project directory or a captured standalone base. Share URI resolution with native ERC projection without losing raw registration metadata (`docs/tables.md`; #52).

@@ -12,26 +12,30 @@ import json
 import os
 import platform
 import re
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal
 
-from lossless_sexpr import SourceSpan, TextEdit, apply_edits, parse, quote
+from lossless_sexpr import ListNode, SourceSpan, TextEdit, apply_edits, parse, quote
+
+from . import _symbol_persist
 
 __all__ = [
     "AmbiguousLibraryError",
     "InvalidLibraryTableError",
     "LibraryEntry",
-    "LibraryMutationResult",
     "LibraryScope",
+    "LibraryTable",
+    "LibraryTableConflictError",
+    "LibraryTableLifecycleError",
     "LibraryTables",
     "LibraryTablesError",
     "LibraryType",
     "MissingLibraryError",
+    "TableEntry",
 ]
 
 LibraryType = Literal["symbol", "footprint"]
@@ -80,17 +84,339 @@ class LibraryEntry:
     table_path: Path
 
 
-@dataclass(frozen=True)
-class LibraryMutationResult:
-    """Outcome of an add, remove, or rename on one scope table file."""
+class LibraryTableConflictError(LibraryTablesError, RuntimeError):
+    """A physical table changed on disk since its successful open or save."""
 
-    operation: str
-    library_type: LibraryType
-    scope: LibraryScope
-    table_path: Path
-    nickname: str
-    applied: bool
-    details: str
+
+class LibraryTableLifecycleError(LibraryTablesError, RuntimeError):
+    """A table is closed, an entry is stale, or no current close decision exists."""
+
+
+def _require_table_text(label: str, value: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be a string")
+    if "\x00" in value:
+        raise ValueError(f"{label} cannot contain NUL")
+    value.encode("utf-8")
+    if not allow_empty and not value.strip():
+        raise ValueError(f"{label} cannot be empty")
+    return value
+
+
+class LibraryTable:
+    """One physical table with buffered source and explicit persistence."""
+
+    def __init__(
+        self,
+        context: LibraryTables,
+        path: Path,
+        library_type: LibraryType,
+        scope: LibraryScope,
+    ) -> None:
+        self._context = context
+        self._path = path
+        self._library_type = library_type
+        self._scope = scope
+        self._baseline = path.read_bytes() if path.exists() else None
+        raw = self._baseline
+        self._source = (
+            raw.decode("utf-8")
+            if raw is not None
+            else f"({_TABLE_ROOT_NAMES[library_type]}\n  (version 7)\n)\n"
+        )
+        self._initial = self._source.encode("utf-8")
+        self._records = _records_from_source(
+            self._source, table_path=path, library_type=library_type
+        )
+        self._entries = tuple(TableEntry(self, i) for i in range(len(self._records)))
+        self._closed = False
+        self._close_authorized = False
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise LibraryTableLifecycleError(f"Table is closed: {self._path}")
+
+    def _accept_source(self, source: str, *, removed: TableEntry | None = None) -> None:
+        self._check_open()
+        records = _records_from_source(
+            source, table_path=self._path, library_type=self.library_type
+        )
+        if source == self._source:
+            return
+        handles = [entry for entry in self._entries if entry is not removed]
+        if removed is not None:
+            removed._alive = False
+        while len(handles) < len(records):
+            handles.append(TableEntry(self, len(handles)))
+        for i, entry in enumerate(handles):
+            entry._index = i
+        self._source = source
+        self._records = records
+        self._entries = tuple(handles)
+        self._close_authorized = False
+
+    @property
+    def library_type(self) -> LibraryType:
+        """Symbol or footprint identity of this physical table."""
+        return self._library_type
+
+    @property
+    def scope(self) -> LibraryScope:
+        """Scope through which this physical table first entered its context."""
+        return self._scope
+
+    @property
+    def path(self) -> Path:
+        """Current physical destination, retained as diagnostic identity after close."""
+        return self._path
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether this root has exited through close or terminal discard."""
+        return self._closed
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether pending bytes differ from the last successful open/save baseline."""
+        self._check_open()
+        baseline = self._initial if self._baseline is None else self._baseline
+        return self.to_bytes() != baseline
+
+    @property
+    def entries(self) -> tuple[TableEntry, ...]:
+        """Live direct row occurrences, including nested links and repeated names."""
+        self._check_open()
+        return self._entries
+
+    def entry(self, nickname: str) -> TableEntry:
+        """Select one direct row, rejecting missing or ambiguous nicknames."""
+        self._check_open()
+        matches = tuple(e for e in self._entries if e.nickname == nickname)
+        if not matches:
+            raise MissingLibraryError(nickname)
+        if len(matches) != 1:
+            raise AmbiguousLibraryError(f"Ambiguous direct nickname: {nickname!r}")
+        return matches[0]
+
+    def add_entry(
+        self,
+        nickname: str,
+        uri: str,
+        *,
+        entry_type: str = "KiCad",
+        options: str = "",
+        descr: str = "",
+    ) -> TableEntry:
+        """Append one new direct registration in memory, preserving existing source."""
+        self._check_open()
+        name = _require_table_text("Nickname", nickname).strip()
+        uri = _require_table_text("URI", uri).strip()
+        entry_type = _require_table_text("Entry type", entry_type).strip()
+        _require_table_text("Options", options, allow_empty=True)
+        _require_table_text("Description", descr, allow_empty=True)
+        if any(e.nickname == name for e in self._entries):
+            raise ValueError(f"Library nickname already exists: {name}")
+        source = _append_lib_record(
+            table_path=self._path,
+            library_type=self.library_type,
+            record={
+                "name": name,
+                "uri": uri,
+                "type": entry_type,
+                "options": options,
+                "descr": descr,
+            },
+            source=self._source,
+        )
+        self._accept_source(source)
+        return self._entries[-1]
+
+    def to_bytes(self) -> bytes:
+        """Preview full pending source, including opaque metadata and row flags."""
+        self._check_open()
+        return self._source.encode("utf-8")
+
+    def save(self) -> None:
+        """Persist this file only; authorize close only after successful persistence."""
+        self._check_open()
+        self._close_authorized = False
+        output = self.to_bytes()
+        if self._baseline is None:
+            _symbol_persist.save_new_source(
+                self._path, output, unsupported_error=InvalidLibraryTableError
+            )
+        else:
+            _symbol_persist.save_source(
+                self._path,
+                self._baseline,
+                output,
+                conflict_error=LibraryTableConflictError,
+                unsupported_error=InvalidLibraryTableError,
+                label="Library table",
+            )
+        self._baseline = output
+        self._close_authorized = True
+
+    def save_as(self, path: str | PathLike[str]) -> None:
+        """Save one new file and rebind only on success; never overwrite a destination."""
+        self._check_open()
+        self._close_authorized = False
+        destination = Path(path).expanduser().absolute()
+        self._context._check_rebind(self, destination)
+        mode = 0o600
+        if self._baseline is not None:
+            info = _symbol_persist._check_read_baseline(
+                self._path,
+                self._baseline,
+                conflict_error=LibraryTableConflictError,
+                label="Library table",
+            )
+            mode = info.st_mode & 0o7777
+        output = self.to_bytes()
+        _symbol_persist.save_new_source(
+            destination,
+            output,
+            mode=mode,
+            unsupported_error=InvalidLibraryTableError,
+        )
+        self._context._rebind(self, destination)
+        self._baseline = output
+        self._close_authorized = True
+
+    def discard(self) -> None:
+        """Abandon this artifact and invalidate its entries without writing."""
+        if self._closed:
+            return
+        self._closed = True
+        for entry in self._entries:
+            entry._alive = False
+
+    def close(self) -> None:
+        """Exit without writing, requiring a successful current save or terminal discard."""
+        if self._closed:
+            return
+        if not self._close_authorized:
+            raise LibraryTableLifecycleError("Save, save as, or discard before close")
+        self.discard()
+
+
+class TableEntry:
+    """One live direct registration owned by a physical LibraryTable."""
+
+    def __init__(self, table: LibraryTable, index: int) -> None:
+        self._table = table
+        self._index = index
+        self._alive = True
+
+    def _record(self) -> dict[str, str]:
+        self._table._check_open()
+        if not self._alive:
+            raise LibraryTableLifecycleError("Library table entry has been deleted")
+        return self._table._records[self._index]
+
+    def _check_target(self) -> None:
+        self._table.entry(self.nickname)
+        node = _table_root_lists(
+            self._table._source,
+            library_type=self._table.library_type,
+            table_path=self._table.path,
+        )[0].child_lists("lib")[self._index]
+        names = node.child_lists("name")
+        if len(names) != 1 or len(names[0].children()) != 2:
+            raise InvalidLibraryTableError("Expected one unambiguous nickname atom")
+
+    @property
+    def nickname(self) -> str:
+        """Current raw direct nickname."""
+        return self._record().get("name", "")
+
+    @property
+    def uri(self) -> str:
+        """Current unexpanded URI text."""
+        return self._record().get("uri", "")
+
+    @property
+    def entry_type(self) -> str:
+        """Plugin type, including Table for nested registrations."""
+        return self._record().get("type", "")
+
+    @property
+    def options(self) -> str:
+        """Uninterpreted options text."""
+        return self._record().get("options", "")
+
+    @property
+    def descr(self) -> str:
+        """Current description text."""
+        return self._record().get("descr", "")
+
+    @property
+    def resolved_path(self) -> Path:
+        """URI resolved from the owning context's captured common base."""
+        return _resolve_entry_path(
+            uri=self.uri,
+            base_directory=self._table._context.base_directory,
+            path_variables=self._table._context.path_variables,
+        )
+
+    @property
+    def included_table(self) -> LibraryTable | None:
+        """Live physical nested table in this same context, or None for a leaf."""
+        if self.entry_type != _NESTED_ENTRY_TYPE:
+            return None
+        return self._table._context._table_at(
+            self.resolved_path, self._table.library_type, self._table.scope
+        )
+
+    def rename(self, nickname: str) -> None:
+        """Rename this direct registration in memory, retaining row flags and metadata."""
+        current = self.nickname
+        self._check_target()
+        name = _require_table_text("Nickname", nickname).strip()
+        self._table._accept_source(
+            _rename_direct_nickname(
+                table_path=self._table.path,
+                library_type=self._table.library_type,
+                old_name=current,
+                new_name=name,
+                source=self._table._source,
+            )
+        )
+
+    def set_uri(self, uri: str) -> None:
+        """Set this row's URI in memory; an equal URI preserves exact source bytes."""
+        current = self.uri
+        self._check_target()
+        value = _require_table_text("URI", uri)
+        roots = _table_root_lists(
+            self._table._source,
+            library_type=self._table.library_type,
+            table_path=self._table.path,
+        )
+        node = roots[0].child_lists("lib")[self._index]
+        fields = node.child_lists("uri")
+        if len(fields) != 1 or len(fields[0].children()) != 2:
+            raise InvalidLibraryTableError("Expected one unambiguous URI atom")
+        token = fields[0].atom(1)
+        if token is None:
+            raise InvalidLibraryTableError("Missing URI atom")
+        if value == current:
+            return
+        self._table._accept_source(
+            apply_edits(self._table._source, [TextEdit(token.span, quote(value))])
+        )
+
+    def delete(self) -> None:
+        """Remove this direct row and invalidate its handle, without persistence."""
+        nickname = self.nickname
+        self._check_target()
+        source = _delete_direct_nickname(
+            table_path=self._table.path,
+            library_type=self._table.library_type,
+            nickname=nickname,
+            source=self._table._source,
+        )
+        self._table._accept_source(source, removed=self)
 
 
 class LibraryTables:
@@ -108,6 +434,8 @@ class LibraryTables:
         self._project_directory = project_directory
         self._path_variables = path_variables
         self._base_directory = base_directory
+        self._physical_tables: dict[tuple[Path, LibraryType], LibraryTable] = {}
+        self._primary_tables: dict[tuple[LibraryType, LibraryScope], LibraryTable] = {}
 
     @classmethod
     def open(
@@ -222,184 +550,75 @@ class LibraryTables:
             raise MissingLibraryError(key)
         return winners[-1]
 
-    def add_library(
+    def _table_at(
         self,
-        *,
+        path: Path,
         library_type: LibraryType,
         scope: LibraryScope,
-        nickname: str,
-        uri: str,
-        entry_type: str = "KiCad",
-        options: str = "",
-        descr: str = "",
-        apply: bool = False,
-    ) -> LibraryMutationResult:
-        """Append a leaf library row to the primary table for *scope*.
+    ) -> LibraryTable:
+        for opened in self._physical_tables.values():
+            if opened.path == path.absolute() and opened.library_type == library_type:
+                opened._check_open()
+                return opened
+        key = (path.resolve(), library_type)
+        if key not in self._physical_tables:
+            self._physical_tables[key] = LibraryTable(self, path, library_type, scope)
+        table = self._physical_tables[key]
+        table._check_open()
+        return table
 
-        Creates a minimal table file when missing. Refuses duplicate nicknames
-        already declared as direct rows in that file (nested tables are not
-        scanned for collisions). Set *apply* to write; otherwise plan only.
-        """
+    def table(self, library_type: LibraryType, scope: LibraryScope) -> LibraryTable:
+        """Get the live physical primary table for this type and scope."""
         _require_library_type(library_type)
         _require_scope(scope)
-        name = nickname.strip()
-        if not name:
-            raise ValueError("Nickname cannot be empty")
-        uri_text = uri.strip()
-        if not uri_text:
-            raise ValueError("URI cannot be empty")
-        table_path = self.table_path(library_type, scope)
-        records = _load_direct_records(table_path, library_type=library_type)
-        if any(record["name"] == name for record in records):
-            raise ValueError(f"Library nickname already exists: {name}")
-        records.append(
-            {
-                "name": name,
-                "type": entry_type.strip() or "KiCad",
-                "uri": uri_text,
-                "options": options,
-                "descr": descr,
-            }
-        )
-        if apply:
-            previous = _read_table_source_if_present(table_path)
-            if previous is None:
-                _write_new_table_file(
-                    table_path=table_path,
-                    library_type=library_type,
-                    records=records,
-                )
-            else:
-                _append_lib_record(
-                    table_path=table_path,
-                    library_type=library_type,
-                    record=records[-1],
-                    source=previous,
-                )
-        return LibraryMutationResult(
-            operation="add",
-            library_type=library_type,
-            scope=scope,
-            table_path=table_path,
-            nickname=name,
-            applied=apply,
-            details="added" if apply else "planned",
-        )
-
-    def remove_library(
-        self,
-        *,
-        library_type: LibraryType,
-        scope: LibraryScope,
-        nickname: str,
-        apply: bool = False,
-    ) -> LibraryMutationResult:
-        """Remove one direct nickname row from the primary *scope* table file."""
-        _require_library_type(library_type)
-        _require_scope(scope)
-        name = nickname.strip()
-        if not name:
-            raise ValueError("Nickname cannot be empty")
-        table_path = self.table_path(library_type, scope)
-        if not table_path.is_file():
-            raise MissingLibraryError(name)
-        records = _load_direct_records(table_path, library_type=library_type)
-        updated = [record for record in records if record["name"] != name]
-        if len(updated) == len(records):
-            raise MissingLibraryError(name)
-        if apply:
-            previous = table_path.read_text(encoding="utf-8")
-            _delete_direct_nickname(
-                table_path=table_path,
-                library_type=library_type,
-                nickname=name,
-                source=previous,
+        key = (library_type, scope)
+        if key not in self._primary_tables:
+            self._primary_tables[key] = self._table_at(
+                self.table_path(library_type, scope), library_type, scope
             )
-        return LibraryMutationResult(
-            operation="remove",
-            library_type=library_type,
-            scope=scope,
-            table_path=table_path,
-            nickname=name,
-            applied=apply,
-            details="removed" if apply else "planned",
+        table = self._primary_tables[key]
+        table._check_open()
+        return table
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether any opened physical table retains pending changes."""
+        return any(
+            t.is_modified for t in self._physical_tables.values() if not t.is_closed
         )
 
-    def rename_library(
-        self,
-        *,
-        library_type: LibraryType,
-        scope: LibraryScope,
-        old_nickname: str,
-        new_nickname: str,
-        apply: bool = False,
-    ) -> LibraryMutationResult:
-        """Rename one direct nickname in the primary *scope* table file."""
-        _require_library_type(library_type)
-        _require_scope(scope)
-        old_name = old_nickname.strip()
-        new_name = new_nickname.strip()
-        if not old_name or not new_name:
-            raise ValueError("Nickname cannot be empty")
-        table_path = self.table_path(library_type, scope)
-        if not table_path.is_file():
-            raise MissingLibraryError(old_name)
-        previous = table_path.read_text(encoding="utf-8")
-        if apply:
-            _rename_direct_nickname(
-                table_path=table_path,
-                library_type=library_type,
-                old_name=old_name,
-                new_name=new_name,
-                source=previous,
-            )
-        else:
-            records = _load_direct_records(table_path, library_type=library_type)
-            if any(record["name"] == new_name for record in records):
-                raise ValueError(f"Target nickname already exists: {new_name}")
-            if not any(record["name"] == old_name for record in records):
-                raise MissingLibraryError(old_name)
-        return LibraryMutationResult(
-            operation="rename",
-            library_type=library_type,
-            scope=scope,
-            table_path=table_path,
-            nickname=new_name,
-            applied=apply,
-            details=(
-                f"{old_name} -> {new_name}"
-                if apply
-                else f"planned {old_name} -> {new_name}"
-            ),
-        )
+    def _check_rebind(self, table: LibraryTable, destination: Path) -> None:
+        other = self._physical_tables.get((destination.resolve(), table.library_type))
+        if other is not None and other is not table:
+            raise ValueError("Destination already belongs to another opened table")
+
+    def _rebind(self, table: LibraryTable, destination: Path) -> None:
+        for key, opened in tuple(self._physical_tables.items()):
+            if opened is table:
+                del self._physical_tables[key]
+        table._path = destination
+        self._physical_tables[(destination.resolve(), table.library_type)] = table
 
     def _collect_leaf_entries(self, library_type: LibraryType) -> list[LibraryEntry]:
         entries: list[LibraryEntry] = []
-        global_table = self.table_path(library_type, "global")
-        if global_table.is_file():
+        scopes: tuple[LibraryScope, ...] = (
+            ("global", "project")
+            if self._project_directory is not None
+            else ("global",)
+        )
+        for scope in scopes:
+            path = self.table(library_type, scope).path
             entries.extend(
                 _expand_table_file(
-                    table_path=global_table,
+                    table_path=path,
                     library_type=library_type,
-                    scope="global",
+                    scope=scope,
                     base_directory=self._base_directory,
                     path_variables=self._path_variables,
                     active=set(),
+                    context=self,
                 )
             )
-        if self._project_directory is not None:
-            project_table = self.table_path(library_type, "project")
-            if project_table.is_file():
-                entries.extend(
-                    _expand_table_file(
-                        table_path=project_table,
-                        library_type=library_type,
-                        scope="project",
-                        base_directory=self._base_directory,
-                        path_variables=self._path_variables,
-                        active=set(),
-                    )
-                )
         return entries
 
 
@@ -422,10 +641,10 @@ def _table_path_for_scope(
 ) -> Path:
     name = _TABLE_FILE_NAMES[library_type]
     if scope == "global":
-        return (config_home / name).resolve()
+        return (config_home / name).absolute()
     if project_directory is None:
         raise ValueError("Project directory is required for project-scope tables")
-    return (project_directory / name).resolve()
+    return (project_directory / name).absolute()
 
 
 def _detect_config_home(config_home: Path | None) -> Path:
@@ -637,13 +856,15 @@ def _expand_table_file(
     base_directory: Path,
     path_variables: Mapping[str, str],
     active: set[Path],
+    context: LibraryTables,
 ) -> list[LibraryEntry]:
     resolved_table = table_path.resolve()
     if resolved_table in active:
         return []
     # Only current ancestry counts as a cycle; completed includes replay later.
     active = active | {resolved_table}
-    records = _load_direct_records(resolved_table, library_type=library_type)
+    physical = context._table_at(table_path, library_type, scope)
+    records = physical._records
     entries: list[LibraryEntry] = []
     for record in records:
         nickname = record.get("name", "").strip()
@@ -657,7 +878,10 @@ def _expand_table_file(
             path_variables=path_variables,
         )
         if entry_type == _NESTED_ENTRY_TYPE:
-            if resolved_path.is_file():
+            if (
+                resolved_path.is_file()
+                or (resolved_path.resolve(), library_type) in context._physical_tables
+            ):
                 entries.extend(
                     _expand_table_file(
                         table_path=resolved_path,
@@ -666,6 +890,7 @@ def _expand_table_file(
                         base_directory=base_directory,
                         path_variables=path_variables,
                         active=active,
+                        context=context,
                     )
                 )
             continue
@@ -685,43 +910,10 @@ def _expand_table_file(
     return entries
 
 
-def _read_table_source_if_present(table_path: Path) -> str | None:
-    if table_path.is_file():
-        return table_path.read_text(encoding="utf-8")
-    return None
-
-
-def _load_direct_records(
-    table_path: Path, *, library_type: LibraryType
-) -> list[dict[str, str]]:
-    if not table_path.is_file():
-        return []
-    try:
-        text = table_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise InvalidLibraryTableError(
-            f"Cannot read library table {table_path}: {exc}"
-        ) from exc
-    return _records_from_source(text, table_path=table_path, library_type=library_type)
-
-
 def _records_from_source(
     text: str, *, table_path: Path, library_type: LibraryType
 ) -> list[dict[str, str]]:
-    try:
-        document = parse(text)
-    except Exception as exc:
-        raise InvalidLibraryTableError(
-            f"Failed to parse KiCad table {table_path}: {exc}"
-        ) from exc
-    root_name = _TABLE_ROOT_NAMES[library_type]
-    roots: Any = document.lists(head=root_name)
-    if not roots:
-        # Accept either root name when reading an existing file.
-        other = "fp_lib_table" if root_name == "sym_lib_table" else "sym_lib_table"
-        roots = document.lists(head=other)
-    if not roots:
-        raise InvalidLibraryTableError(f"Library table root not found in {table_path}")
+    roots = _table_root_lists(text, table_path=table_path, library_type=library_type)
     records: list[dict[str, str]] = []
     root = roots[0]
     for lib_node in root.child_lists():
@@ -729,11 +921,10 @@ def _records_from_source(
             continue
         record: dict[str, str] = {}
         for field in lib_node.child_lists():
-            atoms = list(field.children())
-            if len(atoms) < 2:
+            value = field.atom(1)
+            if value is None or field.head is None:
                 continue
-            key = str(atoms[0].value)
-            record[key] = str(atoms[1].value)
+            record[field.head] = value.value
         records.append(record)
     return records
 
@@ -757,7 +948,7 @@ def _detect_indent(source: str, lib_spans: list[SourceSpan]) -> str:
     span = lib_spans[0]
     line_start = source.rfind("\n", 0, span.start) + 1
     prefix = source[line_start : span.start]
-    if prefix:
+    if prefix and not prefix.strip():
         return prefix
     return "\t" if "\t" in source else "  "
 
@@ -774,33 +965,24 @@ def _format_lib_line(indent: str, record: Mapping[str, str]) -> str:
     )
 
 
-def _write_new_table_file(
-    *,
-    table_path: Path,
-    library_type: LibraryType,
-    records: list[dict[str, str]],
-) -> None:
-    root_name = _TABLE_ROOT_NAMES[library_type]
-    indent = "\t"
-    lines = [f"({root_name}", f"{indent}(version 7)"]
-    for record in records:
-        lines.append(_format_lib_line(indent, record))
-    lines.append(")")
-    _atomic_write_text(table_path, "\n".join(lines) + "\n")
-
-
 def _table_root_lists(
     source: str, *, library_type: LibraryType, table_path: Path
-) -> Any:
-    root_name = _TABLE_ROOT_NAMES[library_type]
-    document = parse(source)
-    roots = document.lists(head=root_name)
-    if not roots:
-        other = "fp_lib_table" if root_name == "sym_lib_table" else "sym_lib_table"
-        roots = document.lists(head=other)
-    if not roots:
-        raise InvalidLibraryTableError(f"Library table root not found in {table_path}")
-    return roots
+) -> tuple[ListNode, ...]:
+    _require_library_type(library_type)
+    try:
+        document = parse(source)
+    except Exception as exc:
+        raise InvalidLibraryTableError(
+            f"Failed to parse KiCad table {table_path}: {exc}"
+        ) from exc
+    roots = document.roots()
+    if (
+        len(roots) != 1
+        or not isinstance(roots[0], ListNode)
+        or roots[0].head not in _TABLE_ROOT_NAMES.values()
+    ):
+        raise InvalidLibraryTableError(f"Expected one library table root: {table_path}")
+    return (roots[0],)
 
 
 def _append_lib_record(
@@ -809,19 +991,26 @@ def _append_lib_record(
     library_type: LibraryType,
     record: Mapping[str, str],
     source: str,
-) -> None:
+) -> str:
     roots = _table_root_lists(source, library_type=library_type, table_path=table_path)
     root = roots[0]
     lib_nodes = [node for node in root.child_lists() if node.head == "lib"]
     indent = _detect_indent(source, [node.span for node in lib_nodes])
-    insert_at = root.span.end - 1
-    line = _format_lib_line(indent, record)
-    if source[:insert_at].endswith("\n"):
-        body = f"{line}\n"
-    else:
-        body = f"\n{line}\n"
-    edited = apply_edits(source, [TextEdit(SourceSpan(insert_at, insert_at), body)])
-    _atomic_write_text(table_path, edited)
+    head = root.atom(0)
+    assert head is not None
+    insert_at = (
+        lib_nodes[-1].span.end
+        if lib_nodes
+        else list(root.child_lists())[-1].span.end
+        if root.child_lists()
+        else head.span.end
+    )
+    multiline = "\n" in source[root.span.start : root.span.end]
+    separator = ("\r\n" if "\r\n" in source else "\n") if multiline else " "
+    line = _format_lib_line(indent if multiline else "", record)
+    return apply_edits(
+        source, [TextEdit(SourceSpan(insert_at, insert_at), separator + line)]
+    )
 
 
 def _delete_direct_nickname(
@@ -830,7 +1019,7 @@ def _delete_direct_nickname(
     library_type: LibraryType,
     nickname: str,
     source: str,
-) -> None:
+) -> str:
     roots = _table_root_lists(source, library_type=library_type, table_path=table_path)
     target_start: int | None = None
     target_end: int | None = None
@@ -841,10 +1030,10 @@ def _delete_direct_nickname(
         name_field = fields.get("name")
         if name_field is None:
             continue
-        atoms = list(name_field.children())
-        if len(atoms) < 2:
+        token = name_field.atom(1)
+        if token is None:
             continue
-        if str(atoms[1].value) != nickname:
+        if token.value != nickname:
             continue
         target_start = _leading_separator_start(source, lib_node.span.start)
         target_end = lib_node.span.end
@@ -852,7 +1041,7 @@ def _delete_direct_nickname(
     if target_start is None or target_end is None:
         raise MissingLibraryError(nickname)
     edited = apply_edits(source, [TextEdit(SourceSpan(target_start, target_end), "")])
-    _atomic_write_text(table_path, edited)
+    return edited
 
 
 def _rename_direct_nickname(
@@ -862,7 +1051,7 @@ def _rename_direct_nickname(
     old_name: str,
     new_name: str,
     source: str,
-) -> None:
+) -> str:
     roots = _table_root_lists(source, library_type=library_type, table_path=table_path)
     target_span: SourceSpan | None = None
     seen_new = False
@@ -873,32 +1062,19 @@ def _rename_direct_nickname(
         name_field = fields.get("name")
         if name_field is None:
             continue
-        atoms = list(name_field.children())
-        if len(atoms) < 2:
+        token = name_field.atom(1)
+        if token is None:
             continue
-        current = str(atoms[1].value)
+        current = token.value
         if current == new_name:
             seen_new = True
         if current == old_name and target_span is None:
-            target_span = atoms[1].span
+            target_span = token.span
     if seen_new and old_name != new_name:
         raise ValueError(f"Target nickname already exists: {new_name}")
     if target_span is None:
         raise MissingLibraryError(old_name)
+    if old_name == new_name:
+        return source
     edited = apply_edits(source, [TextEdit(target_span, quote(new_name))])
-    _atomic_write_text(table_path, edited)
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = text.encode("utf-8")
-    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    return edited
