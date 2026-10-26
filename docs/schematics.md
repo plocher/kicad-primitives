@@ -154,6 +154,8 @@ This includes the proven output/input-to-passive repair.
 Changed power types, hidden or alternate pin types, pin additions, deletions, moves, and renumbering are unsupported.
 Pin-name edits are unsupported because generated net names can depend on pin names.
 Type corrections require unique pin numbers, simple unit/body mapping, and unique normal placement references.
+Affected references must be unique across all placements in the document, not only the selected cache.
+Type correction also requires a qualified `Lib:Part` cache identity before mutation.
 Multi-unit, alternate-body, DNP, excluded, or unobservable placement corrections fail explicitly.
 These are bounded implementation limits, not complete donor parity or general electrical editing.
 

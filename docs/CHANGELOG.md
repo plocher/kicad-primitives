@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject cross-cache placement reference ambiguity and unqualified type-correction identities before a restore changes pending source (#37).
+
 - Add stable `EmbeddedSymbol` objects and selected concrete `restore_from` in memory. Preserve placement source and unrelated cache definitions. Support bounded ordinary pin-type corrections with baseline-derived electrical predictions and full exported pin-inventory checks at explicit save. Inheritance, pin names, geometry, hidden/power edits, and ambiguous proof mappings fail explicitly (`docs/schematics.md`; #37).
 
 - Reject duplicate mandatory schematic attributes at intake. Validate raw electrical evidence without collapsing duplicate component references, and preflight all changed destination-directory permissions before replacing any source (#36).
