@@ -158,6 +158,11 @@ def _report(
     units = _string(report.get("coordinate_units"))
     if units not in {"mm", "mils", "in"}:
         raise ErcAcquisitionError("Unsupported ERC coordinate units")
+    included_severities = tuple(
+        _string(value) for value in _array(report.get("included_severities"))
+    )
+    if not {"error", "warning", "exclusion"}.issubset(included_severities):
+        raise ErcAcquisitionError("ERC report omits requested severity coverage")
     sheets: list[ErcSheet] = []
     for value in _array(report.get("sheets")):
         sheet = _object(value)
@@ -192,7 +197,7 @@ def _report(
         _string(report.get("date")),
         _string(report.get("kicad_version")),
         units,
-        tuple(_string(s) for s in _array(report.get("included_severities"))),
+        included_severities,
         tuple(checks),
         tuple(sheets),
         snapshot,
@@ -256,7 +261,12 @@ def acquire_erc(
         ]
         try:
             result = subprocess.run(
-                command, check=False, capture_output=True, text=True, timeout=120
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=project.directory,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ErcAcquisitionError(f"ERC execution failed: {exc}") from exc

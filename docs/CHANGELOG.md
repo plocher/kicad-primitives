@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require proof of all requested native ERC severities. Replay repeated nested-table includes in order, and anchor relative include/leaf URIs to the original project's explicit native working directory. Preserve strict cycle and acquisition failures (#40).
+
 - Add `Project.erc()` typed per-sheet reports over pending hierarchy snapshots. Preserve item coordinates/UUIDs, severities/exclusions, check metadata, and original-path/hash provenance. Project native symbol/footprint registrations with raw metadata and original-context paths. Reject report acquisition/context failures explicitly. Document-only ERC remains unsupported (`docs/schematics.md`, `docs/projects.md`; #40).
 
 - Reject cross-cache placement reference ambiguity and unqualified type-correction identities before a restore changes pending source (#37).

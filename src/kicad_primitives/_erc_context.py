@@ -58,7 +58,7 @@ def _field(node: ListNode, head: str) -> AtomNode:
     return atom
 
 
-def _path(uri: str, table: Path, variables: dict[str, str], project: Project) -> Path:
+def _path(uri: str, variables: dict[str, str], project: Project) -> Path:
     expanded = uri
     for _ in range(32):
         replaced = tables._URI_VARIABLE_PATTERN.sub(
@@ -71,12 +71,10 @@ def _path(uri: str, table: Path, variables: dict[str, str], project: Project) ->
         raise ErcContextError("Unresolved or empty library URI in original context")
     if "://" in expanded:
         raise ErcContextError("ERC context supports local filesystem library URIs only")
-    return tables._resolve_entry_path(
-        uri=expanded,
-        project_directory=project.directory,
-        path_variables=variables,
-        table_path=table,
-    ).resolve()
+    location = Path(expanded).expanduser()
+    if not location.is_absolute():
+        location = project.directory / location
+    return location.resolve()
 
 
 def _snapshot_kind(
@@ -89,12 +87,10 @@ def _snapshot_kind(
 ) -> bytes:
     winners: dict[str, str] = {}
 
-    def expand(table: Path, active: set[Path], visited: set[Path]) -> None:
+    def expand(table: Path, active: set[Path]) -> None:
         table = table.resolve()
         if table in active:
             raise ErcContextError(f"Cyclic nested library table: {table}")
-        if table in visited:
-            return
         if not table.is_file():
             raise ErcContextError(f"Missing nested library table: {table}")
         try:
@@ -110,7 +106,6 @@ def _snapshot_kind(
         ):
             raise ErcContextError(f"Expected one native {root_name}: {table}")
         active.add(table)
-        visited.add(table)
         if len(roots[0].child_lists("version")) > 1:
             raise ErcContextError("Ambiguous library-table format")
         for node in roots[0].children()[1:]:
@@ -133,7 +128,7 @@ def _snapshot_kind(
                     _field(node, scalar)
             if not name.value.strip() or name.value != name.value.strip():
                 raise ErcContextError("Empty or indeterminate library nickname")
-            location = _path(uri.value, table, variables, project)
+            location = _path(uri.value, variables, project)
             if kind.value == "Table":
                 if any(
                     not isinstance(c, ListNode)
@@ -143,7 +138,7 @@ def _snapshot_kind(
                     _field(node, "options").value for _ in node.child_lists("options")
                 ):
                     raise ErcContextError("Nested table modifiers are unsupported")
-                expand(location, active, visited)
+                expand(location, active)
             elif kind.value == "KiCad" and location.suffix.lower() == suffix:
                 raw = source[node.span.start : node.span.end]
                 start, end = (
@@ -160,7 +155,7 @@ def _snapshot_kind(
 
     for primary in (home / table_name, project.directory / table_name):
         if primary.exists() or primary.is_symlink():
-            expand(primary, set(), set())
+            expand(primary, set())
     raw = (
         f"({root_name}\n  (version 7)\n"
         + "".join("  " + row + "\n" for row in winners.values())

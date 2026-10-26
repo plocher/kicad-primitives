@@ -222,7 +222,7 @@ class ProjectErcTests(unittest.TestCase):
         expected = winner.replace("${SELECTED}", str(self.directory / "captured"))
         paths = {
             "global": str(self.directory / "global/global.kicad_sym"),
-            "nested": str(nested.parent / "parts/nested.kicad_sym"),
+            "nested": str(self.directory / "parts/nested.kicad_sym"),
             "missing": str(self.directory / "not-present.kicad_sym"),
         }
         original = {p: p.read_bytes() for p in (table, nested, global_table)}
@@ -323,6 +323,34 @@ class ProjectErcTests(unittest.TestCase):
             with self.assertRaises(UnsupportedSchematicOperationError):
                 document.erc(kicad_cli=self.directory / "must-not-run")
 
+    def test_severity_all_requires_native_coverage_without_losing_future_tokens(
+        self,
+    ) -> None:
+        document = self.project.schematic()
+        original = self.path.read_bytes()
+        document.symbol("R1").set_attribute("Value", "pending")
+        pending = document.to_bytes()
+        for coverage in (
+            [],
+            ["exclusion"],
+            ["error", "exclusion"],
+            ["error", "warning"],
+        ):
+            with self.subTest(coverage=coverage):
+                payload = copy.deepcopy(REPORT)
+                for sheet in payload["sheets"]:
+                    sheet["violations"] = []
+                payload["included_severities"] = coverage
+                with self.assertRaises(ErcAcquisitionError):
+                    self.project.erc(kicad_cli=self.verifier(payload))
+                self.assertEqual(document.to_bytes(), pending)
+                self.assertEqual(self.path.read_bytes(), original)
+                self.assertTrue(self.project.is_modified)
+        payload = copy.deepcopy(REPORT)
+        payload["included_severities"].append("future-severity")
+        report = self.project.erc(kicad_cli=self.verifier(payload))
+        self.assertEqual(report.included_severities[-1], "future-severity")
+
     def test_footprint_shadow_and_missing_local_winner_keep_original_context(
         self,
     ) -> None:
@@ -346,6 +374,60 @@ class ProjectErcTests(unittest.TestCase):
         report = self.project.erc(kicad_cli=self.verifier(stage_assertions=assertions))
         self.assertTrue(report.snapshot.footprint_table_sha256)
         self.assertEqual(table.read_bytes(), original)
+
+    def test_repeated_nested_dag_include_reapplies_after_an_intervening_override(
+        self,
+    ) -> None:
+        nested = self.directory / "nested/table"
+        nested.parent.mkdir()
+        nested.write_text(
+            '(sym_lib_table (lib (name "SPCoast") (type "KiCad")'
+            f' (uri "{self.directory / "local.kicad_sym"}") (descr "nested winner")))',
+            encoding="utf-8",
+        )
+        (self.directory / "sym-lib-table").write_text(
+            "(sym_lib_table"
+            ' (lib (name "First") (type "Table") (uri "nested/table"))'
+            ' (lib (name "SPCoast") (type "KiCad") (uri "missing.kicad_sym"))'
+            ' (lib (name "Again") (type "Table") (uri "nested/table")))',
+            encoding="utf-8",
+        )
+        assertions = (
+            "table = (pathlib.Path(sys.argv[-1]).parent/'sym-lib-table').read_text()\n"
+            f"assert {str(self.directory / 'local.kicad_sym')!r} in table\n"
+            "assert 'missing.kicad_sym' not in table\n"
+            "assert '(descr \"nested winner\")' in table\n"
+            "assert table.count('(name \"SPCoast\")') == 1\n"
+        )
+        report = self.project.erc(kicad_cli=self.verifier(stage_assertions=assertions))
+        self.assertEqual(report.source_path, self.path)
+
+    def test_relative_nested_include_and_leaf_use_original_project_cwd(self) -> None:
+        nested = self.directory / "nested/first-table"
+        nested.parent.mkdir()
+        nested.write_text(
+            '(sym_lib_table (lib (name "Second") (type "Table") (uri "second-table")))',
+            encoding="utf-8",
+        )
+        second = self.directory / "second-table"
+        second.write_text(
+            '(sym_lib_table (lib (name "SPCoast") (type "KiCad") (uri "local.kicad_sym")))',
+            encoding="utf-8",
+        )
+        (self.directory / "sym-lib-table").write_text(
+            f'(sym_lib_table (lib (name "First") (type "Table") (uri "{nested}")))',
+            encoding="utf-8",
+        )
+        assertions = (
+            f"assert pathlib.Path.cwd() == pathlib.Path({str(self.directory)!r})\n"
+            "table = (pathlib.Path(sys.argv[-1]).parent/'sym-lib-table').read_text()\n"
+            f"assert {str(self.directory / 'local.kicad_sym')!r} in table\n"
+            f"assert {str(nested.parent / 'local.kicad_sym')!r} not in table\n"
+        )
+        original_cwd = Path.cwd()
+        report = self.project.erc(kicad_cli=self.verifier(stage_assertions=assertions))
+        self.assertEqual(report.source_path, self.path)
+        self.assertEqual(Path.cwd(), original_cwd)
 
     def test_duplicate_report_keys_are_acquisition_errors(self) -> None:
         raw = json.dumps(REPORT).replace(

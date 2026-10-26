@@ -116,6 +116,7 @@ class Project:
         Return typed per-sheet findings with original-path snapshot provenance.
         Acquisition failures are exceptions, not synthetic findings. Locked
         and read-only originals remain checkable.
+        Relative library URIs use this project's original directory as native CWD.
         """
         from ._erc import acquire_erc
 
