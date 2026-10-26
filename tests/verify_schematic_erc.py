@@ -2,12 +2,15 @@
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from kicad_primitives._kicad_cli import resolve_kicad_cli
 from kicad_primitives.projects import Project
 from kicad_primitives.schematics import ErcReport, UnsupportedSchematicOperationError
 
@@ -31,10 +34,85 @@ def main() -> None:
             schematic = project.schematic()
             baseline = project.erc(kicad_cli=args.kicad_cli)
             assert isinstance(baseline, ErcReport)
+            # Native Table links and leaves both resolve against process CWD.
+            second = root / "second-table"
+            second.write_bytes(
+                (root / "sym-lib-table")
+                .read_bytes()
+                .replace(b"${KIPRJMOD}/local.kicad_sym", b"local.kicad_sym")
+            )
+            first = root / "nested/first-table"
+            first.parent.mkdir()
+            first.write_text(
+                '(sym_lib_table (lib (name "Second") (type "Table") (uri "second-table")))',
+                encoding="utf-8",
+            )
+            (root / "sym-lib-table").write_text(
+                f'(sym_lib_table (lib (name "First") (type "Table") (uri "{first}")))',
+                encoding="utf-8",
+            )
+            with TemporaryDirectory(prefix="kp-native-erc-control-") as control:
+                raw_report = Path(control) / "native.json"
+                native = subprocess.run(
+                    [
+                        str(resolve_kicad_cli(args.kicad_cli)),
+                        "sch",
+                        "erc",
+                        "--format",
+                        "json",
+                        "--units",
+                        "mm",
+                        "--severity-all",
+                        "--output",
+                        str(raw_report),
+                        str(schematic.path),
+                    ],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=120,
+                )
+                assert native.returncode == 0, native.stderr
+                raw = json.loads(raw_report.read_bytes())
+                assert not any(
+                    v["type"] == "lib_symbol_issues"
+                    for s in raw["sheets"]
+                    for v in s["violations"]
+                )
+                assert {"error", "warning", "exclusion"}.issubset(
+                    raw["included_severities"]
+                )
+            relative_report = project.erc(kicad_cli=args.kicad_cli)
+            assert not any(
+                finding.type == "lib_symbol_issues"
+                for sheet in relative_report.sheets
+                for finding in sheet.violations
+            )
+            assert (
+                relative_report.snapshot.symbol_table_sha256
+                == baseline.snapshot.symbol_table_sha256
+            )
+            # Independently test ordered DAG projection with absolute leaf URIs.
+            # Native repeated loaders can emit duplicate/load-status artifacts;
+            # those are not a golden finding count for the flattened winners.
+            dag = root / "dag-table"
+            dag.write_bytes(
+                second.read_bytes().replace(
+                    b'"local.kicad_sym"',
+                    json.dumps(str(root / "local.kicad_sym")).encode(),
+                )
+            )
+            (root / "sym-lib-table").write_text(
+                f'(sym_lib_table (lib (name "First") (type "Table") (uri "{dag}"))'
+                ' (lib (name "SPCoast") (type "KiCad") (uri "missing.kicad_sym"))'
+                f' (lib (name "Again") (type "Table") (uri "{dag}")))',
+                encoding="utf-8",
+            )
             schematic.symbol("R3").set_attribute("Value", "22K")
             original = {
                 p: (p.read_bytes(), p.stat().st_ino)
-                for p in root.iterdir()
+                for p in (*root.iterdir(), first)
                 if p.is_file()
             }
             (root / "cpNode-IOX.lck").touch()
@@ -76,7 +154,7 @@ def main() -> None:
                 else:
                     raise AssertionError("Document-only scope was not rejected")
                 print(
-                    f"Native ERC passed: KiCad {report.kicad_version}, {len(findings)} preserved findings, original library URIs, typed items, locked/read-only pending snapshot."
+                    f"Native ERC passed: KiCad {report.kicad_version}, {len(findings)} preserved findings, repeated DAG/common-CWD URI control, typed items, locked/read-only pending snapshot."
                 )
             finally:
                 root.chmod(0o755)

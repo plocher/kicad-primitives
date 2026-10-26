@@ -304,9 +304,13 @@ The report preserves generation date, KiCad version, coordinate units, included 
 ### Library context and failure behavior
 
 ERC stages native local symbol and footprint tables from the original project/config context.
-It follows existing project-over-global and last-row precedence.
+It follows project-over-global and source-order precedence.
+Repeated nested-table includes apply again in order. Active recursion cycles fail explicitly.
+The snapshot represents effective registrations, not parity with native repeated-loader cache diagnostics.
 It expands variables from the explicitly selected project's captured settings, not a discovered sibling project.
-Nested relative paths resolve against their original table locations.
+Both relative table includes and leaf URIs use the original project directory as their common logical native working directory.
+The backend receives that CWD explicitly. The package does not change the caller's working directory.
+Public `LibraryTables` path/expansion deviations remain separate [debt #52](https://github.com/plocher/kicad-primitives/issues/52).
 Only library URI atoms change to absolute original-context `.kicad_sym` or `.pretty` paths.
 Whole winning leaf rows retain disabled/hidden flags, options, descriptions, and opaque metadata.
 Missing winning libraries remain registered. The package does not remove them or fall back to a global library.
@@ -319,6 +323,7 @@ The package does not copy arbitrary project/config trees, symbol libraries, foot
 Libraries and footprints remain at their original locations. The report does not coordinate with concurrent external writers.
 
 The current command requests JSON, millimeter coordinates, and all severities.
+Report metadata must confirm error, warning, and exclusion coverage. Additional severity tokens remain unchanged.
 It uses neither the DRC-only refill option nor an exit-code-on-findings flag.
 Only exit status 0 permits report intake.
 Every nonzero status is an acquisition error, even if a JSON file exists.

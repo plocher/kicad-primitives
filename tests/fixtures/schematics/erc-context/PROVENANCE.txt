@@ -11,6 +11,14 @@ The native ERC gate intentionally does NOT copy this library into its staged
 project: URI projection must retain the ORIGINAL fixture-copy location.
 Otherwise KiCad emits false missing-symbol-library findings.
 
+The native verifier separately checks a nested include and leaf URI relative to
+the ORIGINAL project CWD, not the containing nested table directory. An
+independent raw native ERC control proves that relative context.
+It then checks a repeated-include DAG with absolute leaf URIs and an intervening
+missing-library override. The final projected URI must recover the direct table.
+Native repeated-loader duplicate/load-status artifacts are not asserted to have
+finding-count parity with the package's flattened effective registration snapshot.
+
 No footprint library is registered in this controlled context. Its native
 footprint-link findings remain legitimate and are not filtered or downgraded.
 The report can contain both these context findings and the fixture's electrical
