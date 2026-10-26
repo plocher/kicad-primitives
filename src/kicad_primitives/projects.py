@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ._erc_types import ErcReport
     from .schematics import Schematic
 
 __all__ = [
@@ -108,6 +109,17 @@ class Project:
         from ._schematic_persist import save_schematics
 
         save_schematics(self, tuple(self._schematics.values()), kicad_cli=kicad_cli)
+
+    def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
+        """Check the full pending hierarchy without saving or clearing changes.
+
+        Return typed per-sheet findings with original-path snapshot provenance.
+        Acquisition failures are exceptions, not synthetic findings. Locked
+        and read-only originals remain checkable.
+        """
+        from ._erc import acquire_erc
+
+        return acquire_erc(self, kicad_cli=kicad_cli)
 
     @property
     def directory(self) -> Path:

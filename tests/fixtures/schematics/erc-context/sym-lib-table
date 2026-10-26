@@ -1,0 +1,4 @@
+(sym_lib_table (version 7)
+  (lib (name "SPCoast") (type "KiCad") (uri "${KIPRJMOD}/local.kicad_sym") (options "") (descr "Native ERC fixture"))
+  (lib (name "power") (type "KiCad") (uri "${KIPRJMOD}/local.kicad_sym") (options "") (descr "Native ERC power fixture"))
+)

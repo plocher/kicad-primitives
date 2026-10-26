@@ -15,6 +15,18 @@ from typing import TYPE_CHECKING
 
 from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quote
 
+from ._erc_types import (
+    ErcAcquisitionError,
+    ErcContextError,
+    ErcDocumentSnapshot,
+    ErcIgnoredCheck,
+    ErcItem,
+    ErcPosition,
+    ErcReport,
+    ErcSheet,
+    ErcSnapshot,
+    ErcViolation,
+)
 from ._symbol_types import _MANDATORY, _attribute_key
 
 if TYPE_CHECKING:
@@ -26,6 +38,16 @@ __all__ = [
     "AmbiguousEmbeddedSymbolError",
     "AmbiguousPlacedSymbolError",
     "EmbeddedSymbol",
+    "ErcAcquisitionError",
+    "ErcContextError",
+    "ErcDocumentSnapshot",
+    "ErcIgnoredCheck",
+    "ErcItem",
+    "ErcPosition",
+    "ErcReport",
+    "ErcSheet",
+    "ErcSnapshot",
+    "ErcViolation",
     "GlobalLabel",
     "HierarchicalLabel",
     "InvalidSchematicError",
@@ -309,6 +331,12 @@ class Schematic:
         from ._schematic_persist import save_schematics
 
         save_schematics(self._project, (self,), kicad_cli=kicad_cli)
+
+    def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
+        """Reject document-only ERC because the backend cannot honor that scope."""
+        raise UnsupportedSchematicOperationError(
+            "Document-only ERC is unsupported; request the full hierarchy on Project.erc"
+        )
 
     def _set_attribute(self, symbol: PlacedSymbol, name: str, value: str) -> None:
         if not isinstance(name, str) or not isinstance(value, str):

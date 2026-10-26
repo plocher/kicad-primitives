@@ -22,6 +22,7 @@ They return owned `kicad_primitives.schematics.Schematic` documents: title block
 **merged** placed symbols (attributes, identity, transform, unit, flags).
 Selected concrete embedded definitions support source-backed restore.
 Geometry editing and general cache synchronization remain unsupported.
+`Project.erc()` checks a pending full-project snapshot and returns typed per-sheet reports.
 
 ## Open via a project
 
@@ -255,6 +256,78 @@ Wires keep polyline points in file order. Sheet edges expose `Sheetname` /
 still goes through `Project.schematic_files()` / `Project.schematic(path)`
 (parent-relative), not a second walker.
 
+## Electrical rule reports
+
+```python
+report = project.erc()  # optional kicad_cli="/explicit/path/to/kicad-cli"
+print(report.source_path, report.kicad_version, report.coordinate_units)
+for sheet in report.sheets:
+    print(sheet.path, sheet.uuid_path, sheet.source_path)
+    for finding in sheet.violations:
+        print(finding.type, finding.severity, finding.excluded)
+        for item in finding.items:
+            print(item.uuid, item.description, item.position.x, item.position.y)
+```
+
+`Project.erc()` checks the full hierarchy, including every document's pending `to_bytes()` content.
+It uses the captured `.kicad_pro` settings, text variables, exclusions, and ignored checks.
+It does not save source, clear pending changes, or require the project write guard.
+Locked projects and read-only original files remain checkable.
+The backend writes only temporary snapshot/report files.
+
+`Schematic.erc()` explicitly raises `UnsupportedSchematicOperationError`.
+The current backend cannot honor document-only sheet scope.
+The package does not check an isolated child, silently filter a whole-project report, or claim document-only coverage.
+
+### Typed findings and origin
+
+The immutable report values are available from `kicad_primitives.schematics`.
+`ErcReport.sheets` keeps `ErcSheet` groups in report order.
+Each `ErcViolation` retains its type, description, raw severity, optional excluded flag/comments, and all `ErcItem` values.
+`ErcPosition` holds finite numeric coordinates, not formatted strings.
+Empty item lists remain legitimate violation-level findings.
+Unknown severity strings remain unchanged. Exclusions are not dropped or converted to warnings.
+The client owns severity thresholds and application approval policy.
+
+`source` is KiCad's raw basename. `source_path` is the original absolute root schematic path.
+Each sheet retains its human `path` and raw `uuid_path`.
+The package maps `sheet.source_path` through captured hierarchy UUID chains only.
+It returns `None` when it cannot prove that mapping. It never guesses from a leaf filename.
+Temporary stage paths are not reported as original source origins.
+
+`ErcSnapshot` records the original project path, captured project-settings SHA-256, and original config home.
+Its document entries record original paths, exact checked-content hashes, and pending-change state.
+It also records hashes of the effective symbol and footprint registration snapshots.
+The report preserves generation date, KiCad version, coordinate units, included severities, and typed ignored-check metadata.
+`stdout` and `stderr` retain backend diagnostics.
+
+### Library context and failure behavior
+
+ERC stages native local symbol and footprint tables from the original project/config context.
+It follows existing project-over-global and last-row precedence.
+It expands variables from the explicitly selected project's captured settings, not a discovered sibling project.
+Nested relative paths resolve against their original table locations.
+Only library URI atoms change to absolute original-context `.kicad_sym` or `.pretty` paths.
+Whole winning leaf rows retain disabled/hidden flags, options, descriptions, and opaque metadata.
+Missing winning libraries remain registered. The package does not remove them or fall back to a global library.
+Such missing libraries can produce legitimate KiCad findings.
+
+This context projection supports native `KiCad` rows and unmodified nested `Table` links.
+Table format 7 and tables without a version declaration are supported.
+Missing/cyclic nested tables, unresolved variables, malformed metadata, nested modifiers, remote URIs, and other plugins fail explicitly.
+The package does not copy arbitrary project/config trees, symbol libraries, footprint contents, or 3D assets.
+Libraries and footprints remain at their original locations. The report does not coordinate with concurrent external writers.
+
+The current command requests JSON, millimeter coordinates, and all severities.
+It uses neither the DRC-only refill option nor an exit-code-on-findings flag.
+Only exit status 0 permits report intake.
+Every nonzero status is an acquisition error, even if a JSON file exists.
+A nonempty diagnostic stream, such as Fontconfig output, does not invalidate a successful, complete report.
+Missing, malformed, incomplete, duplicate-key, or invalid-coordinate JSON raises `ErcAcquisitionError`.
+It never becomes an empty report or a synthetic warning finding.
+The supported report schema is `https://schemas.kicad.org/erc.v1.json`.
+ERC findings are not a substitute for the operation-specific save verification above.
+
 ## Limits
 
 - No reference annotation, flag editing, attribute deletion, or geometry editing.
@@ -266,6 +339,7 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 - Absolute, variable-based, external, cyclic, missing, or symlink sheet paths fail explicitly.
 - Verification does not copy arbitrary project trees, external resources, or library tables.
 - No automatic KiCad resave or whole-file normalization occurs.
+- ERC is full-project only and uses the bounded native local reference context described above.
 
 ## Errors
 
@@ -278,6 +352,8 @@ still goes through `Project.schematic_files()` / `Project.schematic(path)`
 - Parent-library lookup errors propagate for missing or ambiguous parent definitions.
 - `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
 - `ProjectWriteBlockedError`: the project write guard blocks persistence.
+- `ErcAcquisitionError`: ERC execution or report intake failed, not a design finding.
+- `ErcContextError`: the original library context cannot be staged faithfully.
 - `KicadCliNotFoundError`, netlist export/parse errors, and ordinary filesystem errors propagate from explicit saves.
 
 ## Tests
@@ -311,3 +387,14 @@ uv run python tests/verify_schematic_restore.py --kicad-cli /path/to/kicad-cli
 
 It proves exact source recovery and output/input-to-passive corrections across three placements and six singleton pins.
 Expected types come from fixed fixture requirements, not another export of the requested replacement.
+
+ERC scenarios port kproj report and execution behavior through the public report boundary.
+`tests/functional/test_schematic_erc.py` covers pending hierarchy, grouping, exclusions, acquisition failures, raw library context, and scope limits.
+The native gate uses disposable source/library copies with recorded context provenance:
+
+```bash
+uv run python tests/verify_schematic_erc.py --kicad-cli /path/to/kicad-cli
+```
+
+It checks actual KiCad 10 JSON, typed findings, original URI resolution, and locked/read-only pending snapshots.
+Finding totals depend on the original reference context. The gate does not filter legitimate missing-footprint findings.
