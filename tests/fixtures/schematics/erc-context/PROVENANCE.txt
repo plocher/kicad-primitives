@@ -1,0 +1,22 @@
+Native local ERC reference context
+
+Source: ../attribute-edit/cpNode-IOX.kicad_sch and its recorded native provenance.
+local.kicad_sym contains that fixture's two exact cached definitions, with only
+outer names adapted from SPCoast:R / power:+5V to standalone R / +5V.
+Nested short body names, pins, graphics, defaults, and opaque payloads are unchanged.
+The wrapper declares native symbol-library format 20251024.
+
+sym-lib-table registers SPCoast and power against ${KIPRJMOD}/local.kicad_sym.
+The native ERC gate intentionally does NOT copy this library into its staged
+project: URI projection must retain the ORIGINAL fixture-copy location.
+Otherwise KiCad emits false missing-symbol-library findings.
+
+No footprint library is registered in this controlled context. Its native
+footprint-link findings remain legitimate and are not filtered or downgraded.
+The report can contain both these context findings and the fixture's electrical
+findings. The gate does not hard-code a universal total finding count.
+
+Behavior anchors: kproj/tests/contract/test_kicad_cli_erc.py and
+kproj/tests/unit/services/test_design_analyzer.py. Their useful per-sheet,
+item, execution, and cleanup scenarios are retained without the donor's refill
+flag bug, severity policy, tolerant empty-report fallback, or flattened findings.

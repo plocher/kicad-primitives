@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `Project.erc()` typed per-sheet reports over pending hierarchy snapshots. Preserve item coordinates/UUIDs, severities/exclusions, check metadata, and original-path/hash provenance. Project native symbol/footprint registrations with raw metadata and original-context paths. Reject report acquisition/context failures explicitly. Document-only ERC remains unsupported (`docs/schematics.md`, `docs/projects.md`; #40).
+
 - Reject cross-cache placement reference ambiguity and unqualified type-correction identities before a restore changes pending source (#37).
 
 - Add stable `EmbeddedSymbol` objects and selected concrete `restore_from` in memory. Preserve placement source and unrelated cache definitions. Support bounded ordinary pin-type corrections with baseline-derived electrical predictions and full exported pin-inventory checks at explicit save. Inheritance, pin names, geometry, hidden/power edits, and ambiguous proof mappings fail explicitly (`docs/schematics.md`; #37).

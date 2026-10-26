@@ -10,6 +10,7 @@ It opens schematic **content** through `schematic()` / `schematics()` (see
 [schematics.md](schematics.md)).
 Owned schematic objects edit attributes in memory. `Project.save()` explicitly persists their pending changes with electrical verification.
 PCB document models remain unsupported. Library tables: [tables.md](tables.md).
+`Project.erc()` returns full-hierarchy electrical rule reports against pending source without saving it.
 The package remains pre-alpha (`0.0.0` informational).
 
 ## Open a project
@@ -75,6 +76,23 @@ Save preflights all sources and the project guard before original writes.
 Each changed document saves separately. This is not a crash-atomic multi-file transaction.
 The [schematic usage page](schematics.md#save-explicitly) defines checks, errors, and supported staging limits.
 The `.kicad_pro` remains read-only and serves as verification context.
+
+
+## Electrical rule reports
+
+```python
+report = project.erc()  # optional explicit kicad_cli path
+for sheet in report.sheets:
+    print(sheet.path, sheet.source_path, len(sheet.violations))
+```
+
+Reports preserve per-sheet findings, affected item UUIDs/positions, severities, exclusions, and check metadata.
+Original paths and checked-content hashes identify the captured pending snapshot.
+Locked and read-only originals remain checkable. No source save or dirty-state reset occurs.
+Native local symbol/footprint registrations retain their original variables, paths, raw flags, and effective precedence.
+Unsupported context or acquisition failures raise exceptions, not findings.
+Document-only `Schematic.erc()` is explicitly unsupported.
+The [schematic usage page](schematics.md#electrical-rule-reports) defines report values, context depth, and failures.
 
 ## Text variables
 

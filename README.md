@@ -24,7 +24,7 @@ Dependency rules are in [ADR 0005](docs/adr/0005-distribution-and-versioning.md)
 - [ADR 0005](docs/adr/0005-distribution-and-versioning.md) — distribution, versioning, and probe install rules
 - [Symbol-library usage](docs/symbol-libraries.md) — inspect declarations/inheritance, edit existing values, and save explicitly
 - [Project context usage](docs/projects.md) — open a project, list hierarchical sheets, read text variables
-- [Schematics](docs/schematics.md) — inspect symbols and geometry, edit attributes, restore selected concrete embedded definitions, and save explicitly with electrical proof
+- [Schematics](docs/schematics.md) — inspect/edit supported objects, restore concrete definitions, save with electrical proof, and get full-project pending ERC reports
 - [Library tables](docs/tables.md) — global/project symbol and footprint table resolve and localized writes
 - [Netlist exchange](docs/netlist.md) — parse kicadsexpr `.net` files; obtain/export via private `kicad-cli`
 - [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
@@ -78,7 +78,7 @@ This is intended scope, not a list of shipped capabilities.
 Implemented services today:
 - `kicad_primitives.symbols.SymbolLibrary` — explicit-path inspection and localized existing-attribute updates, with byte-preserving output ([usage](docs/symbol-libraries.md)).
 - `kicad_primitives.projects.Project` — open a project directory or `.kicad_pro`, list hierarchical schematic paths with parent-relative `Sheetfile` resolution, and read `text_variables` ([usage](docs/projects.md)).
-- `kicad_primitives.schematics` via `Project.schematic` / `schematics` — placed attributes, selected concrete embedded restore with bounded pin-type repair, explicit verified saves, title block, and geometry read ([usage](docs/schematics.md)).
+- `kicad_primitives.schematics` via project context — placed attributes, selected concrete embedded restore, verified saves, typed pending `Project.erc()` reports, title block, and geometry read ([usage](docs/schematics.md)).
 - `kicad_primitives.tables.LibraryTables` — global/project symbol and footprint tables, `${VAR}` resolve, nested tables, localized add/remove/rename ([usage](docs/tables.md)).
 - `kicad_primitives.netlist` — kicadsexpr netlist **exchange** parse and obtain/export; not full project-owned Connectivity ([usage](docs/netlist.md)).
 PCB document models, project-owned Connectivity beyond exchange, and the remaining TOC areas are not implemented yet.
