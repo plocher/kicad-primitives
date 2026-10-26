@@ -42,6 +42,8 @@ def main() -> None:
         assert schematic.to_bytes() == expected_source
         assert schematic.path.read_bytes() == original
         parent.symbol("R").body(1, 0).pin("1").set(electrical_type="input")
+        parent.discard()
+        assert parent.is_closed
         project.save(kicad_cli=args.kicad_cli)
         after = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         expected_after = {key: "passive" for key in expected_before}
@@ -63,7 +65,7 @@ def main() -> None:
         schematic.save(kicad_cli=args.kicad_cli)
         assert schematic.path.stat().st_ino == inode
         print(
-            "Native restore passed: exact cache/complement, three placements, six output/input-to-passive pin effects, parent capture, explicit save."
+            "Native restore passed: exact cache/complement, three placements, six output/input-to-passive pin effects, captured parent after terminal discard, explicit save."
         )
 
 

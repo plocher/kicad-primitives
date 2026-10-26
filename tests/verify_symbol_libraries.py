@@ -175,6 +175,9 @@ def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
         assert edited_path.read_bytes() == original, "Editing implicitly wrote to disk"
         edited.save()
         assert edited_path.read_bytes() == changed, "Save changed preview bytes"
+        assert edited_path.with_suffix(".bak").read_bytes() == original, (
+            "Native suffix backup did not capture the previous source"
+        )
         first: bool | None = None
         stable: bool | None = None
         delta_only: bool | None = None
@@ -192,6 +195,7 @@ def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
                 "Normalization introduced changes beyond the required edit"
             )
         cases.append(CaseResult(name, key, True, first, stable, delta_only))
+        edited.close()
     assert sha256(path.read_bytes()).hexdigest() == digest, (
         "Original changed during verification"
     )

@@ -58,7 +58,16 @@ The library owns KiCad invariants, source preservation, change tracking, and app
 Project ownership supplies schematic and PCB context. It does not force every edit onto `Project`.
 `set_attribute` means create if absent, update if different, and exact no-op if equal. Reject ambiguity.
 Reference annotation and flags have their own semantics.
-Lifecycle names, save-as relocation, and multi-file failure handling need bounded designs. Do not invent a universal session or transaction framework.
+Independent `SymbolLibrary` and physical `LibraryTable` artifacts implement the lifecycle defined in ADR 0008.
+`close()` errors even for a clean, never-edited open until a successful explicit save decision exists.
+Save/save-as authorizes close only for the current state. Later edits and every failed save attempt invalidate that decision.
+Exact no-op edits preserve a successful decision.
+`discard()` is terminal exit without writing. It invalidates owned editable handles, not a reset for continued editing.
+Close after discard is idempotent. No mutation, close, discard, or finalizer implicitly persists.
+Single-file save-as refuses existing or unsafe destinations and rebinds only after success.
+Changed independent symbol-library overwrites require native `Foo.bak` backup behavior. Table saves do not invent a backup.
+Project multi-file save-as and native backup support remain subsequent work. The owner has not selected timestamped ZIP versus Git-backed `.history`.
+Do not implement that backend or invent a universal session or transaction framework.
 Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.
 
 ### Functional ownership
@@ -103,6 +112,10 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 
 > Advance **one** map ticket or **one** small PR under existing ADRs; use donor tests as the net when lifting; no CI/test-framework epic before foundation; check with the owner before any new policy.
 
+The owner may approve related implementation tickets in one umbrella PR.
+Work them serially as coherent, validated per-ticket commits under the accepted decisions.
+This does not authorize parallel decision-making or reopen the one-at-a-time human decision spine.
+
 ### Human vs agent
 
 | Role | Who | Job |
@@ -121,7 +134,7 @@ Wayfinder map: [#1 Stand-alone kicad-primitives package](https://github.com/ploc
 ### Grilling and wayfinder
 
 - `wayfinder:grilling` is HITL: one question at a time, recommended answer, **owner locks**, then write ADR/code.
-- Never resolve more than one map ticket per session.
+- Resolve decision/grilling tickets one at a time with the owner. Related approved implementation tickets may use the serial umbrella-PR exception above.
 - Resolution: comment + close + one line on the map's Decisions so far.
 
 ### Git

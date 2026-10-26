@@ -41,6 +41,10 @@ class FileConflictError(SymbolLibraryError, RuntimeError):
     """The opened file has changed since the last successful read/save."""
 
 
+class LibraryLifecycleError(SymbolLibraryError, RuntimeError):
+    """A library is closed or lacks a successful current save decision."""
+
+
 @dataclass(frozen=True)
 class SymbolAttribute:
     """One attribute occurrence; origin identifies its declaring symbol."""

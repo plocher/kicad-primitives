@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add independent SymbolLibrary save-as and current-state close decisions. Discard is terminal and invalidates editable handles. Changed overwrites create native `Foo.bak` backups with safe failure recovery. Guard closed-parent copy/restore while retaining captured restore intent. Record the accepted lifecycle in ADR 0008, AGENTS, and CONTEXT. Project backup/history and multi-file save-as remain pending the owner's backend choice (`docs/symbol-libraries.md`; #54).
+
 - Add physical `LibraryTable` and live `TableEntry` nouns. Buffer localized registration edits, expose pending nested resolution, remove `apply`/dry-run commands, and add explicit single-file save/save-as plus terminal discard/close with current-decision checks. Preserve full raw rows and flags (`docs/tables.md`; #54).
 
 - Expose stable source-backed Symbol, SymbolBody, and SymbolPin objects. Move declared attribute upsert, body/pin edits, and graphics insertion onto those nouns without library-command aliases. Preserve authoring, inheritance inspection, source-local edits, and deleted-handle rejection (`docs/symbol-libraries.md`; #54).

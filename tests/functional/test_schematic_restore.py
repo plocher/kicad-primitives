@@ -202,6 +202,31 @@ class EmbeddedRestoreTests(unittest.TestCase):
                     )
                 self.assertEqual(schematic.to_bytes(), source.encode())
 
+    def test_closed_parent_restore_fails_before_pending_or_disk_changes(self) -> None:
+        for decision in ("discard", "close"):
+            with self.subTest(decision=decision):
+                parent = SymbolLibrary.open(self.parent_path)
+                if decision == "close":
+                    parent.save()
+                    parent.close()
+                else:
+                    parent.discard()
+                with self.assertRaises(RuntimeError):
+                    self.schematic.embedded_symbol("Test:Part").restore_from(
+                        parent, "Parent"
+                    )
+                self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
+                self.assertEqual(self.path.read_bytes(), SOURCE.encode())
+                self.assertFalse(self.project.is_modified)
+
+    def test_captured_restore_intent_survives_parent_terminal_exit(self) -> None:
+        self.schematic.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
+        expected = self.schematic.to_bytes()
+        self.parent.discard()
+        self.project.save(kicad_cli=self.verifier())
+        self.assertEqual(self.path.read_bytes(), expected)
+        self.assertFalse(self.project.is_modified)
+
     def test_document_save_excludes_other_pending_restore_and_rejects_cache_variants(
         self,
     ) -> None:

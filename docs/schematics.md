@@ -355,7 +355,8 @@ ERC findings are not a substitute for the operation-specific save verification a
 - `UnsupportedSchematicOperationError`: unsupported format, identity, edit, or safe staging case.
 - `SchematicConflictError`: changed or missing source or project verification context.
 - `SchematicVerificationError`: pending content does not match its required or predicted electrical signature.
-- Parent-library lookup errors propagate for missing or ambiguous parent definitions.
+- Parent-library lookup/lifecycle errors propagate for missing or ambiguous definitions and closed/discarded parent libraries.
+  A restore intent captured before parent exit remains valid and does not reread that parent at save.
 - `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
 - `ProjectWriteBlockedError`: the project write guard blocks persistence.
 - `ErcAcquisitionError`: ERC execution or report intake failed, not a design finding.

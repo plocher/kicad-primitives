@@ -34,7 +34,7 @@ def save_new_source(
     *,
     mode: int = 0o600,
     unsupported_error: type[Exception] = UnsupportedOperationError,
-) -> None:
+) -> os.stat_result:
     """Create one new file without overwrite, symlink traversal, or implicit parents."""
     path = path.absolute()
     _check_new_destination(path, unsupported_error=unsupported_error)
@@ -49,8 +49,147 @@ def save_new_source(
         _check_new_destination(path, unsupported_error=unsupported_error)
         # Linking a staged regular file is atomic and refuses a racing destination.
         os.link(temporary, path)
+        return temporary.stat()
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _file_version(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _backup_recovery(path: Path, raw: bytes, mode: int) -> Path:
+    fd, name = tempfile.mkstemp(
+        prefix=f".{path.name}.recovery.", suffix=".tmp", dir=path.parent
+    )
+    recovery = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fchmod(stream.fileno(), mode)
+            os.fsync(stream.fileno())
+    except BaseException:
+        recovery.unlink(missing_ok=True)
+        raise
+    return recovery
+
+
+def _recover_backup(
+    path: Path,
+    installed: os.stat_result,
+    baseline: bytes,
+    recovery: Path | None,
+) -> None:
+    """Restore only our installed backup, never a concurrent replacement/version."""
+    try:
+        info = _check_baseline(path, baseline, label="Library backup")
+        if _file_version(info) != _file_version(installed):
+            raise FileConflictError(
+                f"Library backup changed during failed save: {path}"
+            )
+        if recovery is None:
+            path.unlink()
+        else:
+            os.replace(recovery, path)
+    except Exception as exc:
+        retained = "" if recovery is None else f"; prior backup retained at {recovery}"
+        raise FileConflictError(
+            f"Cannot restore backup after failed save; concurrent backup left untouched: {path}{retained}"
+        ) from exc
+
+
+def save_library_source(path: Path, baseline: bytes, output: bytes) -> None:
+    """Back up a changed library to native Foo.bak before replacing Foo.kicad_sym."""
+    info = _check_baseline(path, baseline)
+    if output == baseline:
+        return
+    if not stat.S_IMODE(info.st_mode) & 0o222:
+        raise PermissionError(f"Library has no write permission bits: {path}")
+    # Resolve directory aliases, not the final backup filename: do not follow links.
+    backup = path.parent.resolve() / path.with_suffix(".bak").name
+    if backup == path.resolve():
+        raise UnsupportedOperationError("Library and backup destinations collide")
+    parent_mode = stat.S_IMODE(backup.parent.stat().st_mode)
+    if (
+        not parent_mode & 0o222
+        or not parent_mode & 0o111
+        or not os.access(backup.parent, os.W_OK | os.X_OK)
+    ):
+        raise PermissionError(
+            f"Library destination directory is not writable: {backup.parent}"
+        )
+    prior: bytes | None = None
+    recovery: Path | None = None
+    retain_recovery = False
+    try:
+        backup_info = backup.lstat()
+    except FileNotFoundError:
+        backup_info = None
+    if backup_info is not None:
+        if (backup_info.st_dev, backup_info.st_ino) == (info.st_dev, info.st_ino):
+            raise UnsupportedOperationError("Library and backup destinations collide")
+        if not stat.S_ISREG(backup_info.st_mode) or backup_info.st_nlink != 1:
+            raise UnsupportedOperationError(
+                "Backup requires a regular singly linked file"
+            )
+        if not stat.S_IMODE(backup_info.st_mode) & 0o222:
+            raise PermissionError(f"Backup has no write permission bits: {backup}")
+        prior = backup.read_bytes()
+        _check_baseline(backup, prior, label="Library backup")
+        recovery = _backup_recovery(backup, prior, stat.S_IMODE(backup_info.st_mode))
+    try:
+        try:
+            if prior is None:
+                expected = save_new_source(
+                    backup, baseline, mode=stat.S_IMODE(info.st_mode)
+                )
+            else:
+                expected = save_source(backup, prior, baseline, label="Library backup")
+            installed = _check_baseline(
+                backup, baseline, label="Installed library backup"
+            )
+            if (installed.st_dev, installed.st_ino, installed.st_mode) != (
+                expected.st_dev,
+                expected.st_ino,
+                expected.st_mode,
+            ):
+                raise FileConflictError("Installed backup was concurrently replaced")
+        except BaseException as exc:
+            if recovery is not None and backup_info is not None:
+                try:
+                    current = _check_baseline(
+                        backup, prior or b"", label="Library backup"
+                    )
+                    unchanged = _file_version(current) == _file_version(backup_info)
+                except (OSError, FileConflictError, UnsupportedOperationError):
+                    unchanged = False
+                if not unchanged:
+                    retain_recovery = True
+                    raise FileConflictError(
+                        f"Backup changed before source save; prior backup retained at {recovery}"
+                    ) from exc
+            raise
+        try:
+            save_source(path, baseline, output)
+        except BaseException:
+            try:
+                _recover_backup(backup, installed, baseline, recovery)
+            except FileConflictError:
+                retain_recovery = recovery is not None
+                raise
+            raise
+    finally:
+        if recovery is not None and not retain_recovery:
+            recovery.unlink(missing_ok=True)
 
 
 def _check_read_baseline(
@@ -99,7 +238,7 @@ def save_source(
     conflict_error: type[Exception] = FileConflictError,
     unsupported_error: type[Exception] = UnsupportedOperationError,
     label: str = "Library",
-) -> None:
+) -> os.stat_result:
     info = _check_baseline(
         path,
         baseline,
@@ -108,7 +247,7 @@ def save_source(
         label=label,
     )
     if output == baseline:
-        return
+        return info
     if not stat.S_IMODE(info.st_mode) & 0o222:
         raise PermissionError(f"{label} has no write permission bits: {path}")
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
@@ -119,6 +258,7 @@ def save_source(
             stream.flush()
             os.fchmod(stream.fileno(), stat.S_IMODE(info.st_mode))
             os.fsync(stream.fileno())
+            installed = os.fstat(stream.fileno())
         final_info = _check_baseline(
             path,
             baseline,
@@ -135,5 +275,6 @@ def save_source(
                 f"{label} identity or permissions changed during save: {path}"
             )
         os.replace(temporary, path)
+        return installed
     finally:
         temporary.unlink(missing_ok=True)

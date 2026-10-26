@@ -12,10 +12,16 @@ In-memory changes to an artifact or its owned content that the client has not sa
 Explicit persistence of an artifact's pending changes to its current storage location.
 
 **Save as**:
-Explicit persistence of an artifact to a different destination.
+Explicit persistence to a new destination, with artifact rebinding only after success.
 
 **Discard**:
-Abandon pending changes without saving them.
+Terminal artifact exit without writing. Invalidate owned editable handles.
+This is not rollback, reload, or a reset that permits continued editing.
+
+**Close**:
+Artifact exit without implicit persistence.
+A current successful save/save-as decision is required, even for a clean open.
+Terminal discard already permits an idempotent close.
 
 **Flag**:
 A typed behavior switch on a symbol or footprint, such as DNP or exclusion from BOM, board, or simulation.
