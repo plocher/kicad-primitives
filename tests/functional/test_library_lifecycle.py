@@ -392,3 +392,84 @@ class LibraryLifecycleTests(unittest.TestCase):
                 self.assertTrue(library.is_modified)
                 with self.assertRaises(RuntimeError):
                     library.close()
+
+    def test_published_backup_never_adopts_a_same_inode_same_byte_foreign_version(
+        self,
+    ) -> None:
+        real_replace = os.replace
+        real_link = os.link
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                root = self.root / f"same-inode-{existing}"
+                root.mkdir()
+                path = root / "Parts.kicad_sym"
+                path.write_bytes(ORIGINAL)
+                backup = path.with_suffix(".bak")
+                if existing:
+                    backup.write_bytes(b"prior backup")
+                foreign_version: tuple[int, int] | None = None
+                source_attempted = False
+
+                def rewrite_same_bytes(target: Path) -> None:
+                    nonlocal foreign_version
+                    info = target.stat()
+                    target.write_bytes(ORIGINAL)
+                    os.utime(
+                        target,
+                        ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000),
+                    )
+                    changed = target.stat()
+                    foreign_version = (changed.st_ino, changed.st_mtime_ns)
+
+                def racing_replace(
+                    source: Path,
+                    target: Path,
+                    *,
+                    path: Path = path,
+                    backup: Path = backup,
+                ) -> None:
+                    nonlocal source_attempted
+                    if target == path:
+                        source_attempted = True
+                        raise OSError("source replacement failed")
+                    real_replace(source, target)
+                    if target == backup:
+                        rewrite_same_bytes(target)
+
+                def racing_link(
+                    source: Path,
+                    target: Path,
+                    *,
+                    backup: Path = backup,
+                ) -> None:
+                    real_link(source, target)
+                    if target == backup:
+                        rewrite_same_bytes(target)
+
+                library = SymbolLibrary.open(path)
+                library.symbol("A").set_attribute("Note", "pending")
+                with (
+                    patch(
+                        "kicad_primitives._symbol_persist.os.replace",
+                        side_effect=racing_replace,
+                    ),
+                    patch(
+                        "kicad_primitives._symbol_persist.os.link",
+                        side_effect=racing_link,
+                    ),
+                    self.assertRaises(FileConflictError),
+                ):
+                    library.save()
+                self.assertFalse(source_attempted)
+                self.assertIsNotNone(foreign_version)
+                actual = backup.stat()
+                self.assertEqual((actual.st_ino, actual.st_mtime_ns), foreign_version)
+                self.assertEqual(backup.read_bytes(), ORIGINAL)
+                self.assertEqual(path.read_bytes(), ORIGINAL)
+                if existing:
+                    recoveries = tuple(root.glob(".Parts.bak.recovery.*.tmp"))
+                    self.assertEqual(len(recoveries), 1)
+                    self.assertEqual(recoveries[0].read_bytes(), b"prior backup")
+                self.assertTrue(library.is_modified)
+                with self.assertRaises(RuntimeError):
+                    library.close()

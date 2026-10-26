@@ -46,10 +46,11 @@ def save_new_source(
             stream.flush()
             os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
+            staged = os.fstat(stream.fileno())
         _check_new_destination(path, unsupported_error=unsupported_error)
         # Linking a staged regular file is atomic and refuses a racing destination.
         os.link(temporary, path)
-        return temporary.stat()
+        return staged
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -157,12 +158,21 @@ def save_library_source(path: Path, baseline: bytes, output: bytes) -> None:
             installed = _check_baseline(
                 backup, baseline, label="Installed library backup"
             )
-            if (installed.st_dev, installed.st_ino, installed.st_mode) != (
+            # Own rename/link operations can change ctime/nlink, not file data facts.
+            if (
+                installed.st_dev,
+                installed.st_ino,
+                installed.st_mode,
+                installed.st_size,
+                installed.st_mtime_ns,
+            ) != (
                 expected.st_dev,
                 expected.st_ino,
                 expected.st_mode,
+                expected.st_size,
+                expected.st_mtime_ns,
             ):
-                raise FileConflictError("Installed backup was concurrently replaced")
+                raise FileConflictError("Installed backup was concurrently changed")
         except BaseException as exc:
             if recovery is not None and backup_info is not None:
                 try:
