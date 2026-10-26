@@ -102,10 +102,12 @@ class LibraryTables:
         config_home: Path,
         project_directory: Path | None,
         path_variables: Mapping[str, str],
+        base_directory: Path,
     ) -> None:
         self._config_home = config_home
         self._project_directory = project_directory
         self._path_variables = path_variables
+        self._base_directory = base_directory
 
     @classmethod
     def open(
@@ -113,6 +115,7 @@ class LibraryTables:
         *,
         config_home: str | PathLike[str] | None = None,
         project_directory: str | PathLike[str] | None = None,
+        base_directory: str | PathLike[str] | None = None,
     ) -> LibraryTables:
         """Open tables for an optional project against a KiCad config home.
 
@@ -123,6 +126,10 @@ class LibraryTables:
         *project_directory* adds project-scope tables, ``KIPRJMOD``, and
         ``.kicad_pro`` ``text_variables`` overrides. Library resolution works
         without a project.
+
+        Relative include and leaf URIs use the project directory. Standalone
+        resolution uses *base_directory*, or captures process CWD at open.
+        The base is never the containing table's directory.
         """
         home = _detect_config_home(None if config_home is None else Path(config_home))
         project = (
@@ -135,10 +142,20 @@ class LibraryTables:
                 f"Project directory does not exist: {project}"
             )
         variables = _build_path_variables(config_home=home, project_directory=project)
+        if project is not None and base_directory is not None:
+            raise ValueError("base_directory is only for standalone table resolution")
+        base = project or (
+            Path.cwd()
+            if base_directory is None
+            else Path(base_directory).expanduser().resolve()
+        )
+        if not base.is_dir():
+            raise InvalidLibraryTableError(f"Base directory does not exist: {base}")
         return cls(
             config_home=home,
             project_directory=project,
             path_variables=variables,
+            base_directory=base,
         )
 
     @property
@@ -155,6 +172,11 @@ class LibraryTables:
     def path_variables(self) -> Mapping[str, str]:
         """Read-only effective ``${VAR}`` map used for URI expansion."""
         return MappingProxyType(dict(self._path_variables))
+
+    @property
+    def base_directory(self) -> Path:
+        """Captured base for relative include and leaf URIs in this context."""
+        return self._base_directory
 
     def table_path(self, library_type: LibraryType, scope: LibraryScope) -> Path:
         """Return the path of the primary table file for *scope* and *type*."""
@@ -360,9 +382,9 @@ class LibraryTables:
                     table_path=global_table,
                     library_type=library_type,
                     scope="global",
-                    project_directory=self._project_directory,
+                    base_directory=self._base_directory,
                     path_variables=self._path_variables,
-                    visited=set(),
+                    active=set(),
                 )
             )
         if self._project_directory is not None:
@@ -373,9 +395,9 @@ class LibraryTables:
                         table_path=project_table,
                         library_type=library_type,
                         scope="project",
-                        project_directory=self._project_directory,
+                        base_directory=self._base_directory,
                         path_variables=self._path_variables,
-                        visited=set(),
+                        active=set(),
                     )
                 )
         return entries
@@ -585,15 +607,9 @@ def _kicad_share_roots_from_model_vars(variables: Mapping[str, str]) -> dict[str
     return roots
 
 
-def _resolve_entry_path(
-    *,
-    uri: str,
-    project_directory: Path | None,
-    path_variables: Mapping[str, str],
-    table_path: Path,
-) -> Path:
+def _expand_library_uri(uri: str, path_variables: Mapping[str, str]) -> str:
     expanded = uri
-    for _ in range(8):
+    for _ in range(32):
         replaced = _URI_VARIABLE_PATTERN.sub(
             lambda match: path_variables.get(match.group(1), match.group(0)),
             expanded,
@@ -601,16 +617,16 @@ def _resolve_entry_path(
         if replaced == expanded:
             break
         expanded = replaced
-    expanded_path = Path(expanded).expanduser()
-    if expanded_path.is_absolute():
-        return expanded_path
-    # Nested and relative URIs resolve against the table file directory first
-    # (kDoctor nested tables). Plain project-relative paths still work when the
-    # table lives in the project directory.
-    base = table_path.parent
-    if project_directory is not None and base == project_directory:
-        return (project_directory / expanded_path).resolve()
-    return (base / expanded_path).resolve()
+    return expanded
+
+
+def _resolve_entry_path(
+    *, uri: str, base_directory: Path, path_variables: Mapping[str, str]
+) -> Path:
+    location = Path(_expand_library_uri(uri, path_variables)).expanduser()
+    if not location.is_absolute():
+        location = base_directory / location
+    return location.resolve()
 
 
 def _expand_table_file(
@@ -618,14 +634,15 @@ def _expand_table_file(
     table_path: Path,
     library_type: LibraryType,
     scope: LibraryScope,
-    project_directory: Path | None,
+    base_directory: Path,
     path_variables: Mapping[str, str],
-    visited: set[Path],
+    active: set[Path],
 ) -> list[LibraryEntry]:
     resolved_table = table_path.resolve()
-    if resolved_table in visited:
+    if resolved_table in active:
         return []
-    visited.add(resolved_table)
+    # Only current ancestry counts as a cycle; completed includes replay later.
+    active = active | {resolved_table}
     records = _load_direct_records(resolved_table, library_type=library_type)
     entries: list[LibraryEntry] = []
     for record in records:
@@ -636,9 +653,8 @@ def _expand_table_file(
             continue
         resolved_path = _resolve_entry_path(
             uri=uri,
-            project_directory=project_directory,
+            base_directory=base_directory,
             path_variables=path_variables,
-            table_path=resolved_table,
         )
         if entry_type == _NESTED_ENTRY_TYPE:
             if resolved_path.is_file():
@@ -647,9 +663,9 @@ def _expand_table_file(
                         table_path=resolved_path,
                         library_type=library_type,
                         scope=scope,
-                        project_directory=project_directory,
+                        base_directory=base_directory,
                         path_variables=path_variables,
-                        visited=visited,
+                        active=active,
                     )
                 )
             continue
