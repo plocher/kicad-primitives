@@ -23,7 +23,7 @@ __all__ = [
     "Junction",
     "Label",
     "NoConnect",
-    "PlacedProperty",
+    "PlacedAttribute",
     "PlacedSymbol",
     "Schematic",
     "SchematicError",
@@ -58,8 +58,8 @@ class TitleBlock:
 
 
 @dataclass(frozen=True)
-class PlacedProperty:
-    """One property declared on a placed symbol instance."""
+class PlacedAttribute:
+    """One attribute declared on a placed symbol instance."""
 
     name: str
     value: str
@@ -67,14 +67,14 @@ class PlacedProperty:
 
 @dataclass(frozen=True)
 class PlacedSymbol:
-    """Merged placed-symbol snapshot: fields, identity, transform, and flags."""
+    """Merged placed-symbol snapshot: attributes, identity, transform, and flags."""
 
     reference: str
     lib_id: str
     uuid: str
     value: str
     footprint: str
-    properties: tuple[PlacedProperty, ...]
+    attributes: tuple[PlacedAttribute, ...]
     x: float
     y: float
     rotation: float
@@ -87,14 +87,14 @@ class PlacedSymbol:
     exclude_from_sim: bool
     path: Path
 
-    def property(self, name: str) -> PlacedProperty:
-        """Return the unique property with this name."""
-        matches = tuple(p for p in self.properties if p.name == name)
+    def attribute(self, name: str) -> PlacedAttribute:
+        """Return the unique attribute with this name."""
+        matches = tuple(p for p in self.attributes if p.name == name)
         if not matches:
             raise KeyError(name)
         if len(matches) > 1:
             raise AmbiguousPlacedSymbolError(
-                f"Ambiguous property {name!r} on {self.reference!r}"
+                f"Ambiguous attribute {name!r} on {self.reference!r}"
             )
         return matches[0]
 
@@ -327,8 +327,8 @@ def _placed_symbol(node: ListNode, path: Path) -> PlacedSymbol | None:
     y = _number(at, 2)
     rotation = _number(at, 3) if len(at.children()) >= 4 else 0.0
 
-    properties = tuple(_property(p) for p in node.child_lists("property"))
-    reference = _named_value(properties, "Reference")
+    attributes = tuple(_attribute(p) for p in node.child_lists("property"))
+    reference = _named_value(attributes, "Reference")
     if not reference:
         return None
 
@@ -347,9 +347,9 @@ def _placed_symbol(node: ListNode, path: Path) -> PlacedSymbol | None:
         reference=reference,
         lib_id=lib_id,
         uuid=uuid,
-        value=_named_value(properties, "Value"),
-        footprint=_named_value(properties, "Footprint"),
-        properties=properties,
+        value=_named_value(attributes, "Value"),
+        footprint=_named_value(attributes, "Footprint"),
+        attributes=attributes,
         x=x,
         y=y,
         rotation=rotation,
@@ -472,16 +472,16 @@ def _optional_shape(node: ListNode) -> str:
     return _atom(shapes[0], 1).value
 
 
-def _property(node: ListNode) -> PlacedProperty:
+def _attribute(node: ListNode) -> PlacedAttribute:
     name = _atom(node, 1).value
     value = _atom(node, 2).value
     if not name:
-        raise InvalidSchematicError("Empty property name")
-    return PlacedProperty(name=name, value=value)
+        raise InvalidSchematicError("Empty attribute name")
+    return PlacedAttribute(name=name, value=value)
 
 
-def _named_value(properties: tuple[PlacedProperty, ...], name: str) -> str:
-    for prop in properties:
+def _named_value(attributes: tuple[PlacedAttribute, ...], name: str) -> str:
+    for prop in attributes:
         if prop.name == name:
             return prop.value
     return ""

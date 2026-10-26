@@ -6,12 +6,14 @@ Only library behavior is ported; HTML and Railroad policy remain in the donor.
 """
 
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, fields
+from inspect import signature
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from kicad_primitives import schematics, symbols
 from kicad_primitives.symbols import (
-    AmbiguousPropertyError,
+    AmbiguousAttributeError,
     InheritanceError,
     InvalidLibraryError,
     SymbolLibrary,
@@ -19,6 +21,32 @@ from kicad_primitives.symbols import (
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+class AttributeApiTests(unittest.TestCase):
+    def test_canonical_public_names_have_no_property_aliases(self) -> None:
+        for module, canonical, obsolete in (
+            (symbols, "SymbolAttribute", "SymbolProperty"),
+            (symbols, "AmbiguousAttributeError", "AmbiguousPropertyError"),
+            (schematics, "PlacedAttribute", "PlacedProperty"),
+        ):
+            with self.subTest(name=canonical):
+                self.assertIn(canonical, module.__all__)
+                self.assertTrue(hasattr(module, canonical))
+                self.assertNotIn(obsolete, module.__all__)
+                self.assertFalse(hasattr(module, obsolete))
+        for model in (symbols.Symbol, schematics.PlacedSymbol):
+            with self.subTest(model=model.__name__):
+                self.assertIn("attributes", {field.name for field in fields(model)})
+                self.assertNotIn("properties", {field.name for field in fields(model)})
+                self.assertTrue(callable(model.attribute))
+                self.assertFalse(hasattr(model, "property"))
+        for action in ("set", "add", "delete"):
+            with self.subTest(action=action):
+                method = getattr(SymbolLibrary, f"{action}_attribute")
+                self.assertIn("attribute_name", signature(method).parameters)
+                self.assertNotIn("property_name", signature(method).parameters)
+                self.assertFalse(hasattr(SymbolLibrary, f"{action}_property"))
 
 
 class LibraryCase(unittest.TestCase):
@@ -46,13 +74,13 @@ class DonorInspectionTests(unittest.TestCase):
         ):
             with self.subTest(symbol=name):
                 symbol = library.symbol(name)
-                self.assertEqual(symbol.property("Reference").value, reference)
+                self.assertEqual(symbol.attribute("Reference").value, reference)
                 self.assertEqual(
                     {(p.number, p.name) for b in symbol.bodies for p in b.pins},
                     pins,
                 )
         with self.assertRaises(UnsupportedOperationError):
-            library.set_property("IRJ", "Reference", "X")
+            library.set_attribute("IRJ", "Reference", "X")
         with self.assertRaises(UnsupportedOperationError):
             library.save()
 
@@ -66,9 +94,9 @@ class DonorInspectionTests(unittest.TestCase):
             ("hold_ms", "1500"),
             ("Description", 'A <b>gadget</b> & its "friend"'),
         ):
-            with self.subTest(property=key):
-                self.assertEqual(gadget.property(key).value, expected)
-        self.assertFalse(gadget.property("Value").autoplace)
+            with self.subTest(attribute=key):
+                self.assertEqual(gadget.attribute(key).value, expected)
+        self.assertFalse(gadget.attribute("Value").autoplace)
         self.assertEqual(
             [
                 (b.unit, b.body_style, tuple(p.name for p in b.pins))
@@ -80,21 +108,21 @@ class DonorInspectionTests(unittest.TestCase):
         self.assertEqual(gadget.bodies[0].rectangles[0].start_x, -2.54)
         self.assertEqual(gadget.bodies[1].pins[0].x, 5.08)
         self.assertEqual(gadget.bodies[1].pins[0].rotation, 180)
-        self.assertEqual(library.symbol("Marker").property("Kind").value, "END_CTC")
+        self.assertEqual(library.symbol("Marker").attribute("Kind").value, "END_CTC")
         self.assertEqual(
             library.to_bytes(), (FIXTURES / "overview.kicad_sym").read_bytes()
         )
 
 
 class StructuralInspectionTests(LibraryCase):
-    def test_private_modifier_is_not_a_property_name(self) -> None:
+    def test_private_modifier_is_not_an_attribute_name(self) -> None:
         library = self.library("""(kicad_symbol_lib (version 20251024)
           (symbol "Crystal"
             (property private "KLC_S3.3" "reason one" (hide yes))
             (property private "KLC_S4.1" "reason two")
             (property "private" "a genuinely named property")
           ))""")
-        props = library.symbol("Crystal").properties
+        props = library.symbol("Crystal").attributes
         self.assertEqual([p.name for p in props], ["KLC_S3.3", "KLC_S4.1", "private"])
         self.assertEqual([p.is_private for p in props], [True, True, False])
         self.assertTrue(props[0].hidden)
@@ -102,16 +130,16 @@ class StructuralInspectionTests(LibraryCase):
         with self.assertRaises(FrozenInstanceError):
             props[0].value = "mutated"  # type: ignore[misc]
 
-    def test_repeated_properties_remain_visible_but_lookup_is_ambiguous(self) -> None:
+    def test_repeated_attributes_remain_visible_but_lookup_is_ambiguous(self) -> None:
         library = self.library("""(kicad_symbol_lib (version 20251024)
           (symbol "Repeated" (property "Note" "first") (property "Note" "second")))""")
         self.assertEqual(
-            [p.value for p in library.symbol("Repeated").properties],
+            [p.value for p in library.symbol("Repeated").attributes],
             ["first", "second"],
         )
-        with self.assertRaises(AmbiguousPropertyError):
-            library.symbol("Repeated").property("Note")
-        with self.assertRaises(AmbiguousPropertyError):
+        with self.assertRaises(AmbiguousAttributeError):
+            library.symbol("Repeated").attribute("Note")
+        with self.assertRaises(AmbiguousAttributeError):
             library.resolve("Repeated")
 
     def test_top_level_numeric_suffix_and_body_style_identity(self) -> None:
@@ -152,15 +180,15 @@ class StructuralInspectionTests(LibraryCase):
         resolved = library.resolve("Child")
         self.assertFalse(declared.resolved)
         self.assertTrue(resolved.resolved)
-        self.assertEqual(declared.property("Description").value, "")
+        self.assertEqual(declared.attribute("Description").value, "")
         for key, value, origin in (
             ("Reference", "IC", "Middle"),
             ("Description", "base", "Root"),
             ("Note", "", "Child"),
             ("ki_keywords", "base keywords", "Root"),
         ):
-            with self.subTest(property=key):
-                prop = resolved.property(key)
+            with self.subTest(attribute=key):
+                prop = resolved.attribute(key)
                 self.assertEqual((prop.value, prop.origin_symbol), (value, origin))
         self.assertEqual(resolved.bodies[0].origin_symbol, "Root")
         self.assertEqual(resolved.bodies[0].pins[0].name, "IN")

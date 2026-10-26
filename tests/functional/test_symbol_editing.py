@@ -5,15 +5,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from kicad_primitives.symbols import (
+    AmbiguousAttributeError,
     AmbiguousPinError,
-    AmbiguousPropertyError,
     AmbiguousSymbolError,
     SymbolLibrary,
     UnsupportedOperationError,
 )
 
 
-class PropertyEditTests(unittest.TestCase):
+class AttributeEditTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -33,27 +33,28 @@ class PropertyEditTests(unittest.TestCase):
         library = SymbolLibrary.open(self.path)
         snapshot = library.symbol("Café")
         value = 'Résumé "quoted" \\ path\nnext\tline'
-        library.set_property("Café", "Description", value)
+        library.set_attribute("Café", "Description", value)
         expected = original.replace(
             b'"old"', '"Résumé \\"quoted\\" \\\\ path\\nnext\\tline"'.encode(), 1
         )
         self.assertEqual(library.to_bytes(), expected)
         self.assertEqual(self.path.read_bytes(), original)
-        self.assertEqual(snapshot.property("Description").value, "old")
-        self.assertEqual(library.symbol("Café").property("Description").value, value)
-        library.set_property("Café", "Note", "new")
+        self.assertEqual(snapshot.attribute("Description").value, "old")
+        self.assertEqual(library.symbol("Café").attribute("Description").value, value)
+        library.set_attribute("Café", "Note", "new")
         expected = expected.replace(b'"untouched"', b'"new"', 1)
         self.assertEqual(library.to_bytes(), expected)
-        self.assertTrue(library.symbol("Café").property("Note").is_private)
+        self.assertTrue(library.symbol("Café").attribute("Note").is_private)
         library.save()
         self.assertEqual(self.path.read_bytes(), expected)
-        library.set_property("Café", "Note", "third")
+        library.set_attribute("Café", "Note", "third")
         library.save()
         self.assertEqual(
             self.path.read_bytes(), expected.replace(b'"new"', b'"third"', 1)
         )
         self.assertEqual(
-            SymbolLibrary.open(self.path).symbol("Café").property("Note").value, "third"
+            SymbolLibrary.open(self.path).symbol("Café").attribute("Note").value,
+            "third",
         )
 
     def test_equal_value_is_a_lexical_and_filesystem_no_op(self) -> None:
@@ -61,7 +62,7 @@ class PropertyEditTests(unittest.TestCase):
         self.path.write_bytes(original)
         before = self.path.stat()
         library = SymbolLibrary.open(self.path)
-        library.set_property("A", "Note", "aq")
+        library.set_attribute("A", "Note", "aq")
         library.save()
         self.assertEqual(library.to_bytes(), original)
         self.assertEqual(self.path.read_bytes(), original)
@@ -75,15 +76,15 @@ class PropertyEditTests(unittest.TestCase):
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(UnsupportedOperationError):
-            library.set_property("Child", "Description", "not declared")
+            library.set_attribute("Child", "Description", "not declared")
         self.assertEqual(library.to_bytes(), original)
-        library.set_property("Child", "Note", "local")
+        library.set_attribute("Child", "Note", "local")
         self.assertEqual(
             library.to_bytes(), original.replace(b'"child"', b'"local"', 1)
         )
-        self.assertEqual(library.symbol("Root").property("Note").value, "base")
+        self.assertEqual(library.symbol("Root").attribute("Note").value, "base")
         self.assertEqual(
-            library.resolve("Child").property("Note").origin_symbol, "Child"
+            library.resolve("Child").attribute("Note").origin_symbol, "Child"
         )
 
     def test_bad_selection_leaves_memory_and_disk_unchanged(self) -> None:
@@ -92,13 +93,13 @@ class PropertyEditTests(unittest.TestCase):
                 '(symbol "A" (property "Note" "one") (property "Note" "two"))',
                 "A",
                 "Note",
-                AmbiguousPropertyError,
+                AmbiguousAttributeError,
             ),
             (
                 '(symbol "A" (property "Reference" "U") (property "reference" "J"))',
                 "A",
                 "Reference",
-                AmbiguousPropertyError,
+                AmbiguousAttributeError,
             ),
             ('(symbol "A") (symbol "A")', "A", "Note", AmbiguousSymbolError),
             ('(symbol "A")', "Missing", "Note", KeyError),
@@ -109,7 +110,7 @@ class PropertyEditTests(unittest.TestCase):
                 self.path.write_bytes(original)
                 library = SymbolLibrary.open(self.path)
                 with self.assertRaises(error):
-                    library.set_property(symbol, key, "replacement")
+                    library.set_attribute(symbol, key, "replacement")
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
 
@@ -122,18 +123,18 @@ class PropertyEditTests(unittest.TestCase):
                 self.subTest(value=repr(value)),
                 self.assertRaises((ValueError, TypeError)),
             ):
-                library.set_property("A", "Note", value)  # type: ignore[arg-type]
+                library.set_attribute("A", "Note", value)  # type: ignore[arg-type]
             self.assertEqual(library.to_bytes(), original)
             self.assertEqual(self.path.read_bytes(), original)
 
 
-class PropertyInsertDeleteTests(unittest.TestCase):
+class AttributeInsertDeleteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "Example.kicad_sym"
 
-    def test_add_property_exact_delta_and_private(self) -> None:
+    def test_add_attribute_exact_delta_and_private(self) -> None:
         original = (
             "(kicad_symbol_lib (version 20251024)\r\n"
             '  (symbol "Café"\r\n'
@@ -147,7 +148,7 @@ class PropertyInsertDeleteTests(unittest.TestCase):
         ).encode()
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_property("Café", "Role", "DEVICE")
+        library.add_attribute("Café", "Role", "DEVICE")
         expected = original.replace(
             b'(property "Description" "old")',
             b'(property "Description" "old")\r\n'
@@ -158,28 +159,28 @@ class PropertyInsertDeleteTests(unittest.TestCase):
         )
         self.assertEqual(library.to_bytes(), expected)
         self.assertEqual(self.path.read_bytes(), original)
-        self.assertEqual(library.symbol("Café").property("Role").value, "DEVICE")
-        self.assertFalse(library.symbol("Café").property("Role").is_private)
+        self.assertEqual(library.symbol("Café").attribute("Role").value, "DEVICE")
+        self.assertFalse(library.symbol("Café").attribute("Role").is_private)
         # Bodies and other symbols stay intact.
         self.assertEqual(library.symbol("Café").bodies[0].pins[0].number, "1")
-        library.add_property("Café", "KLC_S3.3", "reason", private=True)
-        self.assertTrue(library.symbol("Café").property("KLC_S3.3").is_private)
-        self.assertEqual(library.symbol("Café").property("KLC_S3.3").value, "reason")
+        library.add_attribute("Café", "KLC_S3.3", "reason", private=True)
+        self.assertTrue(library.symbol("Café").attribute("KLC_S3.3").is_private)
+        self.assertEqual(library.symbol("Café").attribute("KLC_S3.3").value, "reason")
         library.save()
         reopened = SymbolLibrary.open(self.path)
-        self.assertEqual(reopened.symbol("Café").property("Role").value, "DEVICE")
-        self.assertTrue(reopened.symbol("Café").property("KLC_S3.3").is_private)
+        self.assertEqual(reopened.symbol("Café").attribute("Role").value, "DEVICE")
+        self.assertTrue(reopened.symbol("Café").attribute("KLC_S3.3").is_private)
 
-    def test_add_property_when_symbol_has_no_properties(self) -> None:
+    def test_add_attribute_when_symbol_has_no_attributes(self) -> None:
         original = b'(kicad_symbol_lib (version 20251024) (symbol "A" (extends "B")))'
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_property("A", "Note", "fresh")
-        self.assertEqual(library.symbol("A").property("Note").value, "fresh")
+        library.add_attribute("A", "Note", "fresh")
+        self.assertEqual(library.symbol("A").attribute("Note").value, "fresh")
         self.assertIn(b'(property "Note" "fresh"', library.to_bytes())
         self.assertIn(b'(extends "B")', library.to_bytes())
 
-    def test_delete_property_exact_delta_preserves_siblings(self) -> None:
+    def test_delete_attribute_exact_delta_preserves_siblings(self) -> None:
         original = (
             b"(kicad_symbol_lib (version 20251024)\n"
             b'  (symbol "Part"\n'
@@ -195,20 +196,20 @@ class PropertyInsertDeleteTests(unittest.TestCase):
         )
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.delete_property("Part", "Note")
+        library.delete_attribute("Part", "Note")
         expected = original.replace(b'\n    (property "Note" "drop")', b"", 1)
         self.assertEqual(library.to_bytes(), expected)
         self.assertEqual(self.path.read_bytes(), original)
-        props = [p.name for p in library.symbol("Part").properties]
+        props = [p.name for p in library.symbol("Part").attributes]
         self.assertEqual(props, ["Description", "Secret"])
         self.assertEqual(library.symbol("Part").bodies[0].pins[0].name, "P")
-        library.delete_property("Part", "Secret")
+        library.delete_attribute("Part", "Secret")
         self.assertEqual(
-            [p.name for p in library.symbol("Part").properties], ["Description"]
+            [p.name for p in library.symbol("Part").attributes], ["Description"]
         )
         library.save()
         self.assertEqual(
-            [p.name for p in SymbolLibrary.open(self.path).symbol("Part").properties],
+            [p.name for p in SymbolLibrary.open(self.path).symbol("Part").attributes],
             ["Description"],
         )
 
@@ -218,13 +219,15 @@ class PropertyInsertDeleteTests(unittest.TestCase):
           (symbol "Root" (property "Description" "parent") (property "Note" "base")))"""
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.add_property("Child", "Description", "local")
-        self.assertEqual(library.symbol("Root").property("Description").value, "parent")
+        library.add_attribute("Child", "Description", "local")
         self.assertEqual(
-            library.resolve("Child").property("Description").origin_symbol, "Child"
+            library.symbol("Root").attribute("Description").value, "parent"
         )
         self.assertEqual(
-            library.resolve("Child").property("Description").value, "local"
+            library.resolve("Child").attribute("Description").origin_symbol, "Child"
+        )
+        self.assertEqual(
+            library.resolve("Child").attribute("Description").value, "local"
         )
 
     def test_delete_declared_does_not_remove_inherited_effective_value(self) -> None:
@@ -237,13 +240,15 @@ class PropertyInsertDeleteTests(unittest.TestCase):
               (pin input line (at 0 0 0) (length 1) (name "IN") (number "1")))))"""
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
-        library.delete_property("Child", "Description")
+        library.delete_attribute("Child", "Description")
         with self.assertRaises(KeyError):
-            library.symbol("Child").property("Description")
+            library.symbol("Child").attribute("Description")
         resolved = library.resolve("Child")
-        self.assertEqual(resolved.property("Description").value, "parent")
-        self.assertEqual(resolved.property("Description").origin_symbol, "Root")
-        self.assertEqual(library.symbol("Root").property("Description").value, "parent")
+        self.assertEqual(resolved.attribute("Description").value, "parent")
+        self.assertEqual(resolved.attribute("Description").origin_symbol, "Root")
+        self.assertEqual(
+            library.symbol("Root").attribute("Description").value, "parent"
+        )
 
     def test_add_and_delete_bad_selection_leave_memory_and_disk_unchanged(self) -> None:
         cases = (
@@ -251,14 +256,14 @@ class PropertyInsertDeleteTests(unittest.TestCase):
                 '(symbol "A" (property "Note" "one") (property "Note" "two"))',
                 "A",
                 "Note",
-                AmbiguousPropertyError,
+                AmbiguousAttributeError,
                 "delete",
             ),
             (
                 '(symbol "A" (property "Reference" "U") (property "reference" "J"))',
                 "A",
                 "Reference",
-                AmbiguousPropertyError,
+                AmbiguousAttributeError,
                 "add",
             ),
             ('(symbol "A") (symbol "A")', "A", "Note", AmbiguousSymbolError, "add"),
@@ -286,9 +291,9 @@ class PropertyInsertDeleteTests(unittest.TestCase):
                 library = SymbolLibrary.open(self.path)
                 with self.assertRaises(error):
                     if action == "add":
-                        library.add_property(symbol, key, "replacement")
+                        library.add_attribute(symbol, key, "replacement")
                     else:
-                        library.delete_property(symbol, key)
+                        library.delete_attribute(symbol, key)
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
 
@@ -301,7 +306,7 @@ class PropertyInsertDeleteTests(unittest.TestCase):
                 self.subTest(value=repr(value)),
                 self.assertRaises((ValueError, TypeError)),
             ):
-                library.add_property("A", "Note", value)  # type: ignore[arg-type]
+                library.add_attribute("A", "Note", value)  # type: ignore[arg-type]
             self.assertEqual(library.to_bytes(), original)
 
     def test_add_delete_reject_readonly_format(self) -> None:
@@ -311,9 +316,9 @@ class PropertyInsertDeleteTests(unittest.TestCase):
         self.path.write_bytes(original)
         library = SymbolLibrary.open(self.path)
         with self.assertRaises(UnsupportedOperationError):
-            library.add_property("A", "Role", "X")
+            library.add_attribute("A", "Role", "X")
         with self.assertRaises(UnsupportedOperationError):
-            library.delete_property("A", "Note")
+            library.delete_attribute("A", "Note")
         self.assertEqual(library.to_bytes(), original)
 
 
@@ -483,7 +488,7 @@ class PinEditTests(unittest.TestCase):
         body12 = next(b for b in library.symbol("Part").bodies if b.body_style == 2)
         self.assertEqual([p.number for p in body11.pins], ["2"])
         self.assertEqual([p.number for p in body12.pins], ["1"])
-        self.assertEqual(library.symbol("Part").property("Description").value, "keep")
+        self.assertEqual(library.symbol("Part").attribute("Description").value, "keep")
 
     def test_pin_ops_do_not_touch_parent_or_create_bodies(self) -> None:
         original = b"""(kicad_symbol_lib (version 20251024)
@@ -501,7 +506,7 @@ class PinEditTests(unittest.TestCase):
             library.delete_pin("Root", 1, 1, "99")
         self.assertEqual(library.to_bytes(), original)
         library.set_pin("Root", 1, 1, "1", name="IN1")
-        self.assertEqual(library.symbol("Child").properties[0].value, "child")
+        self.assertEqual(library.symbol("Child").attributes[0].value, "child")
         self.assertEqual(library.resolve("Child").bodies[0].pins[0].name, "IN1")
 
     def test_pin_ops_bad_selection_leave_memory_and_disk_unchanged(self) -> None:
@@ -724,7 +729,7 @@ class SymbolLifecycleTests(unittest.TestCase):
 
         library.copy_symbol("Root", "RootCopy")
         copy = library.symbol("RootCopy")
-        self.assertEqual(copy.property("Description").value, "base")
+        self.assertEqual(copy.attribute("Description").value, "base")
         self.assertEqual(
             [(b.unit, b.body_style, b.name) for b in copy.bodies],
             [(0, 1, "RootCopy_0_1"), (1, 1, "RootCopy_1_1")],
@@ -808,12 +813,12 @@ class SymbolLifecycleTests(unittest.TestCase):
 
         dest.copy_symbol_from(source, "Root", "ImportedRoot")
         copied = dest.symbol("ImportedRoot")
-        self.assertEqual(copied.property("Description").value, "base")
+        self.assertEqual(copied.attribute("Description").value, "base")
         self.assertEqual(
             [(b.unit, b.body_style, b.name) for b in copied.bodies],
             [(0, 1, "ImportedRoot_0_1"), (1, 1, "ImportedRoot_1_1")],
         )
-        self.assertEqual(dest.symbol("Keep").property("Description").value, "stay")
+        self.assertEqual(dest.symbol("Keep").attribute("Description").value, "stay")
         self.assertEqual([s.name for s in source.symbols], ["Root", "Child"])
 
         with self.assertRaises(UnsupportedOperationError):
@@ -823,7 +828,7 @@ class SymbolLifecycleTests(unittest.TestCase):
         dest.copy_symbol_from(source, "Root", "Root")
         dest.copy_symbol_from(source, "Child", "Child")
         self.assertEqual(dest.symbol("Child").extends, "Root")
-        self.assertEqual(dest.symbol("Child").property("Note").value, "c")
+        self.assertEqual(dest.symbol("Child").attribute("Note").value, "c")
 
         with self.assertRaises(UnsupportedOperationError):
             dest.copy_symbol_from(source, "Root", "Root")
@@ -872,9 +877,9 @@ class SymbolLifecycleTests(unittest.TestCase):
         )
         dest.copy_symbol_from(source, "Part", "Imported")
         self.assertEqual(
-            dest.symbol("Imported").property("Description").value, "from-table"
+            dest.symbol("Imported").attribute("Description").value, "from-table"
         )
-        self.assertEqual(dest.symbol("Keep").property("Description").value, "dest")
+        self.assertEqual(dest.symbol("Keep").attribute("Description").value, "dest")
         self.assertEqual([s.name for s in source.symbols], ["Part"])
 
     def test_lifecycle_rejects_readonly_format(self) -> None:

@@ -30,7 +30,7 @@ class EditPostconditionTests(unittest.TestCase):
                 ),
                 self.assertRaises(InvalidLibraryError),
             ):
-                _symbol_parse.replace_property(source, "A", "Note", "new")
+                _symbol_parse.replace_attribute(source, "A", "Note", "new")
             self.assertEqual(source.document.source.encode(), ORIGINAL)
 
     def test_wrong_quote_value_fails_semantic_postcondition(self) -> None:
@@ -39,7 +39,7 @@ class EditPostconditionTests(unittest.TestCase):
             patch("kicad_primitives._symbol_parse.quote", return_value='"wrong"'),
             self.assertRaises(InvalidLibraryError),
         ):
-            _symbol_parse.replace_property(source, "A", "Note", "new")
+            _symbol_parse.replace_attribute(source, "A", "Note", "new")
         self.assertEqual(source.document.source.encode(), ORIGINAL)
 
     def test_nonfinite_numbers_and_bad_flags_are_not_silently_defaulted(self) -> None:
@@ -59,8 +59,8 @@ class EditPostconditionTests(unittest.TestCase):
           (symbol "Child" (extends "Root")
             (property "ki_fp_filters" " \\t ") (property "ki_keywords" " ")))""")
         child = _symbol_parse.resolve(source, "Child")
-        self.assertEqual(child.property("ki_fp_filters").value, "Device:*")
-        self.assertEqual(child.property("ki_keywords").value, " ")
+        self.assertEqual(child.attribute("ki_fp_filters").value, "Device:*")
+        self.assertEqual(child.attribute("ki_keywords").value, " ")
 
 
 class PersistenceMechanismTests(unittest.TestCase):

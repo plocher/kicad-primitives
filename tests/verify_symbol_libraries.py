@@ -19,7 +19,7 @@ class CaseResult:
     """Measured source-preservation and normalization facts for one edit."""
 
     symbol: str
-    property_name: str
+    attribute_name: str
     exact_delta: bool
     first_save_unchanged: bool | None
     second_save_stable: bool | None
@@ -91,22 +91,22 @@ def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
     targets = [
         (s.name, p.name)
         for s in library.symbols
-        for p in s.properties
+        for p in s.attributes
         if p.name == "Description"
     ][:1]
-    # Exercise the real modifier grammar in addition to an ordinary property.
+    # Exercise the real modifier grammar in addition to an ordinary attribute.
     private_target = next(
         (
             (s.name, p.name)
             for s in library.symbols
-            for p in s.properties
+            for p in s.attributes
             if p.is_private
         ),
         None,
     )
     if private_target is not None:
         targets.append(private_target)
-    assert targets, f"No existing property target in {path}"
+    assert targets, f"No existing attribute target in {path}"
     baseline_first: bool | None = None
     baseline_stable: bool | None = None
     if cli is not None:
@@ -117,18 +117,18 @@ def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
         edited_path = output / f"edit-{i}.kicad_sym"
         edited_path.write_bytes(original)
         edited = SymbolLibrary.open(edited_path)
-        old = edited.symbol(name).property(key).value
-        edited.set_property(name, key, old + " [first edit]")
+        old = edited.symbol(name).attribute(key).value
+        edited.set_attribute(name, key, old + " [first edit]")
         value = (old + " " if old else "") + '[slice proof: "quoted" café \\ path]'
-        edited.set_property(name, key, value)
+        edited.set_attribute(name, key, value)
         changed = edited.to_bytes()
         assert _only_delta(original, changed, old, value), "Unexpected source delta"
         expected_symbols = tuple(
             replace(
                 s,
-                properties=tuple(
+                attributes=tuple(
                     replace(p, value=value) if s.name == name and p.name == key else p
-                    for p in s.properties
+                    for p in s.attributes
                 ),
             )
             for s in library.symbols
@@ -145,8 +145,8 @@ def _verify(path: Path, output: Path, cli: Path | None) -> LibraryResult:
             assert stable, "Edited second resave is unstable"
             normalized_original = SymbolLibrary.open(baseline)
             normalized_edit = SymbolLibrary.open(edited_path)
-            assert normalized_edit.symbol(name).property(key).value == value
-            normalized_old = normalized_original.symbol(name).property(key).value
+            assert normalized_edit.symbol(name).attribute(key).value == value
+            normalized_old = normalized_original.symbol(name).attribute(key).value
             delta_only = _only_delta(
                 baseline.read_bytes(), edited_path.read_bytes(), normalized_old, value
             )

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 _MANDATORY = frozenset({"reference", "value", "footprint", "datasheet", "description"})
 
 
-def _property_key(name: str) -> str:
+def _attribute_key(name: str) -> str:
     return name.casefold() if name.casefold() in _MANDATORY else name
 
 
@@ -21,8 +21,8 @@ class UnsupportedOperationError(SymbolLibraryError, NotImplementedError):
     """The requested operation or format is not supported."""
 
 
-class AmbiguousPropertyError(SymbolLibraryError, ValueError):
-    """More than one declared property matches the requested identity."""
+class AmbiguousAttributeError(SymbolLibraryError, ValueError):
+    """More than one declared attribute matches the requested identity."""
 
 
 class AmbiguousSymbolError(SymbolLibraryError, ValueError):
@@ -42,8 +42,8 @@ class FileConflictError(SymbolLibraryError, RuntimeError):
 
 
 @dataclass(frozen=True)
-class SymbolProperty:
-    """One property occurrence; origin identifies its declaring symbol."""
+class SymbolAttribute:
+    """One attribute occurrence; origin identifies its declaring symbol."""
 
     name: str
     value: str
@@ -119,20 +119,20 @@ class Symbol:
 
     name: str
     extends: str | None
-    properties: tuple[SymbolProperty, ...]
+    attributes: tuple[SymbolAttribute, ...]
     bodies: tuple[SymbolBody, ...]
     units_locked: bool = False
     resolved: bool = False
 
-    def property(self, name: str) -> SymbolProperty:
-        """Get one property; mandatory names use KiCad's case-insensitive identity."""
+    def attribute(self, name: str) -> SymbolAttribute:
+        """Get one attribute; mandatory names use KiCad's case-insensitive identity."""
         matches = tuple(
-            p for p in self.properties if _property_key(p.name) == _property_key(name)
+            p for p in self.attributes if _attribute_key(p.name) == _attribute_key(name)
         )
         if not matches:
             raise KeyError(name)
         if len(matches) != 1:
-            raise AmbiguousPropertyError(f"{self.name}: ambiguous property {name!r}")
+            raise AmbiguousAttributeError(f"{self.name}: ambiguous attribute {name!r}")
         return matches[0]
 
     def body(self, unit: int, body_style: int) -> SymbolBody:

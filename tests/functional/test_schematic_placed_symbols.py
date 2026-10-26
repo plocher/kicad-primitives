@@ -164,9 +164,9 @@ class PlacedSymbolTests(SchematicCase):
         self.assertFalse(symbol.in_pos_files)
         self.assertTrue(symbol.dnp)
         self.assertTrue(symbol.exclude_from_sim)
-        self.assertEqual(symbol.property("MPN").value, "ABC-1")
+        self.assertEqual(symbol.attribute("MPN").value, "ABC-1")
         self.assertEqual(
-            [p.name for p in symbol.properties],
+            [p.name for p in symbol.attributes],
             ["Reference", "Value", "Footprint", "MPN"],
         )
 
