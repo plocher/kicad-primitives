@@ -7,8 +7,9 @@ explicit `.kicad_pro` path.
 It establishes design context: root document paths, hierarchical schematic
 files, and project `text_variables`.
 It opens schematic **content** through `schematic()` / `schematics()` (see
-[schematics.md](schematics.md)). It does not edit schematics, open PCB document
-models, or run KiCad. Library tables: [tables.md](tables.md).
+[schematics.md](schematics.md)).
+Owned schematic objects edit attributes in memory. `Project.save()` explicitly persists their pending changes with electrical verification.
+PCB document models remain unsupported. Library tables: [tables.md](tables.md).
 The package remains pre-alpha (`0.0.0` informational).
 
 ## Open a project
@@ -52,6 +53,29 @@ This list is path discovery only.
 Sheet instance paths and multi-instance sheet models remain later work.
 Placed-symbol and title-block read: [schematics.md](schematics.md).
 
+## Owned documents and explicit persistence
+
+Repeated `schematic()` and `schematics()` accesses reuse owned documents.
+Retained placed-symbol handles observe pending edits.
+`project.is_modified` is true when any owned schematic differs from its opened or saved baseline.
+`schematic.to_bytes()` previews that document without disk writes or KiCad execution.
+
+```python
+sheet = project.schematic()
+symbol = sheet.symbol("R1")
+symbol.set_attribute("Value", "22K")
+if project.is_modified:
+    project.save()  # explicit, same-location persistence
+```
+
+`save(kicad_cli=...)` accepts an optional explicit KiCad executable path.
+Changed saves stage the complete hierarchy and project settings, then verify named nets and component identities.
+No CLI runs per setter. There is no unchecked-save option.
+Save preflights all sources and the project guard before original writes.
+Each changed document saves separately. This is not a crash-atomic multi-file transaction.
+The [schematic usage page](schematics.md#save-explicitly) defines checks, errors, and supported staging limits.
+The `.kicad_pro` remains read-only and serves as verification context.
+
 ## Text variables
 
 ```python
@@ -88,10 +112,13 @@ to stderr.
 
 ## Limits
 
-- This page does not define schematic field edit or PCB document models.
+- Attribute edits belong to placed symbols, not project-level target-selection workflows.
+- PCB document models remain unsupported.
 - Sheet instance paths and multi-instance sheet models remain later work.
 - Library table resolution is a different area.
 - Lock guards do not coordinate with KiCad beyond detecting the `.lck` file.
+- Save-as relocation and general close/discard/session interfaces are later work.
+- No mutation or close action implicitly saves.
 
 ## Errors
 

@@ -1,19 +1,24 @@
-"""Read schematic content within project context: symbols, title block, geometry.
+"""Inspect and edit schematic content within project context.
 
 Parsing uses the private lossless S-expression foundation (ADR 0003).
-This module is read-only: no localized schematic edits.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
-from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse
+from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quote
+
+from ._symbol_types import _attribute_key
+
+if TYPE_CHECKING:
+    from .projects import Project
 
 __all__ = [
     "AmbiguousPlacedSymbolError",
@@ -26,9 +31,12 @@ __all__ = [
     "PlacedAttribute",
     "PlacedSymbol",
     "Schematic",
+    "SchematicConflictError",
     "SchematicError",
+    "SchematicVerificationError",
     "SheetInstance",
     "TitleBlock",
+    "UnsupportedSchematicOperationError",
     "Wire",
     "open_schematic",
 ]
@@ -44,6 +52,18 @@ class InvalidSchematicError(SchematicError):
 
 class AmbiguousPlacedSymbolError(SchematicError):
     """More than one placed symbol matches the requested reference."""
+
+
+class UnsupportedSchematicOperationError(SchematicError):
+    """The requested schematic operation cannot be performed safely."""
+
+
+class SchematicConflictError(SchematicError):
+    """A schematic or its verification context changed on disk."""
+
+
+class SchematicVerificationError(SchematicError):
+    """Pending content could not be shown to preserve electrical connectivity."""
 
 
 @dataclass(frozen=True)
@@ -65,9 +85,9 @@ class PlacedAttribute:
     value: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PlacedSymbol:
-    """Merged placed-symbol snapshot: attributes, identity, transform, and flags."""
+    """Artifact-owned placed symbol with live attributes and focused edits."""
 
     reference: str
     lib_id: str
@@ -86,10 +106,26 @@ class PlacedSymbol:
     in_pos_files: bool
     exclude_from_sim: bool
     path: Path
+    _owner: Schematic | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _index: int = field(default=-1, init=False, repr=False, compare=False)
+
+    def set_attribute(self, name: str, value: str) -> None:
+        """Establish an attribute in memory, without writing or annotating Reference.
+
+        Create missing attributes, update differing values, and leave equal values
+        byte-identical. Ambiguous or unsupported edits fail without changing source.
+        """
+        if self._owner is None:
+            raise UnsupportedSchematicOperationError("Symbol has no owning schematic")
+        self._owner._set_attribute(self, name, value)
 
     def attribute(self, name: str) -> PlacedAttribute:
         """Return the unique attribute with this name."""
-        matches = tuple(p for p in self.attributes if p.name == name)
+        matches = tuple(
+            p for p in self.attributes if _attribute_key(p.name) == _attribute_key(name)
+        )
         if not matches:
             raise KeyError(name)
         if len(matches) > 1:
@@ -174,7 +210,7 @@ class SheetInstance:
     uuid: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Schematic:
     """One schematic file: symbols, title block, and electrical geometry."""
 
@@ -189,6 +225,104 @@ class Schematic:
     hierarchical_labels: tuple[HierarchicalLabel, ...] = ()
     no_connects: tuple[NoConnect, ...] = ()
     sheets: tuple[SheetInstance, ...] = ()
+    _document: Document | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _baseline: bytes = field(default=b"", init=False, repr=False, compare=False)
+    _project: Project | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether content differs from the last opened or saved bytes."""
+        return self.to_bytes() != self._baseline
+
+    def to_bytes(self) -> bytes:
+        """Preview pending source without writing or running electrical checks."""
+        if self._document is None:
+            raise UnsupportedSchematicOperationError("Schematic has no source")
+        return self._document.source.encode("utf-8")
+
+    def save(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
+        """Verify and save this document to its opened location explicitly.
+
+        Other owned documents remain pending. Verification uses the complete
+        project hierarchy with only this document's changes staged. Requires
+        KiCad for changed saves; never silently skips electrical verification.
+        """
+        if self._project is None:
+            raise UnsupportedSchematicOperationError(
+                "Save requires owning project context"
+            )
+        from ._schematic_persist import save_schematics
+
+        save_schematics(self._project, (self,), kicad_cli=kicad_cli)
+
+    def _set_attribute(self, symbol: PlacedSymbol, name: str, value: str) -> None:
+        if not isinstance(name, str) or not isinstance(value, str):
+            raise TypeError("Attribute name and value must be strings")
+        if not name or "\x00" in name or "\x00" in value:
+            raise ValueError("Attribute name must be nonempty; NUL is not supported")
+        name.encode("utf-8")
+        value.encode("utf-8")
+        if self.version != 20260306:
+            raise UnsupportedSchematicOperationError(
+                f"Format {self.version} is read-only"
+            )
+        assert self._document is not None
+        root = self._document.roots()[0]
+        assert isinstance(root, ListNode)
+        nodes = tuple(
+            n
+            for n in root.child_lists("symbol")
+            if _placed_symbol(n, self.path) is not None
+        )
+        node = nodes[symbol._index]
+        if not symbol.uuid or len(node.child_lists("uuid")) != 1:
+            raise UnsupportedSchematicOperationError(
+                "Editing requires one nonempty symbol UUID"
+            )
+        if sum(s.uuid == symbol.uuid for s in self.symbols) != 1:
+            raise AmbiguousPlacedSymbolError(f"Ambiguous symbol UUID {symbol.uuid!r}")
+        matches = tuple(
+            p
+            for p in node.child_lists("property")
+            if _attribute_key(_atom(p, 1).value) == _attribute_key(name)
+        )
+        if len(matches) > 1:
+            raise AmbiguousPlacedSymbolError(f"Ambiguous attribute {name!r}")
+        if matches and _atom(matches[0], 2).value == value:
+            return
+        if _attribute_key(name) == "reference":
+            raise UnsupportedSchematicOperationError(
+                "Reference requires reference annotation"
+            )
+        if name in {"dnp", "in_bom", "on_board", "in_pos_files", "exclude_from_sim"}:
+            raise UnsupportedSchematicOperationError("Flags are not named attributes")
+        if _attribute_key(name) == "value" and _is_power_symbol(root, symbol):
+            raise UnsupportedSchematicOperationError(
+                "Power-symbol Value changes are electrical edits"
+            )
+        before = self._document.source
+        if matches:
+            token = _atom(matches[0], 2)
+            start, end, replacement = token.span.start, token.span.end, quote(value)
+        else:
+            anchor = node.child_lists("property")[-1]
+            start = end = anchor.span.end
+            replacement = _attribute_fragment(before, node, anchor, name, value)
+        edited = before[:start] + replacement + before[end:]
+        updated = _schematic_from_document(self.path, parse(edited))
+        if updated.symbols[symbol._index].attribute(name).value != value:
+            raise InvalidSchematicError(
+                "Edit did not establish the requested attribute"
+            )
+        for old, new in zip(self.symbols, updated.symbols, strict=True):
+            object.__setattr__(old, "attributes", new.attributes)
+            object.__setattr__(old, "value", new.value)
+            object.__setattr__(old, "footprint", new.footprint)
+        object.__setattr__(self, "_document", updated._document)
 
     def symbol(self, reference: str) -> PlacedSymbol:
         """Return the unique placed symbol with this reference."""
@@ -209,7 +343,7 @@ def open_schematic(path: str | PathLike[str]) -> Schematic:
     inside project context. This helper exists for tests and internal use when
     the path is already validated as part of a project hierarchy.
     """
-    location = Path(path).expanduser().resolve()
+    location = Path(path).expanduser().absolute()
     if not location.is_file():
         raise InvalidSchematicError(f"Schematic file not found: {location}")
     if location.suffix.lower() != ".kicad_sch":
@@ -240,7 +374,7 @@ def _schematic_from_document(path: Path, document: Document) -> Schematic:
         for node in root.child_lists("symbol")
         if (symbol := _placed_symbol(node, path)) is not None
     )
-    return Schematic(
+    schematic = Schematic(
         path=path,
         version=version,
         title_block=title_block,
@@ -255,6 +389,12 @@ def _schematic_from_document(path: Path, document: Document) -> Schematic:
         no_connects=tuple(_no_connect(n) for n in root.child_lists("no_connect")),
         sheets=tuple(_sheet(n) for n in root.child_lists("sheet")),
     )
+    object.__setattr__(schematic, "_document", document)
+    object.__setattr__(schematic, "_baseline", document.source.encode("utf-8"))
+    for index, symbol in enumerate(schematic.symbols):
+        object.__setattr__(symbol, "_owner", schematic)
+        object.__setattr__(symbol, "_index", index)
+    return schematic
 
 
 def _format_version(root: ListNode) -> int:
@@ -265,6 +405,37 @@ def _format_version(root: ListNode) -> int:
     if not value.isascii() or not value.isdecimal():
         raise InvalidSchematicError("Invalid schematic version")
     return int(value)
+
+
+def _attribute_fragment(
+    source: str, symbol: ListNode, anchor: ListNode, name: str, value: str
+) -> str:
+    newline = "\r\n" if "\r\n" in source else "\n"
+    line_start = source.rfind("\n", 0, anchor.span.start) + 1
+    prefix = source[line_start : anchor.span.start]
+    indent = prefix if not prefix.strip() else "    "
+    step = "\t" if "\t" in indent else "  "
+    at = symbol.child_lists("at")[0]
+    x, y = _atom(at, 1).raw, _atom(at, 2).raw
+    return (
+        f"{newline}{indent}(property {quote(name)} {quote(value)}"
+        f"{newline}{indent}{step}(at {x} {y} 0)"
+        f"{newline}{indent}{step}(effects (font (size 1.27 1.27)) (hide yes))"
+        f"{newline}{indent})"
+    )
+
+
+def _is_power_symbol(root: ListNode, symbol: PlacedSymbol) -> bool:
+    if symbol.lib_id.startswith("power:") or symbol.reference.startswith(
+        ("#PWR", "#FLG")
+    ):
+        return True
+    return any(
+        _atom(definition, 1).value == symbol.lib_id
+        and bool(definition.child_lists("power"))
+        for cache in root.child_lists("lib_symbols")
+        for definition in cache.child_lists("symbol")
+    )
 
 
 def _title_block(root: ListNode) -> TitleBlock:
@@ -482,7 +653,7 @@ def _attribute(node: ListNode) -> PlacedAttribute:
 
 def _named_value(attributes: tuple[PlacedAttribute, ...], name: str) -> str:
     for prop in attributes:
-        if prop.name == name:
+        if _attribute_key(prop.name) == _attribute_key(name):
             return prop.value
     return ""
 

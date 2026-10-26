@@ -8,7 +8,7 @@ Stand-alone Python package for reading, editing, and writing KiCad **10** projec
 | **Import** | `kicad_primitives` |
 | **License** | MIT |
 | **Python** | 3.11+ |
-| **Status** | Pre-alpha (`0.0.0` informational); symbols, projects, schematics read, library tables, and netlist exchange implemented |
+| **Status** | Pre-alpha (`0.0.0` informational); symbols, projects, schematic attribute edits, library tables, and netlist exchange implemented |
 | **Production dependency** | Not before `1.0.0` on public PyPI ([ADR 0005](docs/adr/0005-distribution-and-versioning.md)) |
 
 Identity is canonical in [`docs/PACKAGE_IDENTITY.md`](docs/PACKAGE_IDENTITY.md), [ADR 0001](docs/adr/0001-package-identity.md), and its [ADR 0003 amendment](docs/adr/0003-source-preserving-parser-and-writes.md).
@@ -24,7 +24,7 @@ Dependency rules are in [ADR 0005](docs/adr/0005-distribution-and-versioning.md)
 - [ADR 0005](docs/adr/0005-distribution-and-versioning.md) — distribution, versioning, and probe install rules
 - [Symbol-library usage](docs/symbol-libraries.md) — inspect declarations/inheritance, edit existing values, and save explicitly
 - [Project context usage](docs/projects.md) — open a project, list hierarchical sheets, read text variables
-- [Schematic placed-symbol read](docs/schematics.md) — title block and merged instance attributes/transform via project context
+- [Schematics](docs/schematics.md) — inspect placed symbols and geometry, edit attributes in memory, and save explicitly with electrical verification
 - [Library tables](docs/tables.md) — global/project symbol and footprint table resolve and localized writes
 - [Netlist exchange](docs/netlist.md) — parse kicadsexpr `.net` files; obtain/export via private `kicad-cli`
 - [`CONTEXT.md`](CONTEXT.md) — capability and release terminology
@@ -70,14 +70,15 @@ The package supplies KiCad artifact objects and capabilities, not client applica
 Clients select objects, inspect and edit them, then decide whether to save, save as, or discard.
 Edits belong on the relevant objects. Source persistence is explicit.
 [ADR 0008](docs/adr/0008-artifact-objects-and-explicit-persistence.md) records this package-wide direction and the current implementation gaps.
-General change tracking and lifecycle interfaces are not yet implemented.
+Schematics support pending-change observation and explicit same-location saves.
+Save-as relocation and general close/discard/session interfaces remain later work.
 
 The accepted functional TOC includes projects, schematics, PCBs, symbol libraries, footprint libraries, library resolution, and connectivity.
 This is intended scope, not a list of shipped capabilities.
 Implemented services today:
 - `kicad_primitives.symbols.SymbolLibrary` — explicit-path inspection and localized existing-attribute updates, with byte-preserving output ([usage](docs/symbol-libraries.md)).
 - `kicad_primitives.projects.Project` — open a project directory or `.kicad_pro`, list hierarchical schematic paths with parent-relative `Sheetfile` resolution, and read `text_variables` ([usage](docs/projects.md)).
-- `kicad_primitives.schematics` via `Project.schematic` / `schematics` — merged placed-symbol read and title block ([usage](docs/schematics.md)).
+- `kicad_primitives.schematics` via `Project.schematic` / `schematics` — live placed-symbol attribute edits, source previews, explicit verified saves, title block, and geometry read ([usage](docs/schematics.md)).
 - `kicad_primitives.tables.LibraryTables` — global/project symbol and footprint tables, `${VAR}` resolve, nested tables, localized add/remove/rename ([usage](docs/tables.md)).
 - `kicad_primitives.netlist` — kicadsexpr netlist **exchange** parse and obtain/export; not full project-owned Connectivity ([usage](docs/netlist.md)).
 PCB document models, project-owned Connectivity beyond exchange, and the remaining TOC areas are not implemented yet.

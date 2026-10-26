@@ -2,7 +2,7 @@
 
 Sheetfile path walks stay private. Schematic *content* is read through
 :meth:`Project.schematic` / :meth:`Project.schematics` (ADR 0002 ownership).
-PCB document models and schematic edits remain later work.
+PCB document models remain later work.
 """
 
 from __future__ import annotations
@@ -48,12 +48,20 @@ class Project:
         schematic_file: Path | None,
         pcb_file: Path | None,
         text_variables: Mapping[str, str],
+        project_baseline: bytes,
     ) -> None:
         self._directory = directory
         self._project_file = project_file
         self._schematic_file = schematic_file
         self._pcb_file = pcb_file
         self._text_variables = text_variables
+        self._schematics: dict[Path, Schematic] = {}
+        self._project_baseline = project_baseline
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether any owned schematic has pending changes."""
+        return any(schematic.is_modified for schematic in self._schematics.values())
 
     @classmethod
     def open(cls, path: str | PathLike[str]) -> Project:
@@ -63,7 +71,7 @@ class Project:
         companions are optional. ``text_variables`` are read now; missing maps are
         empty, not errors. Malformed project JSON fails before a context is returned.
         """
-        location = Path(path).expanduser().resolve()
+        location = Path(path).expanduser().absolute()
         if location.is_file():
             if location.suffix.lower() != ".kicad_pro":
                 raise InvalidProjectError(
@@ -77,14 +85,29 @@ class Project:
         else:
             raise InvalidProjectError(f"Path does not exist: {location}")
 
-        project_file = project_file.resolve()
+        directory = directory.resolve()
+        project_file = directory / project_file.name
         base_name = project_file.stem
         schematic_file = _find_companion(
             directory, base_name, directory.name, ".kicad_sch"
         )
         pcb_file = _find_companion(directory, base_name, directory.name, ".kicad_pcb")
-        variables = _read_text_variables(project_file)
-        return cls(directory, project_file, schematic_file, pcb_file, variables)
+        baseline = project_file.read_bytes()
+        variables = _read_text_variables(project_file, baseline)
+        return cls(
+            directory, project_file, schematic_file, pcb_file, variables, baseline
+        )
+
+    def save(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
+        """Verify and persist changed owned schematics at their current locations.
+
+        Preflight known failures before writing. Files are replaced separately,
+        not as a crash-atomic transaction; a later I/O failure can leave earlier
+        files saved. Unsaved documents retain pending changes for inspection.
+        """
+        from ._schematic_persist import save_schematics
+
+        save_schematics(self, tuple(self._schematics.values()), kicad_cli=kicad_cli)
 
     @property
     def directory(self) -> Path:
@@ -175,7 +198,6 @@ class Project:
         When *path* is given it must resolve to a file returned by
         :meth:`schematic_files`. Outsiders and missing roots fail explicitly.
         """
-        from .schematics import open_schematic
 
         if path is None:
             if self._schematic_file is None:
@@ -190,13 +212,21 @@ class Project:
                 raise InvalidProjectError(
                     f"Schematic is not part of project hierarchy: {target}"
                 )
-        return open_schematic(target)
+        return self._load_schematic(target)
+
+    def _load_schematic(self, target: Path) -> Schematic:
+        from .schematics import open_schematic
+
+        key = target.resolve()
+        if key not in self._schematics:
+            schematic = open_schematic(target)
+            object.__setattr__(schematic, "_project", self)
+            self._schematics[key] = schematic
+        return self._schematics[key]
 
     def schematics(self) -> tuple[Schematic, ...]:
         """Open every schematic in the hierarchical file list, in walk order."""
-        from .schematics import open_schematic
-
-        return tuple(open_schematic(path) for path in self.schematic_files())
+        return tuple(self.schematic(path) for path in self.schematic_files())
 
     def schematic_files(self) -> tuple[Path, ...]:
         """Root schematic plus reachable child sheets in discovery order.
@@ -256,7 +286,7 @@ def _find_companion(
         for preferred in (project_stem, directory_name):
             matches = [path for path in pool if path.stem == preferred]
             if matches:
-                return min(matches).resolve()
+                return min(matches).absolute()
         if pool is autosave:
             autosave_preferred = f"_autosave-{project_stem}"
             matches = [path for path in pool if path.stem == autosave_preferred]
@@ -266,19 +296,19 @@ def _find_companion(
             matches = [path for path in pool if path.stem == autosave_dir]
             if matches:
                 return min(matches).resolve()
-        return min(pool).resolve()
+        return min(pool).absolute()
     return None
 
 
-def _read_text_variables(project_file: Path) -> Mapping[str, str]:
+def _read_text_variables(project_file: Path, raw: bytes) -> Mapping[str, str]:
     try:
-        payload = json.loads(project_file.read_text(encoding="utf-8"))
+        payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise InvalidProjectError(
             f"Failed to parse project file as JSON: {project_file}: {exc}"
         ) from exc
-    raw = payload.get("text_variables") if isinstance(payload, dict) else None
-    return _coerce_text_variables(raw)
+    raw_variables = payload.get("text_variables") if isinstance(payload, dict) else None
+    return _coerce_text_variables(raw_variables)
 
 
 def _coerce_text_variables(raw: object) -> Mapping[str, str]:
