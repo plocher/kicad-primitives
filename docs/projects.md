@@ -138,7 +138,7 @@ Pruning removes only snapshots older than this save's own archive.
 Known newer snapshots from another writer are also protected, so concurrent protected history can exceed the budget.
 Unrelated ZIP files and names outside this Project's archive namespace are not pruned.
 
-### Failures and pending save-as work
+### Failure limits
 Source files are persisted separately, not as a crash-atomic Project transaction.
 Their baselines advance only after each actual successful write.
 A later source failure can leave earlier files saved, with unsaved documents still pending.
@@ -149,8 +149,51 @@ A subsequent clean save retries the full history step rather than silently settl
 Do not infer that `is_modified == False` authorizes close.
 Final optimistic filesystem check/publication races remain possible. Do not write concurrently with another application.
 
-Project save-as relocation is the next bounded milestone and is not implemented yet.
 Native Git-backed `.history` interoperability is deferred to research/grilling/design [#58–60](https://github.com/plocher/kicad-primitives/issues/58).
+
+## Save as a new directory and name
+`project.save_as(new_path, new_project_name, kicad_cli=...)` creates a new directory with a validated project filename stem.
+The destination must not exist. Existing-tree merges, overlapping source/destination trees, and unsafe parent links are refused.
+Original source bytes, inodes, and permissions remain unchanged. Read-only sources need readability, not overwrite permission.
+Destination files inherit source permission modes.
+
+```python
+project = Project.open("/path/to/Old.kicad_pro")
+sheet = project.schematic()
+placed = sheet.symbol("R1")
+project.save_as("/canonical/new-directory", "New")
+assert project.schematic() is sheet
+assert sheet.symbol("R1") is placed
+project.close()
+```
+
+The supported profile is one internal root schematic and its strict child hierarchy.
+Root/project source basenames must match for the existing verification backend.
+Descendant relative layout remains unchanged. Primary `.pro`, root `.sch`, and optional `.pcb` names follow the requested stem.
+Root/child filename collisions and unknown extra top-level roots fail before destination publication.
+Schematic identity edits require format `20260306`; PCB provenance edits require `20260206`.
+The operation preserves UUIDs, library identifiers, references, foreign project groups, and all unrelated source.
+Only proved current-project instance labels change. Mixed owned/foreign paths within one group are explicitly unsupported.
+PCB direct sheetfile and legacy Sheetfile properties change only with uniquely proved placement UUID provenance.
+Human Sheetname values do not change merely because the project filename changes.
+
+Known JSON string members use JSONDecoder-derived spans, not a whole-object rewrite.
+`meta.filename` is updated or created. The selected `schematic.top_level_sheets[].filename` follows the root name.
+Unrelated JSON, MRU paths, whitespace, BOM/CRLF spelling, and human labels remain untouched.
+The ordinary local context includes worksheets, simulator workbooks, sibling rules/UI-state files, symbol/footprint tables, nested native tables, and native libraries.
+Copying retains relative layout and KIPRJMOD meaning. Required local URI changes replace only their atoms, preserving raw table flags and opaque metadata.
+Intentional stable external references stay external.
+Unknown local plugins, nonempty design-block dependencies, unresolved variables, cycles/links, and local/context-dependent simulation or 3D dependencies fail explicitly before destination creation.
+This is not arbitrary directory copying or asset vendoring.
+
+Before publication, staged exports prove the requested pending electrical effects, then compare the renamed layout with the validated pending state.
+Proof retains named nets, component identity, every endpoint/type, and full exported library pin inventories.
+Exact output bytes and the complete destination ZIP are prepared before the destination is reserved.
+Files publish with no-clobber writes; native source and destination peer locks remain enforced.
+Project/document/placed/embedded identities and path caches rebind only after all files and destination ZIP succeed.
+Later edits or failed attempts do not authorize close.
+A late I/O failure may leave an incomplete destination. The exception identifies that retained directory; the library never recursively deletes it.
+Original live identity and pending source remain available on failure.
 
 
 ## Electrical rule reports
@@ -231,7 +274,8 @@ The package does not print diagnostics to stderr.
 - Sheet instance paths and multi-instance sheet models remain later work.
 - Library table resolution is a different area.
 - Lock guards detect actual native peer paths but do not acquire locks or coordinate processes.
-- Project save-as relocation remains pending. ZIP history does not imply Git history or rollback APIs.
+- Save-as supports the bounded ordinary internal-project profile above, not arbitrary relocation layouts.
+- ZIP history does not imply Git history or rollback APIs.
 - No mutation or close action implicitly saves.
 
 ## Errors
@@ -259,3 +303,5 @@ uv run python -m unittest discover -s tests -q
 
 The opt-in `tests/verify_project_lifecycle.py --kicad-cli /path/to/kicad-cli` uses disposable real schematic data and an empty native PCB.
 It verifies electrical save, native PCB acceptance, exact ZIP members, stable/terminal handles, and unchanged JSON/PCB/no-op inodes.
+`tests/verify_project_save_as.py --kicad-cli /path/to/kicad-cli` adds one repeatable current-format root/child/PCB rename proof.
+Its native QA derivation and hashes are in `tests/fixtures/projects/rename-native/PROVENANCE.txt`.

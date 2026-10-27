@@ -229,7 +229,7 @@ Use `project.discard()` for terminal zero-write exit, not reload or rollback.
 `project.close()` requires a current complete save decision even for a clean open.
 Owned document/placed/embedded operations fail after Project exit.
 Later edits and failed saves revoke the decision; exact no-op edits preserve it.
-Project save-as relocation remains the next bounded phase, not implemented yet.
+Bounded Project save-as retains these document/placed/embedded identities while rebinding their paths after complete success.
 ZIP history, budgets, and partial-I/O limits are defined in [projects.md](projects.md#zip-snapshots).
 
 ## Title block

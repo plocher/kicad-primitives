@@ -71,7 +71,8 @@ The owner selected timestamped ZIP as the pre-1.0 minimum in #55. Same-second sa
 Default filesystem saves honor native `~<full-original-filename>.lck` peer locks for actual known project/schematic/PCB/child paths.
 Importable `pcbnew` is not proof of in-KiCad buffer ownership and must not bypass those guards.
 Do not acquire or delete native peer locks, or add a force/allow-locked-save flag.
-Project save-as relocation is the next bounded implementation phase and is not implemented yet.
+Project save-as supports a fresh directory/stem for the bounded ordinary internal-project profile in `docs/projects.md`.
+It preserves originals and rebinds existing owned handles only after verified output and ZIP success; unsupported contexts fail explicitly.
 Git-backed `.history` interoperability remains deferred research #58, owner grilling #59, and design #60.
 Do not add a Git dependency, autosave scheduler, branching/merge/rollback policy, or a universal session/transaction framework.
 Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.

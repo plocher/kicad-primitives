@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add bounded original-safe Project save-as to a fresh directory/stem. Localize JSON identity members, UUID-owned instance labels, and proved PCB sheet provenance; preserve foreign/opaque content and stable owned handles. Copy understood local contexts or reject unsupported dependencies before publication. Verify full electrical identity and destination ZIP before rebinding; retain partial destinations honestly on late failure. Add one repeatable current-format native hierarchy/PCB rename proof (`docs/projects.md`; #56).
+
 - Correct native peer-lock naming to `~<full-original-filename>.lck`. Guard actual project/root/PCB/strict child paths and reject lock presence before source/history writes, including newly appearing locks after partial saves. Remove implicit `pcbnew` importability as a filesystem-save bypass while keeping read/ERC access and explicit helper assertions (#56).
 
 - Preserve latest explicit restore provenance across late exact-revert edits while a frozen Project save advances its baseline. Protect known newer concurrent ZIP history during retention instead of deleting another root's completed snapshot (#56).

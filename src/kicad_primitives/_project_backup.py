@@ -197,19 +197,27 @@ def prepare(
             "Required owned files were excluded from the snapshot inventory"
         )
     members: list[_Member] = []
+    for path in paths:
+        raw, info = _read_member(project, path)
+        name = path.relative_to(project.directory).as_posix()
+        members.append(_Member(path, name, raw, outputs.get(path, raw), info))
+    return build(tuple(members))
+
+
+def build(members: tuple[_Member, ...]) -> _Snapshot:
+    """Build exact frozen member bytes without inspecting or publishing a directory."""
+    names = tuple(member.name for member in members)
+    for name in names:
+        _safe_name(name)
+    if len({name.casefold() for name in names}) != len(names):
+        raise ProjectBackupError("ZIP member names collide in a portable destination")
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in paths:
-            raw, info = _read_member(project, path)
-            name = path.relative_to(project.directory).as_posix()
-            output = outputs.get(path, raw)
-            members.append(_Member(path, name, raw, output, info))
-            archive.writestr(name, output)
-    snapshot = _Snapshot(tuple(members), stream.getvalue())
+        for member in members:
+            archive.writestr(member.name, member.output)
+    snapshot = _Snapshot(members, stream.getvalue())
     with zipfile.ZipFile(io.BytesIO(snapshot.archive)) as archive:
-        if archive.testzip() is not None or archive.namelist() != [
-            m.name for m in members
-        ]:
+        if archive.testzip() is not None or archive.namelist() != list(names):
             raise ProjectBackupError(
                 "ZIP staging did not preserve its complete member inventory"
             )
