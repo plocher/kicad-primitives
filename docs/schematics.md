@@ -220,6 +220,8 @@ Known preflight failures stop before any original file changes.
 Files then save separately. A later I/O failure can leave earlier files saved.
 This is not a crash-atomic multi-file transaction or coordination with another writer.
 An unsuccessful document retains pending changes for inspection and retry.
+The latest explicit restore selection survives an exact old-baseline revert during an older frozen save.
+If that save advances the baseline, retry proves the requested reverse correction against the bytes actually persisted.
 The final check/replace race remains possible.
 
 No mutation, finalizer, close, or discard action implicitly saves.

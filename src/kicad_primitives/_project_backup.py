@@ -288,13 +288,17 @@ def publish(project: Project, snapshot: _Snapshot) -> Path:
     ):
         raise ProjectBackupError("Published archive changed during save")
     archives = _managed_archives(project, directory)
+    own_index = next(
+        (index for index, (candidate, _) in enumerate(archives) if candidate == path),
+        None,
+    )
+    if own_index is None:
+        raise ProjectBackupError("Published archive disappeared before retention")
     limit = project.backup_size_limit_bytes
     total = sum(info.st_size for _, info in archives)
-    for old, before in archives:
+    for old, before in archives[:own_index]:
         if limit == 0 or total <= limit:
             break
-        if old == path:
-            continue
         current = old.lstat()
         if _symbol_persist._file_version(current) != _symbol_persist._file_version(
             before

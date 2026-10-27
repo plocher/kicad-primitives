@@ -1,10 +1,12 @@
 """Selected concrete cache restore through artifact objects, never a batch API."""
 
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from kicad_primitives.projects import Project
+from kicad_primitives.projects import Project, ProjectLifecycleError
 from kicad_primitives.schematics import (
     AmbiguousEmbeddedSymbolError,
     InvalidSchematicError,
@@ -459,3 +461,47 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
                         self.parent, "Parent"
                     )
                 self.assertEqual(schematic.to_bytes(), source.encode())
+
+    def test_late_exact_revert_preserves_explicit_reverse_restore_for_retry(
+        self,
+    ) -> None:
+        original_path = self.directory / "original.kicad_sym"
+        original_path.write_text(
+            "(kicad_symbol_lib (version 20251024) "
+            + CACHE.replace("Test:Part", "Original").replace("Part_1_1", "Original_1_1")
+            + ")",
+            encoding="utf-8",
+        )
+        original = SymbolLibrary.open(original_path)
+        embedded = self.schematic.embedded_symbol("Test:Part")
+        embedded.restore_from(self.parent, "Parent")
+        frozen = self.schematic.to_bytes()
+        real_replace = os.replace
+        reverted = False
+
+        def revert_after_source_write(source: Path, target: Path) -> None:
+            nonlocal reverted
+            real_replace(source, target)
+            if target == self.schematic.path and not reverted:
+                reverted = True
+                embedded.restore_from(original, "Original")
+
+        cli = self.verifier()
+        with (
+            patch(
+                "kicad_primitives._symbol_persist.os.replace",
+                side_effect=revert_after_source_write,
+            ),
+            self.assertRaises(ProjectLifecycleError),
+        ):
+            self.project.save(kicad_cli=cli)
+        self.assertTrue(reverted)
+        self.assertEqual(self.path.read_bytes(), frozen)
+        self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
+        self.assertTrue(self.project.is_modified)
+        with self.assertRaises(ProjectLifecycleError):
+            self.project.close()
+        self.project.save(kicad_cli=cli)
+        self.assertEqual(self.path.read_bytes(), SOURCE.encode())
+        self.assertFalse(self.project.is_modified)
+        self.project.close()

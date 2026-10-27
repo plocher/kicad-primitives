@@ -308,13 +308,25 @@ def restore_definition(
     ):
         raise InvalidSchematicError("Restore did not establish exact requested source")
     schematic._accept_document(updated)
-    baseline_chunk = baseline_doc.source[
-        baseline_node.span.start : baseline_node.span.end
-    ]
-    if materialized == baseline_chunk:
-        schematic._restore_intents.pop(lib_id, None)
-    else:
-        schematic._restore_intents[lib_id] = intent
+    # Retain the latest explicit choice even when it equals the old baseline:
+    # an in-flight older save may advance that baseline after this selection.
+    schematic._restore_intents[lib_id] = intent
+
+
+def _pending_restore_intents(schematic: Schematic) -> tuple[_RestoreIntent, ...]:
+    """Project latest explicit choices against the actual current saved baseline."""
+    if not schematic._restore_intents:
+        return ()
+    baseline = parse(schematic._baseline.decode("utf-8"))
+    nodes = _cache_nodes(baseline)
+    return tuple(
+        intent
+        for intent in schematic._restore_intents.values()
+        if baseline.source[
+            nodes[intent.lib_id].span.start : nodes[intent.lib_id].span.end
+        ]
+        != intent.requested_chunk
+    )
 
 
 def _export_pins(pins: tuple[_PinFact, ...]) -> tuple[tuple[str, str, str], ...]:
@@ -381,7 +393,7 @@ def predict_restored_signature(
     node_updates: dict[tuple[str, str], tuple[str, str]] = {}
     part_updates: dict[tuple[str, str], tuple[tuple[str, str, str], ...]] = {}
     for schematic in changed:
-        for intent in schematic._restore_intents.values():
+        for intent in _pending_restore_intents(schematic):
             node = cache_nodes(schematic)[intent.lib_id]
             assert schematic._document is not None
             if (
