@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add strict complete Project file-set persistence, raw PCB freshness, current-state save decisions, and terminal zero-write discard/close guards on owned handles. Prebuild complete native-allowlisted ZIPs from frozen post-save bytes, publish after selected writes, preserve same-second history and latest snapshots under a soft size budget, and report partial-I/O/retry limits. Selected document saves archive saved sibling baselines, not pending edits. Replace regex Sheetfile discovery with the selected structural parser. Project save-as remains the next phase; Git `.history` is deferred (`docs/projects.md`; #55, #56).
+
 - Reject same-inode, same-byte backup rewrites after publication. Compare staged data facts captured before linking or replacing, rather than adopting a concurrent `.bak` version for recovery (#54).
 
 - Add independent SymbolLibrary save-as and current-state close decisions. Discard is terminal and invalidates editable handles. Changed overwrites create native `Foo.bak` backups with safe failure recovery. Guard closed-parent copy/restore while retaining captured restore intent. Record the accepted lifecycle in ADR 0008, AGENTS, and CONTEXT. Project backup/history and multi-file save-as remain pending the owner's backend choice (`docs/symbol-libraries.md`; #54).

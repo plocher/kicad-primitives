@@ -66,8 +66,11 @@ Exact no-op edits preserve a successful decision.
 Close after discard is idempotent. No mutation, close, discard, or finalizer implicitly persists.
 Single-file save-as refuses existing or unsafe destinations and rebinds only after success.
 Changed independent symbol-library overwrites require native `Foo.bak` backup behavior. Table saves do not invent a backup.
-Project multi-file save-as and native backup support remain subsequent work. The owner has not selected timestamped ZIP versus Git-backed `.history`.
-Do not implement that backend or invent a universal session or transaction framework.
+`Project` now implements strict same-location file-set saves, post-save native-style ZIP snapshots, and terminal close/discard semantics.
+The owner selected timestamped ZIP as the pre-1.0 minimum in #55. Same-second saves never overwrite prior archives.
+Project save-as relocation is the next bounded implementation phase and is not implemented yet.
+Git-backed `.history` interoperability remains deferred research #58, owner grilling #59, and design #60.
+Do not add a Git dependency, autosave scheduler, branching/merge/rollback policy, or a universal session/transaction framework.
 Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.
 
 ### Functional ownership

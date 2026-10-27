@@ -198,6 +198,21 @@ class HierarchyTests(ProjectCase):
         self.write_json("board.kicad_pro", {"meta": {"version": 1}})
         self.assertEqual(Project.open(self.root).schematic_files(), ())
 
+    def test_escaped_unicode_sheetfile_uses_structure_without_geometry_read(
+        self,
+    ) -> None:
+        self.write_json("board.kicad_pro", {})
+        name = 'blocks/quo"té sheet.kicad_sch'
+        main = self.write(
+            "board.kicad_sch",
+            f'(kicad_sch (version 20260306) (sheet (property "Sheetfile" {json.dumps(name, ensure_ascii=False)})))',
+        )
+        child = self.write(name, "(kicad_sch (version 20260306))")
+        self.assertEqual(
+            Project.open(self.root).schematic_files(),
+            (main.resolve(), child.resolve()),
+        )
+
 
 class TextVariablesTests(ProjectCase):
     def test_returns_text_variables_verbatim(self) -> None:

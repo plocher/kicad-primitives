@@ -277,28 +277,7 @@ def save_schematics(
     *,
     kicad_cli: str | os.PathLike[str] | None,
 ) -> None:
-    changed = tuple(document for document in selected if document.is_modified)
-    if not selected:
-        return
-    _preflight(project, tuple(project._schematics.values()), changed)
-    documents = _hierarchy(project)
-    if any(document not in documents for document in selected):
-        raise SchematicConflictError("Owned schematic is no longer in the hierarchy")
-    _preflight(project, documents, changed)
-    if not changed:
-        return
-    _verify(project, documents, changed, kicad_cli)
-    # Verification can take time. Recheck ALL inputs, not only output files.
-    _preflight(project, documents, changed)
-    for document in changed:
-        output = document.to_bytes()
-        _symbol_persist.save_source(
-            document.path,
-            document._baseline,
-            output,
-            conflict_error=SchematicConflictError,
-            unsupported_error=UnsupportedSchematicOperationError,
-            label="Schematic",
-        )
-        object.__setattr__(document, "_baseline", output)
-        document._restore_intents.clear()
+    """Save selected documents through their owning Project's snapshot safety net."""
+    from ._project_persist import save_project
+
+    save_project(project, selected, kicad_cli=kicad_cli)

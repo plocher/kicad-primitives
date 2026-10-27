@@ -153,6 +153,8 @@ class PlacedSymbol:
 
     def attribute(self, name: str) -> PlacedAttribute:
         """Return the unique attribute with this name."""
+        if self._owner is not None:
+            self._owner._check_open()
         matches = tuple(
             p for p in self.attributes if _attribute_key(p.name) == _attribute_key(name)
         )
@@ -288,9 +290,14 @@ class Schematic:
         default_factory=dict, init=False, repr=False, compare=False
     )
 
+    def _check_open(self) -> None:
+        if self._project is not None:
+            self._project._check_open()
+
     @property
     def embedded_symbols(self) -> tuple[EmbeddedSymbol, ...]:
         """Embedded definitions in source order, with stable object identity."""
+        self._check_open()
         from ._schematic_restore import cache_nodes
 
         nodes = cache_nodes(self)
@@ -301,6 +308,7 @@ class Schematic:
 
     def embedded_symbol(self, lib_id: str) -> EmbeddedSymbol:
         """Select one unambiguous embedded definition, or raise KeyError."""
+        self._check_open()
         for symbol in self.embedded_symbols:
             if symbol.lib_id == lib_id:
                 return symbol
@@ -309,10 +317,12 @@ class Schematic:
     @property
     def is_modified(self) -> bool:
         """Whether content differs from the last opened or saved bytes."""
+        self._check_open()
         return self.to_bytes() != self._baseline
 
     def to_bytes(self) -> bytes:
         """Preview pending source without writing or running electrical checks."""
+        self._check_open()
         if self._document is None:
             raise UnsupportedSchematicOperationError("Schematic has no source")
         return self._document.source.encode("utf-8")
@@ -323,7 +333,10 @@ class Schematic:
         Other owned documents remain pending. Verification uses the complete
         project hierarchy with only this document's changes staged. Requires
         KiCad for changed saves; never silently skips electrical verification.
+        The owning Project archives actual post-save bytes, not unsaved sibling
+        changes. This document-only operation does not establish a root decision.
         """
+        self._check_open()
         if self._project is None:
             raise UnsupportedSchematicOperationError(
                 "Save requires owning project context"
@@ -334,6 +347,7 @@ class Schematic:
 
     def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
         """Reject document-only ERC because the backend cannot honor that scope."""
+        self._check_open()
         raise UnsupportedSchematicOperationError(
             "Document-only ERC is unsupported; request the full hierarchy on Project.erc"
         )
@@ -341,6 +355,7 @@ class Schematic:
     def _set_attribute(self, symbol: PlacedSymbol, name: str, value: str) -> None:
         if not isinstance(name, str) or not isinstance(value, str):
             raise TypeError("Attribute name and value must be strings")
+        self._check_open()
         if not name or "\x00" in name or "\x00" in value:
             raise ValueError("Attribute name must be nonempty; NUL is not supported")
         name.encode("utf-8")
@@ -400,14 +415,20 @@ class Schematic:
         self._accept_document(updated)
 
     def _accept_document(self, updated: Schematic) -> None:
+        self._check_open()
+        changed = self.to_bytes() != updated.to_bytes()
         for old, new in zip(self.symbols, updated.symbols, strict=True):
             object.__setattr__(old, "attributes", new.attributes)
             object.__setattr__(old, "value", new.value)
             object.__setattr__(old, "footprint", new.footprint)
         object.__setattr__(self, "_document", updated._document)
+        if changed and self._project is not None:
+            self._project._close_authorized = False
+            self._project._generation += 1
 
     def symbol(self, reference: str) -> PlacedSymbol:
         """Return the unique placed symbol with this reference."""
+        self._check_open()
         matches = tuple(s for s in self.symbols if s.reference == reference)
         if not matches:
             raise KeyError(reference)
@@ -672,6 +693,17 @@ def _no_connect(node: ListNode) -> NoConnect:
     return NoConnect(x=x, y=y, uuid=_optional_uuid(node))
 
 
+def _sheet_filename(node: ListNode) -> str:
+    matches = tuple(
+        prop
+        for prop in node.child_lists("property")
+        if _atom(prop, 1).value == "Sheetfile"
+    )
+    if len(matches) != 1 or not _atom(matches[0], 2).value:
+        raise InvalidSchematicError("sheet: expected one nonempty Sheetfile")
+    return _atom(matches[0], 2).value
+
+
 def _sheet(node: ListNode) -> SheetInstance:
     x, y, _rot = _at(node)
     size_nodes = node.child_lists("size")
@@ -680,16 +712,16 @@ def _sheet(node: ListNode) -> SheetInstance:
     width = _number(size_nodes[0], 1)
     height = _number(size_nodes[0], 2)
     name = ""
-    filename = ""
+    filename = _sheet_filename(node)
+    seen: set[str] = set()
     for prop in node.child_lists("property"):
         key = _atom(prop, 1).value
         value = _atom(prop, 2).value
         if key == "Sheetname":
+            if key in seen:
+                raise InvalidSchematicError(f"sheet: ambiguous {key}")
+            seen.add(key)
             name = value
-        elif key == "Sheetfile":
-            filename = value
-    if not filename:
-        raise InvalidSchematicError("sheet: missing Sheetfile")
     return SheetInstance(
         name=name,
         filename=filename,

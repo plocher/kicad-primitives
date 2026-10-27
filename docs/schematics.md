@@ -172,7 +172,8 @@ Only schematic format `20260306` supports edits. Older and future formats remain
 Do not confuse this with symbol-library format `20251024`.
 Changed saves require working KiCad netlist export. CLI discovery follows ADR 0007.
 There is no unchecked-save flag.
-Unchanged saves preserve bytes and do not replace files or invoke KiCad.
+Unchanged source saves preserve bytes and do not replace files or invoke KiCad.
+An explicit save still requests the owning Project's complete ZIP snapshot safety net.
 
 Before writing, save checks the project guard, project settings baseline, and every reachable schematic baseline.
 It requires regular, non-symlink, singly linked files.
@@ -211,6 +212,9 @@ Mixed attribute and restore edits use the same explicit persistence safeguards.
 `root.save()` stages only that document's pending changes.
 Other documents remain pending and contribute their saved baselines.
 `project.save()` stages all changed owned documents together.
+Both operations publish exact post-save Project ZIP history after their selected source files succeed.
+Unselected pending sibling source is not archived as if saved.
+Only a complete successful `Project.save()` establishes the root close decision.
 The package checks all inputs again after verification and before persistence.
 Known preflight failures stop before any original file changes.
 Files then save separately. A later I/O failure can leave earlier files saved.
@@ -218,9 +222,13 @@ This is not a crash-atomic multi-file transaction or coordination with another w
 An unsuccessful document retains pending changes for inspection and retry.
 The final check/replace race remains possible.
 
-No mutation, finalizer, or close action implicitly saves.
-Save-as relocation and general close/discard/session interfaces are not implemented.
-To abandon pending work, stop using its project and documents and open a new project.
+No mutation, finalizer, close, or discard action implicitly saves.
+Use `project.discard()` for terminal zero-write exit, not reload or rollback.
+`project.close()` requires a current complete save decision even for a clean open.
+Owned document/placed/embedded operations fail after Project exit.
+Later edits and failed saves revoke the decision; exact no-op edits preserve it.
+Project save-as relocation remains the next bounded phase, not implemented yet.
+ZIP history, budgets, and partial-I/O limits are defined in [projects.md](projects.md#zip-snapshots).
 
 ## Title block
 
@@ -359,6 +367,8 @@ ERC findings are not a substitute for the operation-specific save verification a
   A restore intent captured before parent exit remains valid and does not reread that parent at save.
 - `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
 - `ProjectWriteBlockedError`: the project write guard blocks persistence.
+- `ProjectLifecycleError`: the owning Project exited or lacks a current complete save decision.
+- `ProjectBackupError`: snapshot/save-history failure; some source files may already have been persisted.
 - `ErcAcquisitionError`: ERC execution or report intake failed, not a design finding.
 - `ErcContextError`: the original library context cannot be staged faithfully.
 - `KicadCliNotFoundError`, netlist export/parse errors, and ordinary filesystem errors propagate from explicit saves.

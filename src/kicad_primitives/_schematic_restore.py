@@ -267,6 +267,7 @@ def _materialize(
 def restore_definition(
     schematic: Schematic, lib_id: str, parent_library: SymbolLibrary, parent_name: str
 ) -> None:
+    schematic._check_open()
     if not isinstance(parent_library, SymbolLibrary):
         raise TypeError("parent_library must be an opened SymbolLibrary")
     parent_library._check_open()
