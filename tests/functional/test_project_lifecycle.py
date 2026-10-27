@@ -638,3 +638,35 @@ class ProjectLifecycleTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 action()
         self.assertFalse(self.archives())
+
+    def test_retention_preserves_a_known_newer_snapshot_from_another_root(self) -> None:
+        older = Project.open(self.pro, backup_size_limit_bytes=1)
+        newer = Project.open(self.pro, backup_size_limit_bytes=0)
+        base_name = "board-2026-10-27_010203.zip"
+        real_read = Path.read_bytes
+        interleaved = False
+
+        def publish_newer_after_first_archive(path: Path) -> bytes:
+            nonlocal interleaved
+            raw = real_read(path)
+            if path.name == base_name and not interleaved:
+                interleaved = True
+                newer.save()
+            return raw
+
+        with (
+            patch("kicad_primitives._project_backup.datetime") as clock,
+            patch("pathlib.Path.read_bytes", new=publish_newer_after_first_archive),
+        ):
+            clock.now.return_value.strftime.return_value = "2026-10-27_010203"
+            older.save()
+        self.assertTrue(interleaved)
+        self.assertEqual(
+            {path.name for path in self.archives()},
+            {base_name, "board-2026-10-27_010203-001.zip"},
+        )
+        for path in self.archives():
+            with zipfile.ZipFile(path) as archive:
+                self.assertEqual(archive.read(self.sch.name), SOURCE)
+        older.close()
+        newer.close()

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from lossless_sexpr import ListNode, ParseError, parse
 
 from . import _symbol_persist
-from ._schematic_restore import predict_restored_signature
+from ._schematic_restore import _pending_restore_intents, predict_restored_signature
 from .netlist import export_netlist
 from .schematics import (
     Schematic,
@@ -254,7 +254,9 @@ def _verify(
         before_path = export_netlist(
             staged_root, stage / "before.net", kicad_cli=kicad_cli
         )
-        include_libparts = any(document._restore_intents for document in changed)
+        include_libparts = any(
+            _pending_restore_intents(document) for document in changed
+        )
         before = _electrical_signature(before_path, include_libparts=include_libparts)
         expected = predict_restored_signature(before, documents, changed)
         for document in changed:

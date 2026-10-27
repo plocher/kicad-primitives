@@ -134,6 +134,8 @@ Use `Project.open(path, backup_size_limit_bytes=0)` for unlimited history, or pr
 There are no legacy count/day/interval caps, GUI format-setting discovery, or autosave scheduler.
 After publication, oldest recognized regular snapshots are pruned first.
 At least the just-published latest snapshot remains. A sole oversized latest archive makes the budget soft.
+Pruning removes only snapshots older than this save's own archive.
+Known newer snapshots from another writer are also protected, so concurrent protected history can exceed the budget.
 Unrelated ZIP files and names outside this Project's archive namespace are not pruned.
 
 ### Failures and pending save-as work

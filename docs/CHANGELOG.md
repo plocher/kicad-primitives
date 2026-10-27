@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve latest explicit restore provenance across late exact-revert edits while a frozen Project save advances its baseline. Protect known newer concurrent ZIP history during retention instead of deleting another root's completed snapshot (#56).
+
 - Add strict complete Project file-set persistence, raw PCB freshness, current-state save decisions, and terminal zero-write discard/close guards on owned handles. Prebuild complete native-allowlisted ZIPs from frozen post-save bytes, publish after selected writes, preserve same-second history and latest snapshots under a soft size budget, and report partial-I/O/retry limits. Selected document saves archive saved sibling baselines, not pending edits. Replace regex Sheetfile discovery with the selected structural parser. Project save-as remains the next phase; Git `.history` is deferred (`docs/projects.md`; #55, #56).
 
 - Reject same-inode, same-byte backup rewrites after publication. Compare staged data facts captured before linking or replacing, rather than adopting a concurrent `.bak` version for recovery (#54).
