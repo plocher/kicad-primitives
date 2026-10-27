@@ -216,25 +216,43 @@ class Project:
 
     @property
     def lock_file(self) -> Path:
-        """Path of the KiCad ``.lck`` file for this project basename."""
-        return (self._directory / f"{self.base_name}.lck").resolve()
+        """Native Project Manager lock path: ``~<full-project-filename>.lck``."""
+        return _native_lock_path(self._project_file)
+
+    def _lock_candidates(self) -> tuple[Path, ...]:
+        sources = [self._project_file]
+        sources.extend(
+            path for path in (self._schematic_file, self._pcb_file) if path is not None
+        )
+        sources.extend(document.path for document in self._schematics.values())
+        return tuple(dict.fromkeys(_native_lock_path(path) for path in sources))
+
+    def _present_locks(self) -> tuple[Path, ...]:
+        present: list[Path] = []
+        for path in self._lock_candidates():
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                continue
+            present.append(path)
+        return tuple(present)
 
     @property
     def is_locked(self) -> bool:
-        """True when the KiCad lock file is present on disk.
+        """True when any known native Project/schematic/PCB peer lock is present.
 
         Presence means KiCad may hold unsaved state; it does not by itself
         forbid reads. Writers should call :meth:`ensure_writes_allowed`.
         """
         self._check_open()
-        return self.lock_file.is_file()
+        return bool(self._present_locks())
 
     def write_is_permitted(self, *, inside_kicad: bool | None = None) -> bool:
         """Return whether filesystem writes should proceed under lock policy.
 
-        When *inside_kicad* is omitted, the package probes for an importable
-        ``pcbnew`` module (KiCad embedded Python). Callers may pass an explicit
-        boolean in tests or known host contexts.
+        Omitted *inside_kicad* is conservative filesystem mode, regardless of
+        importable KiCad modules. Explicit True is a caller assertion for this
+        helper only, not an unchecked-save permission token.
         """
         self._check_open()
         if _resolve_inside_kicad(inside_kicad):
@@ -250,7 +268,7 @@ class Project:
         """Raise if a KiCad lock should block real filesystem writes.
 
         Policy:
-        - Inside KiCad (plugin/session): always allowed (in-memory host owns state).
+        - Explicit inside_kicad=True: caller asserts ownership for this helper.
         - No lock file: allowed.
         - Locked + ``dry_run=True``: allowed (preview only; no package stderr).
         - Locked + ``dry_run=False``: raises :class:`ProjectWriteBlockedError`.
@@ -260,7 +278,10 @@ class Project:
             return
         if dry_run:
             return
-        lock_name = self.lock_file.name
+        lock_name = (
+            ", ".join(str(path) for path in self._present_locks())
+            or "native lock state changed"
+        )
         raise ProjectWriteBlockedError(
             f"KiCad lock file detected ({lock_name}). "
             "The project appears to be open in KiCad. "
@@ -326,13 +347,13 @@ class Project:
 
 
 def _resolve_inside_kicad(inside_kicad: bool | None) -> bool:
-    if inside_kicad is not None:
-        return inside_kicad
-    try:
-        import pcbnew  # type: ignore[import-not-found]  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    if inside_kicad is not None and not isinstance(inside_kicad, bool):
+        raise TypeError("inside_kicad must be a boolean or None")
+    return inside_kicad is True
+
+
+def _native_lock_path(source: Path) -> Path:
+    return source.with_name(f"~{source.name}.lck")
 
 
 def _find_project_file(directory: Path) -> Path:

@@ -184,7 +184,22 @@ Malformed project JSON raises `InvalidProjectError` on open.
 
 ## Write lock and guards
 
-KiCad creates ``<basename>.lck`` while a project is open.
+Native KiCad uses `~` plus the full original filename plus `.lck`:
+- `~Demo.kicad_pro.lck` for Project Manager
+- `~Demo.kicad_sch.lck` for the schematic editor
+- `~Demo.kicad_pcb.lck` for the PCB editor
+- Child schematic locks beside their actual child files
+
+`lock_file` reports the canonical Project Manager lock path.
+`is_locked` detects any native lock on the known project, root schematic, PCB, and loaded owned schematic paths.
+Save strictly loads the hierarchy and checks child locks before source or history writes.
+Companions with a different basename use their actual filenames, not a project-stem guess.
+Any lock-path presence blocks default persistence, including a dangling link.
+The package never acquires, deletes, or decides that a peer lock is stale.
+The donor `<basename>.lck` guess is not a compatibility alias.
+The native construction and constants are pinned at
+[lockfile.h:54–55](https://github.com/KiCad/kicad-source-mirror/blob/2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f/include/lockfile.h#L54-L55)
+and [wildcards_and_files_ext.cpp:126–127](https://github.com/KiCad/kicad-source-mirror/blob/2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f/common/wildcards_and_files_ext.cpp#L126-L127).
 
 ```python
 project = Project.open("/path/to/board")
@@ -193,15 +208,21 @@ if project.write_is_permitted():
     project.ensure_writes_allowed()  # raises ProjectWriteBlockedError if locked
 # Preview-only callers:
 project.ensure_writes_allowed(dry_run=True)  # locked still OK; do not write
-# In-KiCad plugin hosts:
+# Explicit assertion for this helper, not a filesystem-save permission token:
 project.ensure_writes_allowed(inside_kicad=True)
 ```
 
-`is_locked` is presence of the lock file only. Reads are always allowed.
-`ensure_writes_allowed` implements the package write policy: bypass inside
-KiCad, allow dry-run previews when locked, otherwise raise
-`ProjectWriteBlockedError` (a `PermissionError`). The package does not print
-to stderr.
+Reads and ERC remain allowed while locked.
+`inside_kicad=None` is conservative filesystem mode, even when `pcbnew` is importable.
+Importability does not prove ownership of KiCad's unsaved buffers.
+An explicit `inside_kicad=True` remains a caller assertion for the guard query only.
+It does not authorize a later filesystem save, which performs its own default native peer-lock checks.
+`dry_run=True` permits preview-only validation. There is no save force/allow-locked flag.
+Blocked saves raise `ProjectWriteBlockedError` (`PermissionError`) before unsafe persistence.
+Locks are checked again before each source replacement and before ZIP publication.
+If a new peer lock appears after an earlier file succeeded, completed baselines remain advanced and close stays unauthorized.
+The guard does not remove the final check/write race or coordinate with another process.
+The package does not print diagnostics to stderr.
 
 ## Limits
 
@@ -209,7 +230,7 @@ to stderr.
 - PCB document models remain unsupported.
 - Sheet instance paths and multi-instance sheet models remain later work.
 - Library table resolution is a different area.
-- Lock guards do not coordinate with KiCad beyond detecting the `.lck` file.
+- Lock guards detect actual native peer paths but do not acquire locks or coordinate processes.
 - Project save-as relocation remains pending. ZIP history does not imply Git history or rollback APIs.
 - No mutation or close action implicitly saves.
 

@@ -8,7 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from kicad_primitives.projects import Project, ProjectBackupError
+from kicad_primitives.projects import (
+    Project,
+    ProjectBackupError,
+    ProjectWriteBlockedError,
+)
 from kicad_primitives.schematics import (
     SchematicConflictError,
     UnsupportedSchematicOperationError,
@@ -670,3 +674,105 @@ class ProjectLifecycleTests(unittest.TestCase):
                 self.assertEqual(archive.read(self.sch.name), SOURCE)
         older.close()
         newer.close()
+
+    def test_native_pro_schematic_pcb_and_unloaded_child_locks_block_actual_owned_paths(
+        self,
+    ) -> None:
+        _, child = self.hierarchy()
+        root = self.root / "different-root.kicad_sch"
+        self.sch.rename(root)
+        pcb = self.root / "different-board.kicad_pcb"
+        pcb.write_bytes(b'(kicad_pcb (version 20260206) (generator "pcbnew"))')
+        paths = (self.pro, root, pcb, child)
+        original = {path: (path.read_bytes(), path.stat().st_ino) for path in paths}
+        for source in paths:
+            with self.subTest(source=source):
+                lock = source.with_name(f"~{source.name}.lck")
+                lock.write_bytes(b"native peer lock")
+                try:
+                    project = Project.open(self.pro)
+                    schematic = project.schematic()
+                    schematic.symbol("R1").set_attribute("Value", "22K")
+                    # The child remains unloaded until the complete save walk.
+                    for save in (project.save, schematic.save):
+                        with self.assertRaises(ProjectWriteBlockedError):
+                            save(kicad_cli=self.root / "must-not-run")
+                    self.assertTrue(project.is_locked)
+                    self.assertEqual(
+                        {
+                            path: (path.read_bytes(), path.stat().st_ino)
+                            for path in paths
+                        },
+                        original,
+                    )
+                    self.assertFalse(self.archives())
+                    self.assertTrue(lock.is_file())
+                    self.assertEqual(schematic.symbol("R1").value, "22K")
+                    project.discard()
+                finally:
+                    lock.unlink()
+
+    def test_native_child_lock_appearing_after_first_write_blocks_later_source(
+        self,
+    ) -> None:
+        project, child_path = self.hierarchy()
+        root, child = project.schematics()
+        root.symbol("R1").set_attribute("Value", "22K")
+        child.symbol("R2").set_attribute("Value", "33K")
+        original_child = child_path.read_bytes()
+        lock = child_path.with_name(f"~{child_path.name}.lck")
+        real_replace = os.replace
+
+        def peer_opens_child(source: Path, target: Path) -> None:
+            real_replace(source, target)
+            if target == root.path:
+                lock.write_bytes(b"peer opened child")
+
+        with (
+            patch(
+                "kicad_primitives._symbol_persist.os.replace",
+                side_effect=peer_opens_child,
+            ),
+            self.assertRaises(ProjectWriteBlockedError),
+        ):
+            project.save(kicad_cli=self.verifier())
+        self.assertFalse(root.is_modified)
+        self.assertTrue(child.is_modified)
+        self.assertEqual(child_path.read_bytes(), original_child)
+        self.assertTrue(lock.exists())
+        self.assertFalse(self.archives())
+        lock.unlink()
+        project.save(kicad_cli=self.verifier())
+        project.close()
+
+    def test_native_lock_appearing_after_source_write_blocks_history_and_requires_retry(
+        self,
+    ) -> None:
+        project = Project.open(self.pro)
+        schematic = project.schematic()
+        schematic.symbol("R1").set_attribute("Value", "22K")
+        lock = project.lock_file
+        real_replace = os.replace
+
+        def peer_opens_project(source: Path, target: Path) -> None:
+            real_replace(source, target)
+            if target == schematic.path:
+                lock.write_bytes(b"peer opened Project")
+
+        with (
+            patch(
+                "kicad_primitives._symbol_persist.os.replace",
+                side_effect=peer_opens_project,
+            ),
+            self.assertRaises(ProjectWriteBlockedError),
+        ):
+            project.save(kicad_cli=self.verifier())
+        self.assertFalse(project.is_modified)
+        self.assertFalse(self.archives())
+        self.assertTrue(lock.exists())
+        with self.assertRaises(RuntimeError):
+            project.close()
+        lock.unlink()
+        project.save(kicad_cli=self.root / "not-needed")
+        self.assertEqual(len(self.archives()), 1)
+        project.close()

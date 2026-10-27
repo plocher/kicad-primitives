@@ -139,7 +139,8 @@ def main() -> None:
                 for p in (*root.iterdir(), first)
                 if p.is_file()
             }
-            (root / "cpNode-IOX.lck").touch()
+            (root / "~cpNode-IOX.kicad_pro.lck").touch()
+            assert project.is_locked
             for path in original:
                 path.chmod(0o444)
             root.chmod(0o555)
