@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Record the ADR 0006 acceptance reconciliation: met service rows, remaining 1.0 gaps (#63–#67, #39, #34), release preparation (#68), and owner-confirmed post-1.0 TBDs (`docs/review/adr-0006-reconciliation.md`).
+
 - Reject late edits or terminal exit during final save-as validation before any live handle overwrite or path rebinding. Preserve original identity and newer pending state while retaining completed destination output honestly (#56).
 
 - Add bounded original-safe Project save-as to a fresh directory/stem. Localize JSON identity members, UUID-owned instance labels, and proved PCB sheet provenance; preserve foreign/opaque content and stable owned handles. Copy understood local contexts or reject unsupported dependencies before publication. Verify full electrical identity and destination ZIP before rebinding; retain partial destinations honestly on late failure. Add one repeatable current-format native hierarchy/PCB rename proof (`docs/projects.md`; #56).
