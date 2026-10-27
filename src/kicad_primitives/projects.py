@@ -8,7 +8,6 @@ PCB document models remain later work.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
@@ -22,13 +21,10 @@ if TYPE_CHECKING:
 __all__ = [
     "InvalidProjectError",
     "Project",
+    "ProjectBackupError",
+    "ProjectLifecycleError",
     "ProjectWriteBlockedError",
 ]
-
-_SHEETFILE_RE = re.compile(
-    r'\(property\s+"Sheetfile"\s+"([^"]+\.kicad_sch)"',
-    re.MULTILINE,
-)
 
 
 class InvalidProjectError(ValueError):
@@ -37,6 +33,14 @@ class InvalidProjectError(ValueError):
 
 class ProjectWriteBlockedError(PermissionError):
     """A KiCad lock file blocks package writes outside an in-KiCad session."""
+
+
+class ProjectLifecycleError(RuntimeError):
+    """The Project is closed or lacks a current complete save decision."""
+
+
+class ProjectBackupError(OSError):
+    """Project history failed; some source files may already have been saved."""
 
 
 class Project:
@@ -50,6 +54,7 @@ class Project:
         pcb_file: Path | None,
         text_variables: Mapping[str, str],
         project_baseline: bytes,
+        backup_size_limit_bytes: int = 100 * 1024 * 1024,
     ) -> None:
         self._directory = directory
         self._project_file = project_file
@@ -58,19 +63,65 @@ class Project:
         self._text_variables = text_variables
         self._schematics: dict[Path, Schematic] = {}
         self._project_baseline = project_baseline
+        self._pcb_baseline = None if pcb_file is None else pcb_file.read_bytes()
+        if isinstance(backup_size_limit_bytes, bool) or not isinstance(
+            backup_size_limit_bytes, int
+        ):
+            raise TypeError("backup_size_limit_bytes must be an integer")
+        if backup_size_limit_bytes < 0:
+            raise ValueError("backup_size_limit_bytes cannot be negative")
+        self._backup_size_limit_bytes = backup_size_limit_bytes
+        self._closed = False
+        self._close_authorized = False
+        self._generation = 0
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise ProjectLifecycleError(f"Project is closed: {self._project_file}")
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the artifact exited through close or terminal discard."""
+        return self._closed
+
+    @property
+    def backup_size_limit_bytes(self) -> int:
+        """Explicit ZIP history budget; zero means unlimited."""
+        return self._backup_size_limit_bytes
+
+    def discard(self) -> None:
+        """Terminally abandon the Project without writing or resetting baselines."""
+        self._closed = True
+
+    def close(self) -> None:
+        """Exit without writing after a complete current save decision or discard."""
+        if self._closed:
+            return
+        if not self._close_authorized:
+            raise ProjectLifecycleError("Save or discard before close")
+        self.discard()
 
     @property
     def is_modified(self) -> bool:
         """Whether any owned schematic has pending changes."""
+        self._check_open()
         return any(schematic.is_modified for schematic in self._schematics.values())
 
     @classmethod
-    def open(cls, path: str | PathLike[str]) -> Project:
+    def open(
+        cls,
+        path: str | PathLike[str],
+        *,
+        backup_size_limit_bytes: int = 100 * 1024 * 1024,
+    ) -> Project:
         """Open a project directory or an explicit ``.kicad_pro`` file.
 
         Discovery requires exactly the selected ``*.kicad_pro``. Schematic and PCB
         companions are optional. ``text_variables`` are read now; missing maps are
         empty, not errors. Malformed project JSON fails before a context is returned.
+        Capture optional raw PCB bytes without exposing a board editor.
+        *backup_size_limit_bytes* defaults to 100 MiB. Zero keeps unlimited ZIP
+        history. Reject booleans, non-integers, and negative budgets before writes.
         """
         location = Path(path).expanduser().absolute()
         if location.is_file():
@@ -96,19 +147,29 @@ class Project:
         baseline = project_file.read_bytes()
         variables = _read_text_variables(project_file, baseline)
         return cls(
-            directory, project_file, schematic_file, pcb_file, variables, baseline
+            directory,
+            project_file,
+            schematic_file,
+            pcb_file,
+            variables,
+            baseline,
+            backup_size_limit_bytes,
         )
 
     def save(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
-        """Verify and persist changed owned schematics at their current locations.
+        """Save the supported Project file set and publish an exact ZIP snapshot.
 
-        Preflight known failures before writing. Files are replaced separately,
-        not as a crash-atomic transaction; a later I/O failure can leave earlier
-        files saved. Unsaved documents retain pending changes for inspection.
+        Strictly include the entire internal schematic hierarchy, captured JSON,
+        and optional unchanged raw PCB. Verify changed schematic electrical state.
+        Preserve unchanged source bytes/inodes. Publish ZIP history after source
+        writes, even for a clean explicit save. Later I/O/history failure may leave
+        earlier files saved but never authorizes close. No project transaction,
+        implicit persistence, autosave scheduler, or Git history is supplied.
         """
-        from ._schematic_persist import save_schematics
+        self._check_open()
+        from ._project_persist import save_project
 
-        save_schematics(self, tuple(self._schematics.values()), kicad_cli=kicad_cli)
+        save_project(self, None, kicad_cli=kicad_cli)
 
     def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
         """Check the full pending hierarchy without saving or clearing changes.
@@ -118,6 +179,7 @@ class Project:
         and read-only originals remain checkable.
         Relative library URIs use this project's original directory as native CWD.
         """
+        self._check_open()
         from ._erc import acquire_erc
 
         return acquire_erc(self, kicad_cli=kicad_cli)
@@ -164,6 +226,7 @@ class Project:
         Presence means KiCad may hold unsaved state; it does not by itself
         forbid reads. Writers should call :meth:`ensure_writes_allowed`.
         """
+        self._check_open()
         return self.lock_file.is_file()
 
     def write_is_permitted(self, *, inside_kicad: bool | None = None) -> bool:
@@ -173,6 +236,7 @@ class Project:
         ``pcbnew`` module (KiCad embedded Python). Callers may pass an explicit
         boolean in tests or known host contexts.
         """
+        self._check_open()
         if _resolve_inside_kicad(inside_kicad):
             return True
         return not self.is_locked
@@ -191,6 +255,7 @@ class Project:
         - Locked + ``dry_run=True``: allowed (preview only; no package stderr).
         - Locked + ``dry_run=False``: raises :class:`ProjectWriteBlockedError`.
         """
+        self._check_open()
         if self.write_is_permitted(inside_kicad=inside_kicad):
             return
         if dry_run:
@@ -211,6 +276,7 @@ class Project:
         When *path* is given it must resolve to a file returned by
         :meth:`schematic_files`. Outsiders and missing roots fail explicitly.
         """
+        self._check_open()
 
         if path is None:
             if self._schematic_file is None:
@@ -228,6 +294,7 @@ class Project:
         return self._load_schematic(target)
 
     def _load_schematic(self, target: Path) -> Schematic:
+        self._check_open()
         from .schematics import open_schematic
 
         key = target.resolve()
@@ -239,6 +306,7 @@ class Project:
 
     def schematics(self) -> tuple[Schematic, ...]:
         """Open every schematic in the hierarchical file list, in walk order."""
+        self._check_open()
         return tuple(self.schematic(path) for path in self.schematic_files())
 
     def schematic_files(self) -> tuple[Path, ...]:
@@ -248,6 +316,7 @@ class Project:
         directory. Missing children are skipped. Cycles are ignored after the
         first visit. Without a root schematic the result is empty.
         """
+        self._check_open()
         if self._schematic_file is None:
             return ()
         files: list[Path] = []
@@ -351,8 +420,26 @@ def _walk_schematic(
 
 
 def _extract_sheet_files(schematic_path: Path) -> list[str]:
+    from lossless_sexpr import ListNode, ParseError, parse
+
+    from .schematics import _sheet_filename
+
     try:
-        content = schematic_path.read_text(encoding="utf-8")
+        raw = schematic_path.read_bytes()
     except OSError:
         return []
-    return _SHEETFILE_RE.findall(content)
+    try:
+        roots = parse(raw.decode("utf-8")).roots()
+    except (UnicodeError, ParseError, RecursionError) as exc:
+        raise InvalidProjectError(
+            f"Invalid hierarchy source: {schematic_path}"
+        ) from exc
+    if (
+        len(roots) != 1
+        or not isinstance(roots[0], ListNode)
+        or roots[0].head != "kicad_sch"
+    ):
+        raise InvalidProjectError(
+            f"Expected one schematic hierarchy root: {schematic_path}"
+        )
+    return [_sheet_filename(node) for node in roots[0].child_lists("sheet")]

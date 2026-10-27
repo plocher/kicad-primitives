@@ -170,12 +170,42 @@ Recovery must not overwrite or delete a concurrent third-party backup version.
 These are optimistic bounded safeguards, not a crash-atomic two-file transaction.
 Native table saves have no corresponding backup hook. Do not invent a table backup.
 
-### Project persistence remains pending
-Project multi-file backup/history and project-name-dependent save-as relocation remain subsequent work.
-Native KiCad has timestamped ZIP backups and Git-backed `.history`.
-The owner has not selected the required backend.
-This alignment does not choose one, add a Git dependency, or claim that Project backup/save-as has shipped.
-Independent file persistence does not depend on that pending Project decision.
+### Project ZIP minimum and same-location lifecycle
+The owner selected timestamped ZIP snapshots as the pre-1.0 safety minimum in [#55](https://github.com/plocher/kicad-primitives/issues/55).
+Project save-as relocation remains the next bounded phase of [#56](https://github.com/plocher/kicad-primitives/issues/56), not an implemented capability yet.
+Native Git-backed `.history` interoperability is deferred through research #58, owner grilling #59, and design #60.
+ZIP support adds no Git dependency, branching/merge/rollback policy, or autosave scheduler.
+
+`Project.save()` strictly captures the supported internal schematic hierarchy, project JSON, and optional raw PCB companion.
+Existing electrical proof, source conflicts, guards, links, formats, and permission safeguards remain mandatory.
+Unchanged source bytes/inodes need no replacement.
+Project settings and PCB content remain byte-preserved, without introducing a settings writer or board editor.
+Project close/discard follows the accepted terminal lifecycle above.
+Document-only saves do not establish a complete Project save decision.
+Actual later edits and failed saves revoke it. Frozen outputs and generation checks prevent newer pending state from being silently settled.
+
+Native archive evidence is pinned to KiCad 10.0.1 in #55.
+Use `<name>-backups/<name>-YYYY-MM-DD_HHMMSS.zip` with enabled history and the native 100 MiB default budget.
+An explicit nonnegative byte budget can use zero for unlimited history.
+Do not invent legacy count/day/interval caps or silently read GUI format settings.
+The allowlist is `.kicad_pro/.kicad_prl/.kicad_sch/.kicad_sym/.kicad_pcb/.kicad_mod/.kicad_dru/.kicad_wks/.kicad_jobset/.json/.wbk`
+and the bare `fp-lib-table`, `sym-lib-table`, and `design-block-lib-table` names.
+Hidden trees and actual backup output are excluded. Required owned members must never silently disappear through filtering.
+
+Build and validate the complete ZIP from frozen post-save bytes before original writes.
+Publish only after all selected source writes succeed.
+Selected document saves archive saved sibling baselines, not their pending unsaved edits.
+Keep each explicit snapshot rather than copying native lossy CRC-set deduplication.
+Use exclusive recognizable numeric suffixes instead of overwriting same-second archives.
+Reject unreadable or unsafe included members rather than claiming a partial archive succeeded.
+Prune recognized regular managed archives only after publication, oldest first, always retaining the latest.
+An oversized sole latest archive makes the size budget soft.
+
+These are bounded optimistic safeguards, not a crash-atomic Project transaction.
+Advance each source baseline only after its file succeeds.
+Later source/publication/retention failure can leave earlier files saved but must not authorize close.
+A subsequent clean save retries complete history publication.
+Usage details and failure limits are in [projects.md](../projects.md).
 
 ## Current gaps and consequences
 
@@ -183,7 +213,8 @@ Independent file persistence does not depend on that pending Project decision.
 - Resolved inheritance remains immutable inspection data, not an implicit parent-editing target.
 - Physical `LibraryTable` artifacts own buffered TableEntry edits. Context resolution sees nested pending source. No `apply` or dry-run aliases remain.
 - Project-owned live schematic/placed-symbol objects support attribute edits, selected embedded restore, aggregate change state, and explicit same-location verified saves.
-- General Project save-as, native backup/history, discard, and close remain unimplemented.
+- Project same-location persistence, native-style ZIP snapshots, and terminal discard/close are implemented.
+- Project save-as relocation remains pending. Git `.history` interoperability is separately deferred.
 - The proposed `Project.set_symbol_attribute(...)` batch workflow is superseded by object-level editing.
 
 Align these areas through bounded implementation milestones with their existing behavioral tests.

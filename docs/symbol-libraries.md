@@ -212,7 +212,8 @@ Save-as can fork a read-only library or readable linked source because it does n
 It still checks the captured source-byte baseline and rejects external changes or deletion without refreshing pending content.
 A failed save-as retains the prior path, baseline, and pending changes. It does not authorize close.
 A new destination needs no backup. A subsequent changed `save()` there creates its own `.bak`.
-Project multi-file backup/history and project-name-dependent relocation remain separate pending work, not part of this single-file operation.
+Project same-location ZIP history is separate from this single-file operation.
+Project save-as relocation remains pending, and Git `.history` support is separately deferred.
 
 Errors exported from `kicad_primitives.symbols`:
 - `InvalidLibraryError`: invalid syntax or required structure.
