@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import stat
 import unittest
 import zipfile
@@ -472,3 +473,60 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.assertTrue(project.is_modified)
         self.assertEqual(self.sch.read_bytes(), _SOURCE)
         self.assertTrue((self.destination / ".foreign-moved.kicad_sch").is_file())
+
+    def test_late_edit_during_final_destination_validation_keeps_original_binding_and_pending_state(
+        self,
+    ) -> None:
+        fixture = (
+            Path(__file__).resolve().parents[1] / "fixtures/projects/rename-native"
+        )
+        source = self.root / "native-source"
+        source.mkdir()
+        for path in fixture.glob("*.kicad_*"):
+            shutil.copyfile(path, source / path.name)
+        original = {
+            path: (path.read_bytes(), path.stat().st_ino) for path in source.iterdir()
+        }
+        pro = source / "issue23403.kicad_pro"
+        project = Project.open(pro)
+        schematic = project.schematic()
+        placed = schematic.symbol("C0")
+        destination = self.root / "native-clone"
+        output = destination / "Renamed.kicad_sch"
+        real_read = Path.read_bytes
+        changed = False
+
+        def late_edit_on_final_output_read(path: Path) -> bytes:
+            nonlocal changed
+            raw = real_read(path)
+            if (
+                path == output
+                and not changed
+                and tuple((destination / "Renamed-backups").glob("*.zip"))
+            ):
+                changed = True
+                placed.set_attribute("Value", "LATE-PENDING-EDIT")
+            return raw
+
+        with (
+            patch("kicad_primitives._project_relocate._prove", return_value=None),
+            patch("pathlib.Path.read_bytes", new=late_edit_on_final_output_read),
+            self.assertRaises(ProjectLifecycleError),
+        ):
+            project.save_as(destination, "Renamed")
+        self.assertTrue(changed)
+        self.assertEqual(project.directory, source)
+        self.assertEqual(project.project_file, pro)
+        self.assertIs(project.schematic(), schematic)
+        self.assertEqual(placed.path, source / "issue23403.kicad_sch")
+        self.assertEqual(placed.value, "LATE-PENDING-EDIT")
+        self.assertTrue(project.is_modified)
+        with self.assertRaises(ProjectLifecycleError):
+            project.close()
+        self.assertEqual(
+            {path: (path.read_bytes(), path.stat().st_ino) for path in original},
+            original,
+        )
+        self.assertTrue(output.is_file())
+        self.assertNotIn(b"LATE-PENDING-EDIT", output.read_bytes())
+        self.assertEqual(len(tuple((destination / "Renamed-backups").glob("*.zip"))), 1)
