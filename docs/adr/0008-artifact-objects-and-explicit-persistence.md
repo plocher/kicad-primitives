@@ -172,7 +172,10 @@ Native table saves have no corresponding backup hook. Do not invent a table back
 
 ### Project ZIP minimum and same-location lifecycle
 The owner selected timestamped ZIP snapshots as the pre-1.0 safety minimum in [#55](https://github.com/plocher/kicad-primitives/issues/55).
-Project save-as relocation remains the next bounded phase of [#56](https://github.com/plocher/kicad-primitives/issues/56), not an implemented capability yet.
+Bounded ordinary-project save-as is implemented under [#56](https://github.com/plocher/kicad-primitives/issues/56).
+It creates a fresh directory/stem, preserves original bytes and permissions, and rebinds existing owned objects only after complete output/history success.
+Known JSON identity members use decoder-derived spans. Schematic/PCB provenance uses proved UUID ownership, not global name replacement.
+The supported internal hierarchy and local context boundaries are explicit in `docs/projects.md`; unprovable layouts fail before publication.
 Native Git-backed `.history` interoperability is deferred through research #58, owner grilling #59, and design #60.
 ZIP support adds no Git dependency, branching/merge/rollback policy, or autosave scheduler.
 
@@ -218,7 +221,7 @@ Usage details and failure limits are in [projects.md](../projects.md).
 - Physical `LibraryTable` artifacts own buffered TableEntry edits. Context resolution sees nested pending source. No `apply` or dry-run aliases remain.
 - Project-owned live schematic/placed-symbol objects support attribute edits, selected embedded restore, aggregate change state, and explicit same-location verified saves.
 - Project same-location persistence, native-style ZIP snapshots, and terminal discard/close are implemented.
-- Project save-as relocation remains pending. Git `.history` interoperability is separately deferred.
+- Bounded Project save-as preserves original source and stable owned identity. Git `.history` interoperability is separately deferred.
 - The proposed `Project.set_symbol_attribute(...)` batch workflow is superseded by object-level editing.
 
 Align these areas through bounded implementation milestones with their existing behavioral tests.

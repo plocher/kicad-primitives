@@ -98,7 +98,7 @@ class Project:
         if self._closed:
             return
         if not self._close_authorized:
-            raise ProjectLifecycleError("Save or discard before close")
+            raise ProjectLifecycleError("Save, save as, or discard before close")
         self.discard()
 
     @property
@@ -183,6 +183,24 @@ class Project:
         from ._erc import acquire_erc
 
         return acquire_erc(self, kicad_cli=kicad_cli)
+
+    def save_as(
+        self,
+        new_path: str | PathLike[str],
+        new_project_name: str,
+        *,
+        kicad_cli: str | PathLike[str] | None = None,
+    ) -> None:
+        """Persist a new directory/name and rebind only after complete verified success.
+
+        Preserve original source and stable owned handles. Refuse existing or
+        unsafe destinations and unprovable metadata/dependency layouts. Failed
+        publication can leave an incomplete destination, never a source rebind.
+        """
+        self._check_open()
+        from ._project_relocate import save_as
+
+        save_as(self, new_path, new_project_name, kicad_cli=kicad_cli)
 
     @property
     def directory(self) -> Path:

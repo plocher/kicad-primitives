@@ -1,0 +1,19 @@
+Native rename fixture derivation
+
+KiCad 10.0.1 commit 2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f, qa/data/eeschema/issue23403/.
+Generated KiCad data, not implementation code. Original files were read with git show and never written.
+Formats remain schematic 20260306 and PCB 20260206; no header was upgraded or bumped.
+
+Derivation: retain first root UUID and sheet edge; reduce top_level_sheets and legacy sheets map to that root/child. Correct the reproducer child C1 instance path to the selected root/edge. Preserve the old path under a separate Foreign/C9 group. Clone the actual child capacitor placement/cache into the root as C0 with distinct symbol/pin UUIDs. Add minimal current-format PCB footprints: direct root provenance, legacy child properties, and untouched foreign provenance. Keep UUIDs/library IDs unchanged in production save-as; fixture construction is independent of that operation. JSON was formatted only while constructing this fixture, never by the production metadata editor.
+
+Source SHA-256:
+issue23403.kicad_sch c49f6b199c45fc063751606af51e31b4af784ddd0672a927ac7796e69c22635c
+shared1.kicad_sch 569cfdb6ba087008daa2a072e5f5080927684b37d6010b5ce70eead37ad67de8
+issue23403.kicad_pro 37c98d788148c66238bbee3716f91785d3af4d5a2e0ded5bacac271fb9390bfe
+issue23403.kicad_pcb 9732c37867cd081621490a6345db7caeb4599f087175afcdd57d0df064127de4
+
+Derived SHA-256:
+issue23403.kicad_sch 0a9afda4b42c47663ffa8b6576c9bbbd9f81109a3dc4ca0348f959be8183dce8
+shared1.kicad_sch 6105b6c591614eeb7f8f2352b20f2a4c9586cf60379dbd04a94c7961cc923711
+issue23403.kicad_pro 97191395b106fa74518fcf4bbb5551dfd5bd5d2f8ae84a5d3cc3a7bd975cf2ea
+issue23403.kicad_pcb 7ea15b8620709b2ab47508090a5f01ebc410ae6a96bfabcf4513dab0b71be29e

@@ -213,7 +213,7 @@ It still checks the captured source-byte baseline and rejects external changes o
 A failed save-as retains the prior path, baseline, and pending changes. It does not authorize close.
 A new destination needs no backup. A subsequent changed `save()` there creates its own `.bak`.
 Project same-location ZIP history is separate from this single-file operation.
-Project save-as relocation remains pending, and Git `.history` support is separately deferred.
+Bounded Project save-as is a separate operation; Git `.history` support remains deferred.
 
 Errors exported from `kicad_primitives.symbols`:
 - `InvalidLibraryError`: invalid syntax or required structure.
