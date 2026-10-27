@@ -38,17 +38,21 @@ from .schematics import (
 )
 
 
+def _check_state(project: Project, generation: int) -> None:
+    project._check_open()
+    if project._generation != generation:
+        raise ProjectLifecycleError(
+            "A newer pending state was not included in Project save-as"
+        )
+
+
 def _current(
     project: Project,
     generation: int,
     inputs: tuple[_project_files._Input, ...],
     directories: tuple[_project_assets._Directory, ...],
 ) -> None:
-    project._check_open()
-    if project._generation != generation:
-        raise ProjectLifecycleError(
-            "A newer pending state was not included in Project save-as"
-        )
+    _check_state(project, generation)
     project.ensure_writes_allowed()
     _project_files.check(project.directory, inputs)
     _project_assets.check(directories)
@@ -65,6 +69,7 @@ def _current(
             raise SchematicConflictError(
                 "Source companion membership changed during save-as"
             )
+    _check_state(project, generation)
 
 
 def _validate_layout(destination: Path, files: dict[Path, bytes], name: str) -> None:
@@ -433,6 +438,7 @@ def save_as(
         _current(project, generation, inputs, directories)
         _destination_locks(owned_targets)
         _destination_outputs(outputs, installed)
+        _current(project, generation, inputs, directories)
         old_project, old_pcb = project.project_file, project.pcb_file
         for document in documents:
             source = document.path
