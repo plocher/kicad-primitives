@@ -178,6 +178,10 @@ ZIP support adds no Git dependency, branching/merge/rollback policy, or autosave
 
 `Project.save()` strictly captures the supported internal schematic hierarchy, project JSON, and optional raw PCB companion.
 Existing electrical proof, source conflicts, guards, links, formats, and permission safeguards remain mandatory.
+Native peer locks use `~<full-original-filename>.lck` for the project, schematic, PCB, and owned child sheets.
+Default filesystem persistence checks their actual paths and never infers host ownership from an importable `pcbnew` module.
+Explicit host assertions on a guard helper do not become unchecked-save tokens.
+No lock acquisition or stale-lock deletion is introduced.
 Unchanged source bytes/inodes need no replacement.
 Project settings and PCB content remain byte-preserved, without introducing a settings writer or board editor.
 Project close/discard follows the accepted terminal lifecycle above.

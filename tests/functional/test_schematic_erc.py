@@ -144,7 +144,7 @@ class ProjectErcTests(unittest.TestCase):
         original = {p: p.read_bytes() for p in (self.path, self.child_path, self.pro)}
         root.symbol("R1").set_attribute("Value", "root pending")
         child.symbol("R2").set_attribute("Value", "child pending")
-        (self.directory / "board.lck").touch()
+        (self.directory / "~board.kicad_pro.lck").touch()
         for path in original:
             path.chmod(0o444)
             self.addCleanup(path.chmod, 0o644)

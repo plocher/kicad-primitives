@@ -16,6 +16,7 @@ from .projects import (
     InvalidProjectError,
     ProjectBackupError,
     ProjectLifecycleError,
+    ProjectWriteBlockedError,
     _find_companion,
 )
 from .schematics import SchematicConflictError, UnsupportedSchematicOperationError
@@ -155,6 +156,7 @@ def save_project(
             project._check_open()
             _project_backup.check_fresh(project, snapshot, written)
             output = outputs[document.path]
+            project.ensure_writes_allowed()
             installed = _symbol_persist.save_source(
                 document.path,
                 document._baseline,
@@ -167,10 +169,11 @@ def save_project(
             written[document.path] = installed
         project._check_open()
         _project_backup.check_fresh(project, snapshot, written)
+        project.ensure_writes_allowed()
         _project_backup.publish(project, snapshot)
         _project_backup.check_fresh(project, snapshot, written)
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
-        if isinstance(exc, ProjectBackupError):
+        if isinstance(exc, (ProjectBackupError, ProjectWriteBlockedError)):
             raise
         raise ProjectBackupError(
             "Project save/history failed; successfully persisted files keep their new baselines"

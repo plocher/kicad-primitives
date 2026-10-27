@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Correct native peer-lock naming to `~<full-original-filename>.lck`. Guard actual project/root/PCB/strict child paths and reject lock presence before source/history writes, including newly appearing locks after partial saves. Remove implicit `pcbnew` importability as a filesystem-save bypass while keeping read/ERC access and explicit helper assertions (#56).
+
 - Preserve latest explicit restore provenance across late exact-revert edits while a frozen Project save advances its baseline. Protect known newer concurrent ZIP history during retention instead of deleting another root's completed snapshot (#56).
 
 - Add strict complete Project file-set persistence, raw PCB freshness, current-state save decisions, and terminal zero-write discard/close guards on owned handles. Prebuild complete native-allowlisted ZIPs from frozen post-save bytes, publish after selected writes, preserve same-second history and latest snapshots under a soft size budget, and report partial-I/O/retry limits. Selected document saves archive saved sibling baselines, not pending edits. Replace regex Sheetfile discovery with the selected structural parser. Project save-as remains the next phase; Git `.history` is deferred (`docs/projects.md`; #55, #56).

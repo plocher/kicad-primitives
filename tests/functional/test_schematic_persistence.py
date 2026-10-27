@@ -76,7 +76,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
 
     def test_guard_stale_context_and_links_fail_before_verifier(self) -> None:
         self.schematic.symbol("R1").set_attribute("Value", "22K")
-        lock = self.directory / "board.lck"
+        lock = self.directory / "~board.kicad_pro.lck"
         lock.touch()
         with self.assertRaises(ProjectWriteBlockedError):
             self.project.save(kicad_cli=self.directory / "missing-cli")

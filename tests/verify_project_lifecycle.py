@@ -8,7 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from kicad_primitives._kicad_cli import resolve_kicad_cli
-from kicad_primitives.projects import Project, ProjectLifecycleError
+from kicad_primitives.projects import (
+    Project,
+    ProjectLifecycleError,
+    ProjectWriteBlockedError,
+)
 
 # Independently authored empty native data header, not KiCad implementation code.
 # KiCad 10.0.1 SEXPR_BOARD_FILE_VERSION=20260206. The 79-byte native QA data at
@@ -65,6 +69,24 @@ def main() -> None:
             raise AssertionError("A clean Project closed without an explicit decision")
         placed.set_attribute("Value", "22K")
         pending = schematic.to_bytes()
+        for path in (pro, sch, pcb):
+            lock = path.with_name(f"~{path.name}.lck")
+            lock.write_bytes(b"controlled native peer lock")
+            try:
+                assert project.is_locked
+                assert schematic.to_bytes() == pending
+                try:
+                    project.save(kicad_cli=root / "must-not-run")
+                except ProjectWriteBlockedError:
+                    pass
+                else:
+                    raise AssertionError(f"Native peer lock did not block save: {lock}")
+                assert {
+                    p: (p.read_bytes(), p.stat().st_ino) for p in originals
+                } == originals
+                assert not (root / "cpNode-IOX-backups").exists()
+            finally:
+                lock.unlink()
         project.save(kicad_cli=cli)
         archives = tuple((root / "cpNode-IOX-backups").glob("cpNode-IOX-*.zip"))
         assert len(archives) == 1
@@ -100,7 +122,8 @@ def main() -> None:
         clean.close()
         print(
             "Native Project lifecycle passed: verified schematic save, native PCB acceptance, "
-            "exact full-file-set ZIP, unchanged JSON/PCB/no-op inodes, stable/dead handles, terminal discard."
+            "native peer-lock controls, exact full-file-set ZIP, unchanged JSON/PCB/no-op inodes, "
+            "stable/dead handles, terminal discard."
         )
 
 
