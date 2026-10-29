@@ -3,9 +3,41 @@
 import os
 import stat
 import tempfile
+from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 from ._symbol_types import FileConflictError, UnsupportedOperationError
+
+
+@dataclass(frozen=True)
+class Fingerprint:
+    """What an artifact remembers about the file it read: size and content hash.
+
+    ADR 0009 write promise: no silent overwrite, without keeping the original
+    bytes in memory. The fingerprint stands in for the baseline bytes.
+    """
+
+    size: int
+    digest: str
+
+    @classmethod
+    def of(cls, raw: bytes) -> "Fingerprint":
+        """Fingerprint the given bytes."""
+        return cls(len(raw), sha256(raw).hexdigest())
+
+    def matches(self, raw: bytes) -> bool:
+        """Whether *raw* is the content this fingerprint was taken from."""
+        return len(raw) == self.size and sha256(raw).hexdigest() == self.digest
+
+
+Baseline = bytes | Fingerprint
+
+
+def _matches(baseline: Baseline, raw: bytes) -> bool:
+    if isinstance(baseline, Fingerprint):
+        return baseline.matches(raw)
+    return raw == baseline
 
 
 def _check_new_destination(
@@ -204,7 +236,7 @@ def save_library_source(path: Path, baseline: bytes, output: bytes) -> None:
 
 def _check_read_baseline(
     path: Path,
-    baseline: bytes,
+    baseline: Baseline,
     *,
     conflict_error: type[Exception] = FileConflictError,
     label: str = "Library",
@@ -212,7 +244,7 @@ def _check_read_baseline(
     """Check source freshness for copying, without requiring overwrite permissions."""
     try:
         info = path.stat()
-        if path.read_bytes() != baseline:
+        if not _matches(baseline, path.read_bytes()):
             raise conflict_error(f"{label} changed on disk: {path}")
     except FileNotFoundError as exc:
         raise conflict_error(f"{label} no longer exists: {path}") from exc
@@ -221,7 +253,7 @@ def _check_read_baseline(
 
 def _check_baseline(
     path: Path,
-    baseline: bytes,
+    baseline: Baseline,
     *,
     conflict_error: type[Exception] = FileConflictError,
     unsupported_error: type[Exception] = UnsupportedOperationError,
@@ -233,7 +265,7 @@ def _check_baseline(
             raise unsupported_error(
                 "Save requires a regular, non-symlink, singly linked file"
             )
-        if path.read_bytes() != baseline:
+        if not _matches(baseline, path.read_bytes()):
             raise conflict_error(f"{label} changed on disk: {path}")
     except FileNotFoundError as exc:
         raise conflict_error(f"{label} no longer exists: {path}") from exc
@@ -242,13 +274,19 @@ def _check_baseline(
 
 def save_source(
     path: Path,
-    baseline: bytes,
+    baseline: Baseline,
     output: bytes,
     *,
     conflict_error: type[Exception] = FileConflictError,
     unsupported_error: type[Exception] = UnsupportedOperationError,
     label: str = "Library",
 ) -> os.stat_result:
+    """Replace one existing file atomically after an optimistic baseline check.
+
+    *baseline* is the bytes the artifact read, or their :class:`Fingerprint`.
+    An output equal to the baseline replaces nothing. The temporary file is a
+    same-directory dotfile with a ``.tmp`` suffix, never a KiCad file name.
+    """
     info = _check_baseline(
         path,
         baseline,
@@ -256,7 +294,7 @@ def save_source(
         unsupported_error=unsupported_error,
         label=label,
     )
-    if output == baseline:
+    if _matches(baseline, output):
         return info
     if not stat.S_IMODE(info.st_mode) & 0o222:
         raise PermissionError(f"{label} has no write permission bits: {path}")
