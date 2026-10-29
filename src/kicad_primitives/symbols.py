@@ -9,7 +9,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
-from . import _symbol_parse, _symbol_persist
+from . import _registry, _symbol_parse, _symbol_persist
 from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
 from ._symbol_live import (
     StaleSymbolError,
@@ -34,6 +34,9 @@ from ._symbol_types import (
     TextDefinition,
     UnsupportedOperationError,
 )
+from .tables import LibraryTables
+
+_KIND = "symbol"
 
 __all__ = [
     "AmbiguousAttributeError",
@@ -120,10 +123,29 @@ class SymbolLibrary:
         return self.to_bytes() != self._baseline
 
     @classmethod
-    def open(cls, path: str | PathLike[str]) -> SymbolLibrary:
-        """Read a library at an explicit path; no discovery or project is needed."""
-        location = Path(path).absolute()
-        return cls(location, location.read_bytes())
+    def open(
+        cls,
+        target: str | PathLike[str],
+        *,
+        tables: LibraryTables | None = None,
+    ) -> SymbolLibrary:
+        """Open one library by registered nickname or by path.
+
+        A ``str`` that is a registered symbol nickname in *tables* (or in the
+        default ``LibraryTables.open()`` context when *tables* is omitted)
+        opens that library's resolved path. Any other ``str``, and every
+        ``Path``, is a filesystem path. The same library, by resolved real
+        path, opens to the same object until it is closed or discarded.
+        """
+        location = _registry.resolve_target(
+            target, library_type="symbol", tables=tables
+        )
+        existing = _registry.lookup(_KIND, location)
+        if isinstance(existing, SymbolLibrary):
+            return existing
+        library = cls(location, location.read_bytes())
+        _registry.register(_KIND, location, library)
+        return library
 
     @property
     def version(self) -> int:
@@ -301,6 +323,7 @@ class SymbolLibrary:
         info = _symbol_persist._check_read_baseline(self._path, self._baseline)
         output = self.to_bytes()
         _symbol_persist.save_new_source(destination, output, mode=info.st_mode & 0o7777)
+        _registry.rebind(_KIND, self._path, destination, self)
         self._path = destination
         self._baseline = output
 
@@ -309,6 +332,7 @@ class SymbolLibrary:
         if self._closed:
             return
         self._closed = True
+        _registry.unregister(_KIND, self._path, self)
         for symbol in self._symbols:
             symbol._alive = False
 

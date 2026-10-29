@@ -119,6 +119,7 @@ class AttributeEditTests(unittest.TestCase):
                     library.symbol(symbol).set_attribute(key, "replacement")
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
+                library.discard()
 
     def test_invalid_value_fails_before_mutation(self) -> None:
         original = b'(kicad_symbol_lib (version 20251024) (symbol "A" (property "Note" "old")))'
@@ -302,6 +303,7 @@ class AttributeInsertDeleteTests(unittest.TestCase):
                         library.symbol(symbol).delete_attribute(key)
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
+                library.discard()
 
     def test_add_invalid_value_fails_before_mutation(self) -> None:
         original = b'(kicad_symbol_lib (version 20251024) (symbol "A"))'
@@ -545,6 +547,7 @@ class PinEditTests(unittest.TestCase):
                         library.symbol(symbol).body(unit, style).pin(number).delete()
                 self.assertEqual(library.to_bytes(), original)
                 self.assertEqual(self.path.read_bytes(), original)
+                library.discard()
 
     def test_pin_ops_reject_readonly_format_and_invalid_values(self) -> None:
         original = (
@@ -561,6 +564,7 @@ class PinEditTests(unittest.TestCase):
         with self.assertRaises(UnsupportedOperationError):
             library.symbol("A").body(1, 1).pin("1").delete()
         self.assertEqual(library.to_bytes(), original)
+        library.discard()
 
         current = (
             b'(kicad_symbol_lib (version 20251024) (symbol "A"'
