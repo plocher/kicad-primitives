@@ -257,7 +257,7 @@ python -m unittest discover -s tests -q
 ```
 
 Static checks used for the first slice: `ruff check src tests`, `ruff format --check src tests`, and `mypy --strict --follow-untyped-imports src/kicad_primitives`.
-The normal suite needs neither KiCad nor donor checkouts. The opt-in `tests/verify_symbol_libraries.py` takes explicit library paths, a new output directory, and optionally `--kicad-cli`; see `docs/symbol-libraries.md`.
+The normal suite needs neither KiCad nor donor checkouts. The opt-in `tests/verify_symbol_libraries.py` and `tests/verify_footprint_libraries.py` take explicit library paths, a new output directory, and optionally `--kicad-cli`; see `docs/symbol-libraries.md` and `docs/footprint-libraries.md`.
 On this machine KiCad's CLI is `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`. The verifier may take an explicit `--kicad-cli` path (ADR 0007 step 1). Shared auto-discovery is private package machinery under ADR 0007, not a public module.
 Full `uv lock` / release automation is deferred; it is not required by ADR 0005.
 
