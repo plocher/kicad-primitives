@@ -48,7 +48,7 @@ for body in effective.bodies:
         print(text.text, text.x, text.y, text.rotation)
 ```
 
-`open(target, tables=None)` takes a nickname or a path. A `str` is first tried as a registered symbol nickname in `tables`, or in a default `LibraryTables.open()` context when `tables` is omitted; any other `str`, and every `Path`, is a file path.
+`open(target, tables=None)` takes a nickname or a path. Every `Path` is a file path. With explicit `tables`, a `str` is first tried as a registered symbol nickname; an unregistered `str` is a path. Without `tables`, a `str` that names an existing path is that path at once; otherwise the default `LibraryTables.open()` context is consulted, and a missing nickname or a malformed or unreadable table falls back to the string as a path. Pass a `Path` to skip nickname lookup altogether.
 The same library, by resolved real path, opens to the same object until it is closed or discarded ([ADR 0009](adr/0009-primitives-not-an-executive.md) registry). A second open while the first is still open sees its pending edits. Exit the first object to read the file again.
 
 `SymbolAttribute` holds one named value and its declaration provenance.
