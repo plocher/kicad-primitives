@@ -76,6 +76,19 @@ Git-backed `.history` interoperability remains deferred research #58, owner gril
 Do not add a Git dependency, autosave scheduler, branching/merge/rollback policy, or a universal session/transaction framework.
 Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.
 
+### Primitives, not an executive (locked)
+
+Canonical decision: [ADR 0009](docs/adr/0009-primitives-not-an-executive.md).
+A public operation does one job to one artifact, runs KiCad only when that is its stated purpose, calls no other public capability as a hidden step, and makes no workflow decision for the client.
+File-integrity promises stay inside primitives: no silent overwrite (conflicts raise; `save(overwrite=True)` is the explicit way through), no partial file, no stray KiCad files, native backups from disk.
+Policy (connectivity verification, backup, ERC, discovery roots, URI style, peer-lock guards) lives in `kicad_primitives.recipes`: short tested functions built only from public primitives. Primitives never call recipes.
+Every artifact has one lifecycle: open, read, modify, validate, write, close. `validate()` is public and runs no KiCad. `is_modified` is a setter-maintained flag.
+Connectivity verification is a client sequence: `before = project.netlist()`, edit, `after = project.netlist()`, `before == after`. The package does not predict or excuse expected electrical changes.
+Peer locks are a query (`is_locked`, `lock_file`), not a write guard.
+Footprint libraries are two levels: a directory with cached `summaries` and explicit `refresh()`, plus per-file `Footprint` artifacts; `on_close` is chosen at open (`save` default). Delete, rename, create, and copy are immediate directory operations.
+`update_from_library(library, name)` replaces a project's embedded copy with the library definition, in memory; the family covers symbols, footprints (#34), and worksheets (future).
+Composite operations that predate ADR 0009 (`Project.save()`, `save_as()`, `close()` history retry, `restore_from()`, `ensure_writes_allowed()`) are split in a follow-up ticket, each bundle becoming a named recipe.
+
 ### Functional ownership
 
 Canonical TOC, responsibilities, donor basis, and exclusions: [ADR 0002](docs/adr/0002-functional-service-toc.md).
