@@ -23,6 +23,7 @@ They return owned `kicad_primitives.schematics.Schematic` documents: title block
 Selected concrete embedded definitions support source-backed restore.
 Geometry editing and general cache synchronization remain unsupported.
 `Project.erc()` checks a pending full-project snapshot and returns typed per-sheet reports.
+`Project.export_svgs()` writes SVGs of the same pending snapshot to a new directory.
 
 ## Open via a project
 
@@ -367,6 +368,38 @@ It never becomes an empty report or a synthetic warning finding.
 The supported report schema is `https://schemas.kicad.org/erc.v1.json`.
 ERC findings are not a substitute for the operation-specific save verification above.
 
+## SVG export
+
+```python
+result = project.export_svgs("/path/to/new-svg-dir")  # optional kicad_cli=
+for svg in result.files:
+    print(svg.path, svg.sheet_path, svg.source_path)
+root_page = next(f for f in result.files if f.sheet_path == "/")
+```
+
+`Project.export_svgs(output_dir)` renders the full hierarchy, including every document's pending `to_bytes()` content.
+It uses the same private staging as `Project.erc()`, `Project.netlist()`, and save verification.
+It does not save source, clear pending changes, or require the project write guard.
+Locked projects and read-only original files remain exportable.
+
+`output_dir` must not exist, even as a symlink. Its parent directories must exist and must not be symlinks.
+The destination directory must permit writing. The package does not create parent directories.
+An existing or unsafe destination fails before KiCad runs.
+KiCad renders into a temporary stage. The package creates `output_dir` exclusively only after a complete, validated render.
+A later file-copy failure can leave a partial new directory. It never overwrites an existing file.
+
+`SchematicSvgExport` holds `output_dir`, `files`, the `ProjectSnapshot` provenance (`snapshot`), and backend `stdout`/`stderr`.
+Each `SchematicSvgFile` holds the produced `path`, the human `sheet_path` (`"/"` for the root, `"/A/B/"` for nested sheets), and the original `source_path`.
+KiCad names each page `<root-stem>-<sheet name>-….svg`. The package proves the mapping from that rule and the captured hierarchy.
+A file that it cannot map, for example after KiCad file-name sanitizing or a name collision, keeps `sheet_path=None` and `source_path=None`.
+A proved sheet without a produced file raises `SchematicSvgError`.
+
+The command is `kicad-cli sch export svg --output <stage> <root>`. No plot options are exposed.
+Donor use is the full hierarchy (kproj `schematic_exporter`) and a root-only page (`--pages 1`). Select the root entry by `sheet_path == "/"`.
+Theme, black-and-white, drawing-sheet, and page-selection options are post-1.0.
+The stage holds only the project file and hierarchy schematics. A custom drawing sheet referenced by a relative path is not staged.
+A nonzero exit, no SVG output, or an omitted proved sheet raises `SchematicSvgError`. It never becomes an empty result.
+
 ## Limits
 
 - No reference annotation, flag editing, mandatory-attribute deletion, or geometry editing.
@@ -379,6 +412,7 @@ ERC findings are not a substitute for the operation-specific save verification a
 - Verification does not copy arbitrary project trees, external resources, or library tables.
 - No automatic KiCad resave or whole-file normalization occurs.
 - ERC is full-project only and uses the bounded native local reference context described above.
+- SVG export is full-project only, has no plot options, and does not stage custom drawing sheets.
 
 ## Errors
 
@@ -396,6 +430,8 @@ ERC findings are not a substitute for the operation-specific save verification a
 - `ProjectBackupError`: snapshot/save-history failure; some source files may already have been persisted.
 - `ErcAcquisitionError`: ERC execution or report intake failed, not a design finding.
 - `ErcContextError`: the original library context cannot be staged faithfully.
+- `SchematicSvgError`: SVG export execution or output intake failed.
+- `FileExistsError` / `FileNotFoundError` / `PermissionError`: SVG output directory exists, lacks a parent, or is not writable.
 - `KicadCliNotFoundError`, netlist export/parse errors, and ordinary filesystem errors propagate from explicit saves.
 
 ## Tests
@@ -440,4 +476,14 @@ uv run python tests/verify_schematic_erc.py --kicad-cli /path/to/kicad-cli
 ```
 
 It checks actual KiCad 10 JSON, typed findings, original URI resolution, and locked/read-only pending snapshots.
+
+SVG export scenarios port kproj `schematic_exporter` behavior through `Project.export_svgs` with a backend test double.
+`tests/functional/test_schematic_svg_export.py` covers pending content, sheet mapping, destination safety, and acquisition failures.
+The native gate uses a disposable two-sheet hierarchy copy:
+
+```bash
+uv run python tests/verify_schematic_svg.py --kicad-cli /path/to/kicad-cli
+```
+
+It checks KiCad file names, root/child mapping, a rendered pending Value, unchanged sources, and existing-output refusal.
 Finding totals depend on the original reference context. The gate does not filter legitimate missing-footprint findings.

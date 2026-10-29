@@ -27,6 +27,7 @@ from ._erc_types import (
     ErcSnapshot,
     ErcViolation,
 )
+from ._svg_types import SchematicSvgError, SchematicSvgExport, SchematicSvgFile
 from ._symbol_parse import _leading_separator_start
 from ._symbol_types import _MANDATORY, _attribute_key
 
@@ -64,6 +65,9 @@ __all__ = [
     "Schematic",
     "SchematicConflictError",
     "SchematicError",
+    "SchematicSvgError",
+    "SchematicSvgExport",
+    "SchematicSvgFile",
     "SchematicVerificationError",
     "SheetInstance",
     "TitleBlock",

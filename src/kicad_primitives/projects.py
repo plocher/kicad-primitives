@@ -19,6 +19,7 @@ from ._snapshot_types import ProjectSnapshot, SnapshotDocument
 
 if TYPE_CHECKING:
     from ._erc_types import ErcReport
+    from ._svg_types import SchematicSvgExport
     from .netlist import Netlist
     from .schematics import Schematic
 
@@ -214,6 +215,27 @@ class Project:
                 kicad_cli=kicad_cli,
             )
         return replace(exchange, provenance=pending.snapshot)
+
+    def export_svgs(
+        self,
+        output_dir: str | PathLike[str],
+        *,
+        kicad_cli: str | PathLike[str] | None = None,
+    ) -> SchematicSvgExport:
+        """Write SVGs of the full pending hierarchy into a new directory.
+
+        Use the same pending snapshot as :meth:`erc` and :meth:`netlist`. Do
+        not save source, clear pending changes, or require the write guard.
+        *output_dir* must not exist, even as a symlink; its existing parents
+        must be non-symlink, writable directories. Return each produced file
+        with its proved sheet mapping and snapshot provenance. Acquisition
+        failures raise ``SchematicSvgError`` or ``KicadCliNotFoundError`` and
+        never create the output directory. See ``docs/schematics.md``.
+        """
+        self._check_open()
+        from ._schematic_svg import export_schematic_svgs
+
+        return export_schematic_svgs(self, output_dir, kicad_cli=kicad_cli)
 
     def save_as(
         self,
