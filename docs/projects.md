@@ -19,6 +19,13 @@ PCB editing models remain unsupported. Library tables: [tables.md](tables.md).
 `Project.export_svgs()` writes pending-source schematic SVGs to a new directory; see [schematics.md](schematics.md#svg-export).
 The package remains pre-alpha (`0.0.0` informational).
 
+## Surface (ADR 0006 A)
+
+- **Supported:** open and discover a project; hierarchical schematic files; read-only `text_variables`; owned schematic documents; `save()`, `save_as()`, `discard()`, and `close()` with ZIP history; native peer-lock guards; pending-snapshot `erc()`, `netlist()`, and `export_svgs()`.
+- **Defined, explicit failure:** save or save-as outside the bounded hierarchy and relocation profile; persistence while a native peer lock exists; close without a current successful save decision.
+- **1.0 work in progress:** PCB document reads, DRC reports, and Gerber/drill export ([#34](https://github.com/plocher/kicad-primitives/issues/34)). Until then there is no PCB model on `Project`.
+- **Deferred past 1.0:** `.kicad_pro` settings editing, sheet instance paths and multi-instance sheets, variants, Git `.history` interoperability ([#58–60](https://github.com/plocher/kicad-primitives/issues/58)), and PCB editing.
+
 ## Open a project
 
 ```python

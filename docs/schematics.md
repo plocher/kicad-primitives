@@ -25,6 +25,12 @@ Geometry editing and general cache synchronization remain unsupported.
 `Project.erc()` checks a pending full-project snapshot and returns typed per-sheet reports.
 `Project.export_svgs()` writes SVGs of the same pending snapshot to a new directory.
 
+## Surface (ADR 0006 A)
+
+- **Supported:** merged placed-symbol read; title block; geometry and electrical-structure read; `PlacedSymbol.set_attribute` and custom `delete_attribute`; selected concrete embedded restore; explicit save with electrical verification; project-scope ERC and SVG export.
+- **Defined, explicit failure:** a differing Reference (reference annotation); flag names; mandatory-attribute deletion; power-symbol Value changes; document-only `Schematic.erc()`; `extends` materialization on restore; restore electrical changes outside the proved pin-type depth; edits to formats other than `20260306`.
+- **Deferred past 1.0:** reference annotation and flag editing as operations; geometry editing; general embedded-cache synchronization; multi-instance sheet models; SVG plot options and drawing-sheet staging.
+
 ## Open via a project
 
 ```python

@@ -40,11 +40,12 @@ Use these headings (extra mid-page sections are allowed for large surfaces):
 
 1. **Title** — area name and short scope (what the page covers).
 2. **Scope** — what the surface does and does not do; pre-alpha / ADR limits as needed.
-3. **Open** (or equivalent entry) — how the caller obtains the service.
-4. **Use** — inspect / edit / other operations with short examples.
-5. **Limits** — out of scope for this page or this slice; pointers to later work.
-6. **Errors** — exported exception types and ordinary `KeyError` / `OSError` rules.
-7. **Tests** — how to run gates; fixture provenance; opt-in checks if any.
+3. **Surface (ADR 0006 A)** — short lists: supported; defined but failing explicitly; in-progress 1.0 work when relevant; deferred past 1.0. Per-operation catalogues remain follow-on work.
+4. **Open** (or equivalent entry) — how the caller obtains the service.
+5. **Use** — inspect / edit / other operations with short examples.
+6. **Limits** — out of scope for this page or this slice; pointers to later work.
+7. **Errors** — exported exception types and ordinary `KeyError` / `OSError` rules.
+8. **Tests** — how to run gates; fixture provenance; opt-in checks if any.
 
 ### Writing style
 

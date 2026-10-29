@@ -12,6 +12,12 @@ The optional SVG export invokes KiCad on a temporary copy.
 The package remains pre-alpha (`0.0.0` informational). This is not the whole functional TOC.
 Released donor dependencies wait for `1.0.0` on public PyPI ([ADR 0005](adr/0005-distribution-and-versioning.md)).
 
+## Surface (ADR 0006 A)
+
+- **Supported:** explicit-path open; declared and effective (inherited) inspection; attribute set, add, and delete; pin add, set, and delete; `ensure_body`; rectangle and body-text add, set, and delete; symbol create, rename, delete, copy, and cross-library copy; SVG export; `save()` with native `.bak`, `save_as()`, `discard()`, and `close()`.
+- **Defined, explicit failure:** writes to formats other than `20251024`; effective resolution of derived symbols with their own bodies, missing parents, or cycles; deleting a symbol that another symbol extends; cross-library copy before its parent exists in the destination; ambiguous symbol, attribute, or pin identities.
+- **Deferred past 1.0:** unit split and restructure; stroke, fill, text effects, and other graphic primitives; library discovery by nickname on this surface (use [tables.md](tables.md)).
+
 ## Open and inspect
 
 ```python
