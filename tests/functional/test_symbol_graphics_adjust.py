@@ -144,6 +144,7 @@ class GraphicsAdjustTests(unittest.TestCase):
     def test_readonly_format_and_lifecycle_invalidate(self) -> None:
         old = SOURCE.replace(b"20251024", b"20231120")
         self.path.write_bytes(old)
+        self.library.discard()
         library = SymbolLibrary.open(self.path)
         rect = library.symbol("Part").body(0, 1).rectangles[0]
         with self.assertRaises(UnsupportedOperationError):
@@ -151,7 +152,11 @@ class GraphicsAdjustTests(unittest.TestCase):
         with self.assertRaises(UnsupportedOperationError):
             rect.delete()
         self.assertEqual(library.to_bytes(), old)
+        library.discard()
 
+        self.path.write_bytes(SOURCE)
+        self.library = SymbolLibrary.open(self.path)
+        self.body = self.library.symbol("Part").body(0, 1)
         rect, text = self.body.rectangles[0], self.body.texts[0]
         self.library.delete_symbol("Part")
         for action in (lambda: rect.set(start=(0, 0)), text.delete):

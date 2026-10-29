@@ -78,6 +78,12 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.project = Project.open(self.directory)
         self.schematic = self.project.schematic()
 
+    def reopen_parent(self) -> SymbolLibrary:
+        """Exit the registered parent and read the file on disk again."""
+        self.parent.discard()
+        self.parent = SymbolLibrary.open(self.parent_path)
+        return self.parent
+
     def test_selected_restore_is_exact_and_preserves_stable_placed_objects(
         self,
     ) -> None:
@@ -100,9 +106,9 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.assertEqual(
             self.schematic.to_bytes(), SOURCE.replace(CACHE, EXPECTED, 1).encode()
         )
-        embedded.restore_from(SymbolLibrary.open(self.parent_path), "Parent")
+        embedded.restore_from(self.reopen_parent(), "Parent")
         first = self.schematic.to_bytes()
-        embedded.restore_from(SymbolLibrary.open(self.parent_path), "Parent")
+        embedded.restore_from(self.reopen_parent(), "Parent")
         self.assertEqual(self.schematic.to_bytes(), first)
 
     def test_handles_remain_live_across_attributes_other_cache_and_revert(self) -> None:
@@ -119,7 +125,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {second_parent})", encoding="utf-8"
         )
-        other.restore_from(SymbolLibrary.open(self.parent_path), "Second")
+        other.restore_from(self.reopen_parent(), "Second")
         self.assertIs(self.schematic.embedded_symbol("Test:Part"), embedded)
         self.assertIs(self.schematic.embedded_symbol("Test:Other"), other)
         self.assertIs(self.schematic.symbol("R1"), placed)
@@ -131,7 +137,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {old_parent})", encoding="utf-8"
         )
-        embedded.restore_from(SymbolLibrary.open(self.parent_path), "Parent")
+        embedded.restore_from(self.reopen_parent(), "Parent")
         self.assertIn(CACHE.encode(), self.schematic.to_bytes())
         self.assertTrue(
             self.project.is_modified
@@ -148,7 +154,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
             f"(kicad_symbol_lib (version 20251024) {parent})".encode()
         )
         schematic.embedded_symbol("Test:Part").restore_from(
-            SymbolLibrary.open(self.parent_path), "Parent"
+            self.reopen_parent(), "Parent"
         )
         expected = EXPECTED.replace(
             "new graphics", 'new \\"quoted\\" graphics\nliteral second line'
@@ -175,7 +181,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
                 )
                 with self.assertRaises(UnsupportedSchematicOperationError):
                     self.schematic.embedded_symbol("Test:Part").restore_from(
-                        SymbolLibrary.open(self.parent_path), "Parent"
+                        self.reopen_parent(), "Parent"
                     )
                 self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
                 self.assertEqual(self.path.read_bytes(), SOURCE.encode())
@@ -207,7 +213,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
     def test_closed_parent_restore_fails_before_pending_or_disk_changes(self) -> None:
         for decision in ("discard", "close"):
             with self.subTest(decision=decision):
-                parent = SymbolLibrary.open(self.parent_path)
+                parent = self.reopen_parent()
                 if decision == "close":
                     parent.save()
                     parent.close()
@@ -265,7 +271,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
             self.schematic.embedded_symbol("Test:Part").restore_from(
                 self.parent, "Parent"
             )
-        self.parent = SymbolLibrary.open(self.parent_path)
+        self.reopen_parent()
         self.parent.symbol("Parent").body(1, 1).pin("2").delete()
         with self.assertRaises(UnsupportedSchematicOperationError):
             self.schematic.embedded_symbol("Test:Part").restore_from(
@@ -276,7 +282,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         )
         with self.assertRaises(UnsupportedSchematicOperationError):
             self.schematic.embedded_symbol("Test:Part").restore_from(
-                SymbolLibrary.open(self.parent_path), "Parent"
+                self.reopen_parent(), "Parent"
             )
         self.path.write_bytes(SOURCE.replace("20260306", "20250114").encode())
         old = Project.open(self.directory).schematic()
@@ -365,7 +371,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {original_parent})", encoding="utf-8"
         )
-        embedded.restore_from(SymbolLibrary.open(self.parent_path), "Parent")
+        embedded.restore_from(self.reopen_parent(), "Parent")
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
         self.assertFalse(self.project.is_modified)
         inode = self.path.stat().st_ino
@@ -378,7 +384,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         )
         with self.assertRaises(AmbiguousSymbolError):
             self.schematic.embedded_symbol("Test:Part").restore_from(
-                SymbolLibrary.open(self.parent_path), "Parent"
+                self.reopen_parent(), "Parent"
             )
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
 
@@ -428,6 +434,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         import shutil
 
         fixtures = Path(__file__).resolve().parents[1] / "fixtures/schematics"
+        self.parent.discard()
         for path in (fixtures / "embedded-restore").glob("*.kicad_*"):
             shutil.copyfile(path, self.directory / path.name)
         project = Project.open(self.directory / "cpNode-IOX.kicad_pro")

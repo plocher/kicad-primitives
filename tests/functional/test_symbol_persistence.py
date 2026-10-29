@@ -25,6 +25,7 @@ class PersistenceTests(unittest.TestCase):
         self.library = SymbolLibrary.open(self.path)
 
     def test_external_change_conflicts_for_changed_and_unchanged_save(self) -> None:
+        self.library.discard()
         for edit in (False, True):
             with self.subTest(edit=edit):
                 self.path.write_bytes(ORIGINAL)
@@ -36,6 +37,7 @@ class PersistenceTests(unittest.TestCase):
                 with self.assertRaises(FileConflictError):
                     library.save()
                 self.assertEqual(self.path.read_bytes(), foreign)
+                library.discard()
 
     def test_mode_is_preserved_and_baseline_updates_after_save(self) -> None:
         self.path.chmod(0o640)
@@ -85,6 +87,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertFalse(self.path.exists())
 
     def test_links_are_readable_but_not_replaced(self) -> None:
+        self.library.discard()
         for kind in ("symlink", "hardlink"):
             with self.subTest(kind=kind):
                 link = self.path.with_name(f"{kind}.kicad_sym")
@@ -99,6 +102,7 @@ class PersistenceTests(unittest.TestCase):
                         library.save()
                     self.assertEqual(self.path.read_bytes(), ORIGINAL)
                     self.assertEqual(link.read_bytes(), ORIGINAL)
+                    library.discard()
                 finally:
                     link.unlink()
 
