@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._snapshot_types import ProjectSnapshot
+
 
 class ErcAcquisitionError(RuntimeError):
     """ERC execution or report intake failed, rather than reporting design findings."""
@@ -61,21 +63,14 @@ class ErcIgnoredCheck:
 
 
 @dataclass(frozen=True)
-class ErcDocumentSnapshot:
-    """Original document path, exact checked content hash, and pending-change state."""
-
-    path: Path
-    sha256: str
-    is_modified: bool
-
-
-@dataclass(frozen=True)
 class ErcSnapshot:
-    """Checked in-memory source/settings and original library-registration provenance."""
+    """Checked pending snapshot plus ERC's original library-registration provenance.
 
-    project_file: Path
-    project_sha256: str
-    documents: tuple[ErcDocumentSnapshot, ...]
+    ``project`` is the shared :class:`~kicad_primitives.projects.ProjectSnapshot`
+    of project settings and checked hierarchy content.
+    """
+
+    project: ProjectSnapshot
     config_home: Path
     symbol_table_sha256: str
     footprint_table_sha256: str
