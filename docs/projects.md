@@ -16,6 +16,7 @@ Changed schematics require electrical verification. Unchanged JSON and raw PCB c
 PCB editing models remain unsupported. Library tables: [tables.md](tables.md).
 `Project.erc()` returns full-hierarchy electrical rule reports against pending source without saving it.
 `Project.netlist()` obtains a full-hierarchy netlist of pending source with provenance; see [netlist.md](netlist.md).
+`Project.export_svgs()` writes pending-source schematic SVGs to a new directory; see [schematics.md](schematics.md#svg-export).
 The package remains pre-alpha (`0.0.0` informational).
 
 ## Open a project

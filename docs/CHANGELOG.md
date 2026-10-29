@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `Project.export_svgs(output_dir)`: render full-hierarchy schematic SVGs of the pending snapshot through the shared staging seam, without saving or the write guard. Refuse existing or unsafe output directories; publish only after a validated render. Return `SchematicSvgExport` with per-file `sheet_path`/`source_path` mapping and `ProjectSnapshot` provenance; acquisition failures raise `SchematicSvgError`. No plot options (donor use is full hierarchy or the root page). Add an opt-in native gate (`docs/schematics.md`; #64).
+
 - Add `Project.netlist()`: obtain a netlist of the full pending hierarchy without saving, clearing pending state, or needing the write guard. Return the existing `Netlist` with new `provenance` (`ProjectSnapshot`/`SnapshotDocument`: project and checked-content hashes). Factor one private staging seam shared by save verification, `Project.erc()`, and project exports. Document the Connectivity A surface: supported, not offered, and deferred trace (`docs/netlist.md`; #65).
 
 - Make symbol rectangles and body texts live source-backed handles (`SymbolRectangle`, `SymbolText`) with minimal `set(...)` and `delete()`. Equal values are lexical no-ops; changes replace only target atoms; deleted handles become stale; discard/close invalidate them. `add_rectangle`/`add_text` return the new handle. Rename the immutable value types to `RectangleDefinition`/`TextDefinition`, matching `PinDefinition`/`BodyDefinition` (`docs/symbol-libraries.md`; #66).
