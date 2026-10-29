@@ -2,7 +2,7 @@
 
 Date: 2026-10-29
 
-Status: Proposed. Awaiting owner review.
+Status: Accepted by the owner on 2026-10-29.
 
 Related: [ADR 0003](0003-source-preserving-parser-and-writes.md), [ADR 0008](0008-artifact-objects-and-explicit-persistence.md), footprint libraries [#39](https://github.com/plocher/kicad-primitives/issues/39).
 
@@ -175,6 +175,7 @@ Composite operations to split (follow-up ticket, owner grilling first). Each rem
 2. **`Project.close()`.** After the split, a dirty close calls only the write primitive. The "unpublished history" retry is removed.
 3. **`Project.save_as()`.** Keep the operation that KiCad's own Save As performs: copy the project file set and rewrite project identity. Remove the built-in electrical proof and ZIP publication. A recipe can add them.
 4. **`EmbeddedSymbol.restore_from()`**, renamed **`update_from_library(library, name)`**. A schematic carries its own copy of every symbol it uses (the `lib_symbols` cache). This primitive replaces that copy with the library's current definition, in memory: KiCad's "Update Symbol from Library". If the library symbol changed since the schematic cached it, for example a pin corrected from `output` to `passive`, the update carries that change and the netlist reflects it. Today's save predicts that pin-type change and checks the netlist against the prediction; that prediction is removed, along with the deferred "restore intent". `before != after` reports the change, and the client decides.
+   The same primitive exists for every embedded copy a project keeps: `EmbeddedFootprint.update_from_library(library, name)` on the board (with #34), and `EmbeddedWorksheet.update_from_library(path)` for drawing sheets (future, when a worksheet artifact exists). Each replaces the project's copy with the library's current definition, in memory, and nothing else.
 5. **`ensure_writes_allowed()` and `write_is_permitted()`.** Removed. `is_locked` and `lock_file` remain as the query. A client or recipe that wants the guard checks them before writing. A lock with no pending KiCad edits does not forbid a controlled external write, especially to a library.
 
 Decided by the owner:
@@ -212,6 +213,6 @@ The same shape applies to library nickname renames (`TableEntry.rename()` exists
 
 ## Rollout
 
-1. The owner accepts, changes, or rejects this ADR.
+1. Accepted 2026-10-29.
 2. #39 follows it from the start.
 3. A separate ticket splits the existing composites, with owner grilling on each split. Each split adds its recipe. Tests move with the behavior: save-verification tests become recipe tests.
