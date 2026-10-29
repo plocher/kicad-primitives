@@ -6,7 +6,6 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from lossless_sexpr import ListNode, ParseError, parse
@@ -243,13 +242,13 @@ def _verify(
         raise UnsupportedSchematicOperationError(
             "Save verification requires matching root schematic and project basenames"
         )
-    with TemporaryDirectory(prefix="kicad-primitives-schematic-") as temp:
-        stage = Path(temp)
-        (stage / project.project_file.name).write_bytes(project._project_baseline)
-        for document in documents:
-            target = stage / document.path.relative_to(project.directory)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(document._baseline)
+    from ._pending_snapshot import staged_hierarchy
+
+    with staged_hierarchy(
+        project,
+        {document.path: document._baseline for document in documents},
+        prefix="kicad-primitives-schematic-",
+    ) as stage:
         staged_root = stage / root.relative_to(project.directory)
         before_path = export_netlist(
             staged_root, stage / "before.net", kicad_cli=kicad_cli

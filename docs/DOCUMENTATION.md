@@ -29,7 +29,7 @@ pages. Do not leave public behavior only in chatty module comments.
   - `docs/projects.md` — `kicad_primitives.projects`
 - `docs/schematics.md` — schematic content via `Project` / `kicad_primitives.schematics`
   - `docs/tables.md` — `kicad_primitives.tables`
-  - `docs/netlist.md` — `kicad_primitives.netlist` (exchange slice; not full Connectivity)
+  - `docs/netlist.md` — Connectivity: `Project.netlist()` and `kicad_primitives.netlist` exchange
 - New areas get `docs/<area>.md` (or a clear section on an existing page if the
   surface is a thin extension of that area).
 - Link the page from `README.md` when the surface is first offered.

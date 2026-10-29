@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `Project.netlist()`: obtain a netlist of the full pending hierarchy without saving, clearing pending state, or needing the write guard. Return the existing `Netlist` with new `provenance` (`ProjectSnapshot`/`SnapshotDocument`: project and checked-content hashes). Factor one private staging seam shared by save verification, `Project.erc()`, and project exports. Document the Connectivity A surface: supported, not offered, and deferred trace (`docs/netlist.md`; #65).
+
 - Make symbol rectangles and body texts live source-backed handles (`SymbolRectangle`, `SymbolText`) with minimal `set(...)` and `delete()`. Equal values are lexical no-ops; changes replace only target atoms; deleted handles become stale; discard/close invalidate them. `add_rectangle`/`add_text` return the new handle. Rename the immutable value types to `RectangleDefinition`/`TextDefinition`, matching `PinDefinition`/`BodyDefinition` (`docs/symbol-libraries.md`; #66).
 
 - Add `PlacedSymbol.delete_attribute` for one unambiguous custom attribute. Remove only the node and its separator; reject mandatory attributes, flag names, missing, and repeated names. Explicit save keeps unchanged-connectivity verification. Port jBOM alias normalization as a client scenario and extend the native schematic gate (`docs/schematics.md`; #63).
