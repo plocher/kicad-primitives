@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore Python 3.11 import compatibility: `TitleBlock.comments` uses an immutable `default_factory` instead of a shared `MappingProxyType` default, which Python 3.11 dataclasses reject. Public type and behavior are unchanged (#70).
+
 - Add `Project.export_svgs(output_dir)`: render full-hierarchy schematic SVGs of the pending snapshot through the shared staging seam, without saving or the write guard. Refuse existing or unsafe output directories; publish only after a validated render. Return `SchematicSvgExport` with per-file `sheet_path`/`source_path` mapping and `ProjectSnapshot` provenance; acquisition failures raise `SchematicSvgError`. No plot options (donor use is full hierarchy or the root page). Add an opt-in native gate (`docs/schematics.md`; #64).
 
 - Add `Project.netlist()`: obtain a netlist of the full pending hierarchy without saving, clearing pending state, or needing the write guard. Return the existing `Netlist` with new `provenance` (`ProjectSnapshot`/`SnapshotDocument`: project and checked-content hashes). Factor one private staging seam shared by save verification, `Project.erc()`, and project exports. Document the Connectivity A surface: supported, not offered, and deferred trace (`docs/netlist.md`; #65).

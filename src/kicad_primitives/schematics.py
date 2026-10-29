@@ -113,7 +113,7 @@ class TitleBlock:
     revision: str = ""
     date: str = ""
     company: str = ""
-    comments: Mapping[int, str] = MappingProxyType({})
+    comments: Mapping[int, str] = field(default_factory=lambda: MappingProxyType({}))
 
 
 @dataclass(frozen=True)
