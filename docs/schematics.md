@@ -102,6 +102,29 @@ Flags are not attributes. The setter rejects flag names such as `dnp` and `in_bo
 Power-symbol Value changes are electrical edits and fail explicitly.
 Other attributes can affect electrical names through substitutions. Save verification rejects such changes.
 
+## Delete attributes in memory
+
+```python
+symbol = root.symbol("R3")
+# Client-owned alias normalization (jBOM style): set canonical, delete alias.
+if "W" in {a.name for a in symbol.attributes}:
+    symbol.set_attribute("Power", symbol.attribute("W").value)
+    symbol.delete_attribute("W")
+project.save()
+```
+
+`delete_attribute(name)` removes one custom attribute.
+It removes only the selected `(property …)` node and its leading separator. Other bytes stay unchanged.
+A missing name raises `KeyError`. A repeated custom name raises `AmbiguousPlacedSymbolError`.
+Custom names are case-sensitive.
+Mandatory attributes (Reference, Value, Footprint, Datasheet, Description) are not deletable.
+Flag names such as `dnp` and `in_bom` are not attributes.
+Both raise `UnsupportedSchematicOperationError`.
+The same format and placed-symbol UUID rules as `set_attribute` apply.
+Retained handles observe the deletion. The operation never writes files or runs KiCad.
+Explicit save proves unchanged connectivity, as for other attribute edits.
+The client owns alias maps and conflict policy, for example when alias and canonical values differ.
+
 ## Restore one embedded definition
 
 ```python
@@ -346,7 +369,7 @@ ERC findings are not a substitute for the operation-specific save verification a
 
 ## Limits
 
-- No reference annotation, flag editing, attribute deletion, or geometry editing.
+- No reference annotation, flag editing, mandatory-attribute deletion, or geometry editing.
 - Only selected concrete embedded restore is implemented. General cache sync and inherited materialization remain later work.
 - Sheet instance path / multi-instance models are not first-class here.
 - Prefer `Project.schematic` over free `open_schematic` in application code.
@@ -380,7 +403,8 @@ ERC findings are not a substitute for the operation-specific save verification a
 Donor gates from jBOM schematic/title-block tests and Subdivision placement
 fields are ported in `tests/functional/test_schematic_placed_symbols.py`.
 Geometry gates live in `tests/functional/test_schematic_geometry.py`.
-Object editing and persistence gates live in `test_schematic_editing.py` and `test_schematic_persistence.py`.
+Object editing and persistence gates live in `test_schematic_editing.py`, `test_schematic_attribute_deletion.py`, and `test_schematic_persistence.py`.
+The deletion tests port jBOM annotate alias normalization (`normalize_schematic_properties`) as client code.
 The native fixture provenance is in `tests/fixtures/schematics/attribute-edit/PROVENANCE.txt`.
 These tests need no KiCad installation. The verifier test double exercises failure paths through an executable boundary.
 
@@ -394,7 +418,7 @@ An opt-in real KiCad gate edits only disposable fixture copies:
 uv run python tests/verify_schematic_editing.py --kicad-cli /path/to/kicad-cli
 ```
 
-This checks fresh exported Value and inserted attributes, six singleton nets, byte previews, explicit persistence, and no-op saves.
+This checks fresh exported Value and inserted attributes, one alias deletion (`W` to `Power`), six singleton nets, byte previews, explicit persistence, and no-op saves.
 
 Selected-restore gates are in `tests/functional/test_schematic_restore.py`.
 Native provenance and independently authored expected pin types are in `tests/fixtures/schematics/embedded-restore/PROVENANCE.txt`.

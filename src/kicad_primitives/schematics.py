@@ -27,7 +27,12 @@ from ._erc_types import (
     ErcSnapshot,
     ErcViolation,
 )
+from ._symbol_parse import _leading_separator_start
 from ._symbol_types import _MANDATORY, _attribute_key
+
+_FLAG_NAMES = frozenset(
+    {"dnp", "in_bom", "on_board", "in_pos_files", "exclude_from_sim"}
+)
 
 if TYPE_CHECKING:
     from ._schematic_restore import _RestoreIntent
@@ -150,6 +155,19 @@ class PlacedSymbol:
         if self._owner is None:
             raise UnsupportedSchematicOperationError("Symbol has no owning schematic")
         self._owner._set_attribute(self, name, value)
+
+    def delete_attribute(self, name: str) -> None:
+        """Remove one custom attribute in memory, without writing.
+
+        Remove only the selected ``(property ...)`` node and its leading
+        separator. A missing name raises ``KeyError``. A repeated name raises
+        ``AmbiguousPlacedSymbolError``. Mandatory attributes (Reference, Value,
+        Footprint, Datasheet, Description) and flag names raise
+        ``UnsupportedSchematicOperationError``. Failures leave source unchanged.
+        """
+        if self._owner is None:
+            raise UnsupportedSchematicOperationError("Symbol has no owning schematic")
+        self._owner._delete_attribute(self, name)
 
     def attribute(self, name: str) -> PlacedAttribute:
         """Return the unique attribute with this name."""
@@ -360,6 +378,45 @@ class Schematic:
             raise ValueError("Attribute name must be nonempty; NUL is not supported")
         name.encode("utf-8")
         value.encode("utf-8")
+        root, node = self._editable_node(symbol)
+        matches = tuple(
+            p
+            for p in node.child_lists("property")
+            if _attribute_key(_atom(p, 1).value) == _attribute_key(name)
+        )
+        if len(matches) > 1:
+            raise AmbiguousPlacedSymbolError(f"Ambiguous attribute {name!r}")
+        if matches and _atom(matches[0], 2).value == value:
+            return
+        if _attribute_key(name) == "reference":
+            raise UnsupportedSchematicOperationError(
+                "Reference requires reference annotation"
+            )
+        if name in _FLAG_NAMES:
+            raise UnsupportedSchematicOperationError("Flags are not named attributes")
+        if _attribute_key(name) == "value" and _is_power_symbol(root, symbol):
+            raise UnsupportedSchematicOperationError(
+                "Power-symbol Value changes are electrical edits"
+            )
+        assert self._document is not None
+        before = self._document.source
+        if matches:
+            token = _atom(matches[0], 2)
+            start, end, replacement = token.span.start, token.span.end, quote(value)
+        else:
+            anchor = node.child_lists("property")[-1]
+            start = end = anchor.span.end
+            replacement = _attribute_fragment(before, node, anchor, name, value)
+        edited = before[:start] + replacement + before[end:]
+        updated = _schematic_from_document(self.path, parse(edited))
+        if updated.symbols[symbol._index].attribute(name).value != value:
+            raise InvalidSchematicError(
+                "Edit did not establish the requested attribute"
+            )
+        self._accept_document(updated)
+
+    def _editable_node(self, symbol: PlacedSymbol) -> tuple[ListNode, ListNode]:
+        """Return the root and the writable source node for one placed symbol."""
         if self.version != 20260306:
             raise UnsupportedSchematicOperationError(
                 f"Format {self.version} is read-only"
@@ -379,39 +436,40 @@ class Schematic:
             )
         if sum(s.uuid == symbol.uuid for s in self.symbols) != 1:
             raise AmbiguousPlacedSymbolError(f"Ambiguous symbol UUID {symbol.uuid!r}")
+        return root, node
+
+    def _delete_attribute(self, symbol: PlacedSymbol, name: str) -> None:
+        if not isinstance(name, str):
+            raise TypeError("Attribute name must be a string")
+        self._check_open()
+        if not name or "\x00" in name:
+            raise ValueError("Attribute name must be nonempty; NUL is not supported")
+        name.encode("utf-8")
+        if _attribute_key(name) in _MANDATORY:
+            raise UnsupportedSchematicOperationError(
+                f"Mandatory attribute {name!r} cannot be deleted"
+            )
+        if name in _FLAG_NAMES:
+            raise UnsupportedSchematicOperationError("Flags are not named attributes")
+        _root, node = self._editable_node(symbol)
         matches = tuple(
-            p
-            for p in node.child_lists("property")
-            if _attribute_key(_atom(p, 1).value) == _attribute_key(name)
+            p for p in node.child_lists("property") if _atom(p, 1).value == name
         )
+        if not matches:
+            raise KeyError(name)
         if len(matches) > 1:
             raise AmbiguousPlacedSymbolError(f"Ambiguous attribute {name!r}")
-        if matches and _atom(matches[0], 2).value == value:
-            return
-        if _attribute_key(name) == "reference":
-            raise UnsupportedSchematicOperationError(
-                "Reference requires reference annotation"
-            )
-        if name in {"dnp", "in_bom", "on_board", "in_pos_files", "exclude_from_sim"}:
-            raise UnsupportedSchematicOperationError("Flags are not named attributes")
-        if _attribute_key(name) == "value" and _is_power_symbol(root, symbol):
-            raise UnsupportedSchematicOperationError(
-                "Power-symbol Value changes are electrical edits"
-            )
+        assert self._document is not None
         before = self._document.source
-        if matches:
-            token = _atom(matches[0], 2)
-            start, end, replacement = token.span.start, token.span.end, quote(value)
-        else:
-            anchor = node.child_lists("property")[-1]
-            start = end = anchor.span.end
-            replacement = _attribute_fragment(before, node, anchor, name, value)
-        edited = before[:start] + replacement + before[end:]
+        start = _leading_separator_start(before, matches[0].span.start)
+        edited = before[:start] + before[matches[0].span.end :]
         updated = _schematic_from_document(self.path, parse(edited))
-        if updated.symbols[symbol._index].attribute(name).value != value:
-            raise InvalidSchematicError(
-                "Edit did not establish the requested attribute"
-            )
+        remaining = updated.symbols[symbol._index]
+        if (
+            any(p.name == name for p in remaining.attributes)
+            or len(remaining.attributes) != len(symbol.attributes) - 1
+        ):
+            raise InvalidSchematicError("Edit did not remove the requested attribute")
         self._accept_document(updated)
 
     def _accept_document(self, updated: Schematic) -> None:

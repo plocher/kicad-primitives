@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `PlacedSymbol.delete_attribute` for one unambiguous custom attribute. Remove only the node and its separator; reject mandatory attributes, flag names, missing, and repeated names. Explicit save keeps unchanged-connectivity verification. Port jBOM alias normalization as a client scenario and extend the native schematic gate (`docs/schematics.md`; #63).
+
 - Record the ADR 0006 acceptance reconciliation: met service rows, remaining 1.0 gaps (#63–#67, #39, #34), release preparation (#68), and owner-confirmed post-1.0 TBDs (`docs/review/adr-0006-reconciliation.md`).
 
 - Reject late edits or terminal exit during final save-as validation before any live handle overwrite or path rebinding. Preserve original identity and newer pending state while retaining completed destination output honestly (#56).
