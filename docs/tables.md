@@ -19,7 +19,7 @@ remains pre-alpha (`0.0.0` informational).
 
 ## Surface (ADR 0006 A)
 
-- **Supported:** config-home discovery; read and resolve global and project symbol and footprint tables; `${VAR}` expansion; nested `Table` rows; project shadowing; `add_entry`, `rename`, `set_uri`, and `delete` on physical tables; `save()`, `save_as()`, `discard()`, and `close()`.
+- **Supported:** config-home discovery; read and resolve global and project symbol and footprint tables; `${VAR}` expansion; nested `Table` rows; project shadowing; `find_libraries` under explicit roots; `portable_uri` spelling; `add_entry`, `rename`, `set_uri`, and `delete` on physical tables; `save()`, `save_as()`, `discard()`, and `close()`.
 - **Defined, explicit failure:** ambiguous direct nicknames on an editing target; duplicate add or rename targets; external changes since open or save, including the save that a dirty close runs.
 - **Stored, not interpreted:** remote and plugin library types keep their rows, but resolution treats `uri` as a filesystem path.
 - **Deferred past 1.0:** `design_block_lib_table` as a product API; remote and plugin resolution; multi-file table transactions.
@@ -101,6 +101,22 @@ KiCad 10.0.1 uses process CWD for both relative includes and leaf URIs.
 Project-native checks run from the opened project directory.
 The native control in `tests/verify_schematic_erc.py` checks this behavior and repeated
 lookup without changing original designs.
+
+### Find unregistered libraries and spell a portable URI
+
+```python
+found = LibraryTables.find_libraries("footprint", ["/path/to/libs", "/other/root"], "SPCoast_*")
+registered = {entry.resolved_path for entry in tables.libraries("footprint")}
+for path in found:
+    if path not in registered:
+        tables.table("footprint", "project").add_entry(path.stem, tables.portable_uri(path))
+```
+
+`find_libraries(library_type, roots, pattern="*")` lists candidate `*.kicad_sym` files or `*.pretty` directories under the roots you give. It reads nothing, descends every subdirectory except a `.pretty` directory itself, and filters the name without its suffix with a case-sensitive glob. Results are absolute and sorted and may include libraries that are already registered. A root that is not an existing directory raises `NotADirectoryError`. There are no default roots ([ADR 0009](adr/0009-primitives-not-an-executive.md)).
+
+`portable_uri(path)` returns the spelling a table row would use: `${KIPRJMOD}/…` when the path is under the project directory, otherwise the longest matching absolute path variable from `path_variables` (equal values prefer a versioned `KICADn_*` name, then the alphabetically first), otherwise the absolute path. URIs use `/`. It chooses a spelling, not a nickname; registration stays `add_entry(nickname, uri)` and there is no `add_library` helper.
+
+`SymbolLibrary.open` and `FootprintLibrary.open` accept a registered nickname with an optional `tables=` context; see [symbol-libraries.md](symbol-libraries.md) and [footprint-libraries.md](footprint-libraries.md).
 
 ### Select and edit physical tables
 `table(library_type, scope)` returns a stable physical primary artifact.
@@ -188,7 +204,8 @@ Global and project tables can have the same basename. There is no combined conte
 
 Donor gates from EagleLib2KiCad environment tests plus nested-table and
 project-shadow cases live in
-`tests/functional/test_library_tables.py`.
+`tests/functional/test_library_tables.py`. Discovery and portable-URI gates
+are in `tests/functional/test_library_discovery.py`.
 
 ```bash
 uv run python -m unittest discover -s tests -q

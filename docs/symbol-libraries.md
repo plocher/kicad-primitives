@@ -6,7 +6,7 @@
 The library owns live editable Symbol, SymbolBody, SymbolPin, SymbolRectangle, and SymbolText objects.
 Edits change pending source. Only an explicit `save()` writes that source.
 
-`kicad_primitives.symbols.SymbolLibrary` opens one explicit `.kicad_sym` path.
+`kicad_primitives.symbols.SymbolLibrary` opens one `.kicad_sym` file by path or by registered nickname.
 It does not discover libraries, open a project, or edit schematic caches.
 The optional SVG export invokes KiCad on a temporary copy.
 The package remains pre-alpha (`0.0.0` informational). This is not the whole functional TOC.
@@ -14,16 +14,19 @@ Released donor dependencies wait for `1.0.0` on public PyPI ([ADR 0005](adr/0005
 
 ## Surface (ADR 0006 A)
 
-- **Supported:** explicit-path open; declared and effective (inherited) inspection; attribute set, add, and delete; pin add, set, and delete; `ensure_body`; rectangle and body-text add, set, and delete; symbol create, rename, delete, copy, and cross-library copy; SVG export; `save()` with native `.bak`, `save_as()`, `discard()`, and `close()`.
+- **Supported:** open by path or registered nickname, with one object per open library; declared and effective (inherited) inspection; attribute set, add, and delete; pin add, set, and delete; `ensure_body`; rectangle and body-text add, set, and delete; symbol create, rename, delete, copy, and cross-library copy; SVG export; `save()` with native `.bak`, `save_as()`, `discard()`, and `close()`.
 - **Defined, explicit failure:** writes to formats other than `20251024`; effective resolution of derived symbols with their own bodies, missing parents, or cycles; deleting a symbol that another symbol extends; cross-library copy before its parent exists in the destination; ambiguous symbol, attribute, or pin identities.
-- **Deferred past 1.0:** unit split and restructure; stroke, fill, text effects, and other graphic primitives; library discovery by nickname on this surface (use [tables.md](tables.md)).
+- **Deferred past 1.0:** unit split and restructure; stroke, fill, text effects, and other graphic primitives; library discovery roots on this surface (use `find_libraries` on [tables.md](tables.md)).
 
 ## Open and inspect
 
 ```python
 from kicad_primitives.symbols import SymbolLibrary
+from kicad_primitives.tables import LibraryTables
 
 library = SymbolLibrary.open("Example.kicad_sym")
+tables = LibraryTables.open(config_home="/path/to/kicad/10.0")
+same = SymbolLibrary.open("Device", tables=tables)   # registered nickname
 print(library.version)
 for symbol in library.symbols:
     print(symbol.name, symbol.extends)
@@ -44,6 +47,9 @@ for body in effective.bodies:
     for text in body.texts:
         print(text.text, text.x, text.y, text.rotation)
 ```
+
+`open(target, tables=None)` takes a nickname or a path. A `str` is first tried as a registered symbol nickname in `tables`, or in a default `LibraryTables.open()` context when `tables` is omitted; any other `str`, and every `Path`, is a file path.
+The same library, by resolved real path, opens to the same object until it is closed or discarded ([ADR 0009](adr/0009-primitives-not-an-executive.md) registry). A second open while the first is still open sees its pending edits. Exit the first object to read the file again.
 
 `SymbolAttribute` holds one named value and its declaration provenance.
 Symbol, SymbolBody, SymbolPin, SymbolRectangle, and SymbolText are stable source-backed handles.
@@ -168,7 +174,7 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 
 ## Limits
 
-- No library discovery, project open, or schematic cache edit on this surface.
+- No discovery roots, project open, or schematic cache edit on this surface. Nickname open needs a table context; `find_libraries` and `portable_uri` are on [tables.md](tables.md).
 - No unit split/restructure beyond `ensure_body` on this surface.
 - `copy_symbol_from` does not open tables or resolve nicknames; pass opened libraries.
 - `ensure_body` creates empty bodies only; it does not restructure multi-unit definitions.

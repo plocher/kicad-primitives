@@ -28,6 +28,7 @@ pages. Do not leave public behavior only in chatty module comments.
   - `docs/symbol-libraries.md` — `kicad_primitives.symbols`
   - `docs/projects.md` — `kicad_primitives.projects`
 - `docs/schematics.md` — schematic content via `Project` / `kicad_primitives.schematics`
+  - `docs/footprint-libraries.md` — `kicad_primitives.footprints`
   - `docs/tables.md` — `kicad_primitives.tables`
   - `docs/netlist.md` — Connectivity: `Project.netlist()` and `kicad_primitives.netlist` exchange
 - New areas get `docs/<area>.md` (or a clear section on an existing page if the
