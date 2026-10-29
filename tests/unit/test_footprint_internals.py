@@ -46,6 +46,20 @@ class UniquePadCountTests(unittest.TestCase):
         self.assertEqual(unique_pad_count(()), 0)
 
 
+class PadDefaultLayerTests(unittest.TestCase):
+    def test_pad_without_layers_keeps_kicad_defaults(self) -> None:
+        parsed = _footprint_parse.read_source(
+            b'(footprint "NoLayers" (version 20260206) (generator "x") (layer "F.Cu")'
+            b' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.5))'
+            b' (pad "2" smd rect (at 0 0) (size 1 1))'
+            b' (pad "" smd rect (at 0 0) (size 1 1) (layers "F.Cu")))'
+        )
+        self.assertEqual(parsed.pads[0].layers, ("*.Cu", "*.Mask"))
+        self.assertEqual(parsed.pads[1].layers, ("F.Cu", "F.Paste", "F.Mask"))
+        self.assertTrue(all(p.on_copper for p in parsed.pads))
+        self.assertEqual(unique_pad_count(parsed.pads), 2)
+
+
 class FilterTests(unittest.TestCase):
     def test_wildcards_are_anchored_and_case_insensitive(self) -> None:
         self.assertTrue(matches_filters("SOIC-8_3.9x4.9mm", ["soic-8*"]))

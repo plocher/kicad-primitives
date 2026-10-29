@@ -17,6 +17,7 @@ from tempfile import TemporaryDirectory
 
 from kicad_primitives.footprints import (
     Footprint,
+    FootprintConflictError,
     FootprintLibrary,
     FootprintLifecycleError,
     FootprintSummary,
@@ -45,11 +46,14 @@ class FootprintCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name).resolve()
-        self.path = self.root / "Fixture.pretty"
-        shutil.copytree(FIXTURE, self.path)
-        self.library = FootprintLibrary.open(self.path)
+        # The temp root is left unresolved on purpose: macOS puts it under a
+        # symlink, and the library must bind to the resolved real path.
+        self.root = Path(self.temp.name)
+        self.real_root = self.root.resolve()
+        shutil.copytree(FIXTURE, self.root / "Fixture.pretty")
+        self.library = FootprintLibrary.open(self.root / "Fixture.pretty")
         self.addCleanup(self.library.discard)
+        self.path = self.library.path
 
     def read(self, name: str) -> bytes:
         return (self.path / f"{name}.kicad_mod").read_bytes()
@@ -68,7 +72,8 @@ class SummaryTests(FootprintCase):
             ],
         )
         self.assertEqual(self.library.name, "Fixture")
-        self.assertEqual(self.library.path, self.path)
+        self.assertEqual(self.library.path, self.real_root / "Fixture.pretty")
+        self.assertTrue(self.library.path.is_absolute())
         self.assertEqual(self.library.on_close, "save")
         for summary in self.library.summaries:
             self.assertIsInstance(summary, FootprintSummary)
@@ -329,7 +334,10 @@ class DirectoryOperationTests(FootprintCase):
         )
         with self.assertRaises(TypeError):
             other.copy_from(self.path, "R_0603", "X")  # type: ignore[arg-type]
-        closed = FootprintLibrary.open(self.root)
+        empty = self.root / "Empty.pretty"
+        empty.mkdir()
+        closed = FootprintLibrary.open(empty)
+        self.assertEqual(closed.summaries, ())
         closed.discard()
         with self.assertRaises(FootprintLifecycleError):
             other.copy_from(closed, "R_0603", "X")
@@ -387,11 +395,57 @@ class DirectoryOperationTests(FootprintCase):
             self.library.rename("Legacy", "Ganged_A1_B12")
         self.assertTrue((self.path / "Legacy.kicad_mod").exists())
 
+    def test_rename_refuses_when_an_open_handle_is_stale(self) -> None:
+        live = self.library.footprint("R_0603")
+        live.set_attribute("Value", "pending")
+        original = self.read("R_0603")
+        foreign = original.replace(b'(tags "resistor 0603")', b'(tags "foreign")')
+        (self.path / "R_0603.kicad_mod").write_bytes(foreign)
+        with self.assertRaises(FootprintConflictError) as raised:
+            self.library.rename("R_0603", "R_0603_New")
+        self.assertIn("R_0603.kicad_mod", str(raised.exception))
+        self.assertEqual(self.read("R_0603"), foreign)
+        self.assertFalse((self.path / "R_0603_New.kicad_mod").exists())
+        self.assertIs(self.library.footprint("R_0603"), live)
+        self.assertTrue(live.is_modified)
+        with self.assertRaises(FootprintConflictError):
+            live.save()
+        self.assertFalse(any(p.suffix == ".tmp" for p in self.path.iterdir()))
+
+    def test_library_under_a_symlinked_parent_binds_to_the_real_path(self) -> None:
+        link = self.root / "via-link"
+        link.symlink_to(self.real_root, target_is_directory=True)
+        self.library.discard()
+        library = FootprintLibrary.open(link / "Fixture.pretty")
+        self.addCleanup(library.discard)
+        self.assertEqual(library.path, self.real_root / "Fixture.pretty")
+        library.create("Linked")
+        library.rename("Linked", "Linked2")
+        library.copy("Linked2", "Linked3")
+        self.assertEqual(
+            [s.name for s in library.summaries if s.name.startswith("Linked")],
+            ["Linked2", "Linked3"],
+        )
+        footprint = library.footprint("Linked2")
+        footprint.set_attribute("Value", "x")
+        footprint.save()
+        footprint.save_as(library.path / "Linked4.kicad_mod")
+        self.assertIs(library.footprint("Linked4"), footprint)
+
+    def test_dangling_link_is_listed_as_a_failure(self) -> None:
+        (self.path / "Dangling.kicad_mod").symlink_to(self.path / "missing.kicad_mod")
+        self.library.refresh()
+        failure = next(f for f in self.library.failures if f.name == "Dangling")
+        self.assertIn("FileNotFoundError", failure.error)
+        self.assertNotIn("Dangling", [s.name for s in self.library.summaries])
+        with self.assertRaises(KeyError):
+            self.library.footprint("Dangling")
+
 
 class OpenTests(unittest.TestCase):
     def test_open_by_nickname_and_path_is_the_same_object(self) -> None:
         with TemporaryDirectory() as temp:
-            root = Path(temp).resolve()
+            root = Path(temp)
             config_home = root / "10.0"
             config_home.mkdir()
             path = root / "Fixture.pretty"
@@ -404,10 +458,17 @@ class OpenTests(unittest.TestCase):
             )
             tables = LibraryTables.open(config_home=config_home)
             library = FootprintLibrary.open("Fixture", tables=tables, on_close="raise")
-            self.assertEqual(library.path, path)
+            self.assertEqual(library.path, path.resolve())
             self.assertEqual(library.on_close, "raise")
-            self.assertIs(FootprintLibrary.open(path), library)
-            self.assertIs(FootprintLibrary.open(str(path), tables=tables), library)
+            self.assertIs(FootprintLibrary.open(path, on_close="raise"), library)
+            self.assertIs(
+                FootprintLibrary.open(str(path), tables=tables, on_close="raise"),
+                library,
+            )
+            with self.assertRaises(ValueError):
+                FootprintLibrary.open(path)  # default "save" differs from "raise"
+            with self.assertRaises(TypeError):
+                FootprintLibrary(path, "save")
             library.discard()
             reopened = FootprintLibrary.open(path)
             self.assertIsNot(reopened, library)

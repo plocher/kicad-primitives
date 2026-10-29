@@ -107,21 +107,33 @@ def _drill_view(node: ListNode | None) -> PadDrill | None:
     return PadDrill(width=width, height=height, oval=oval)
 
 
+# A pad without (layers …) keeps KiCad's defaults: the constructor sets
+# PTHMask (pcbnew/pad.cpp:107, 10.0.1); SMDMask/ConnSMDMask are the SMD and
+# connect masks (pad.cpp:368-389). Every default includes a copper layer.
+_DEFAULT_PAD_LAYERS: dict[str, tuple[str, ...]] = {
+    "thru_hole": ("*.Cu", "*.Mask"),
+    "np_thru_hole": ("*.Cu", "*.Mask"),
+    "smd": ("F.Cu", "F.Paste", "F.Mask"),
+    "connect": ("F.Cu", "F.Paste", "F.Mask"),
+}
+
+
 def _pad_view(node: ListNode) -> Pad:
     at = _one(node, "at", required=True)
     size = _one(node, "size", required=True)
     layers = _one(node, "layers")
     assert at is not None and size is not None
+    pad_type = _atom(node, 2).value
     return Pad(
         number=_atom(node, 1).value,
-        pad_type=_atom(node, 2).value,
+        pad_type=pad_type,
         shape=_atom(node, 3).value,
         x=_number(at, 1),
         y=_number(at, 2),
         rotation=_number(at, 3) if at.atom(3) is not None else 0.0,
         width=_number(size, 1),
         height=_number(size, 2),
-        layers=()
+        layers=_DEFAULT_PAD_LAYERS.get(pad_type, ("*.Cu", "*.Mask"))
         if layers is None
         else tuple(c.value for c in layers.children()[1:] if isinstance(c, AtomNode)),
         drill=_drill_view(_one(node, "drill")),

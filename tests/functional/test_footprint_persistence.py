@@ -30,11 +30,15 @@ class PersistenceCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name).resolve()
-        self.path = self.root / "Fixture.pretty"
-        shutil.copytree(FIXTURE, self.path)
-        self.library = FootprintLibrary.open(self.path)
+        # Unresolved temp root on purpose (macOS symlink); the library binds
+        # to the real path. Destinations outside a library use the real root,
+        # because the writer refuses symlinked parent directories.
+        self.root = Path(self.temp.name)
+        self.real_root = self.root.resolve()
+        shutil.copytree(FIXTURE, self.root / "Fixture.pretty")
+        self.library = FootprintLibrary.open(self.root / "Fixture.pretty")
         self.addCleanup(self.library.discard)
+        self.path = self.library.path
         self.file = self.path / "R_0603.kicad_mod"
         self.original = self.file.read_bytes()
 
@@ -186,9 +190,13 @@ class SaveTests(PersistenceCase):
         footprint.validate()
         footprint.validate(self.path / "Elsewhere.kicad_mod")
         with self.assertRaises(NotADirectoryError):
-            footprint.validate(self.root / "missing" / "X.kicad_mod")
+            footprint.validate(self.real_root / "missing" / "X.kicad_mod")
         with self.assertRaises(IsADirectoryError):
-            footprint.validate(self.root)
+            footprint.validate(self.real_root)
+        linked = self.real_root / "linked"
+        linked.symlink_to(self.path, target_is_directory=True)
+        with self.assertRaises(NotADirectoryError):
+            footprint.validate(linked / "X.kicad_mod")  # symlinked parent
         self.assertEqual(self.file.read_bytes(), self.original)
         self.assertTrue(footprint.is_modified)
         self.assertEqual(self.listing(), {p.name for p in FIXTURE.iterdir()})
@@ -275,15 +283,42 @@ class SaveTests(PersistenceCase):
         linked = self.library.footprint("Link")
         linked.set_attribute("Value", "x")
         with self.assertRaises(UnsupportedOperationError):
+            linked.validate()
+        with self.assertRaises(UnsupportedOperationError):
             linked.save()
+        with self.assertRaises(UnsupportedOperationError):
+            linked.save(overwrite=True)
         self.assertEqual(self.file.read_bytes(), self.original)
         self.file.chmod(0o444)
         self.addCleanup(self.file.chmod, 0o644)
         footprint = self.library.footprint("R_0603")
         footprint.set_attribute("Value", "x")
         with self.assertRaises(PermissionError):
+            footprint.validate()
+        with self.assertRaises(PermissionError):
             footprint.save()
+        with self.assertRaises(PermissionError):
+            linked.validate(self.file)  # a save_as destination without write bits
         self.assertEqual(self.file.read_bytes(), self.original)
+        self.assertTrue(footprint.is_modified)
+
+    def test_crlf_source_keeps_its_line_endings_through_edits(self) -> None:
+        crlf = self.original.replace(b"\n", b"\r\n")
+        (self.path / "Crlf.kicad_mod").write_bytes(crlf)
+        footprint = self.library.footprint("Crlf")
+        footprint.set_attribute("Value", "crlf")
+        footprint.set_attribute("MPN", "X")
+        rendered = footprint.to_bytes()
+        self.assertEqual(rendered.count(b"\r\n"), rendered.count(b"\n"))
+        self.assertIn(b'\r\n\t(property "MPN" "X"\r\n\t\t(at 0 0 0)\r\n', rendered)
+        footprint.delete_attribute("MPN")
+        self.assertEqual(
+            footprint.to_bytes(), crlf.replace(b'"Value" "R_0603"', b'"Value" "crlf"')
+        )
+        footprint.save()
+        self.assertEqual(
+            (self.path / "Crlf.kicad_mod").read_bytes(), footprint.to_bytes()
+        )
 
 
 class SaveAsTests(PersistenceCase):
@@ -295,29 +330,54 @@ class SaveAsTests(PersistenceCase):
         footprint.save_as(destination)
         self.assertEqual(footprint.path, destination)
         self.assertEqual(footprint.name, "R_0603_Fork")
-        self.assertEqual(footprint.declared_name, "R_0603")  # save-as copies content
+        # KiCad's Save As: the internal name follows the new stem; the Value
+        # was "forked", not the old stem, so it stays.
+        self.assertEqual(footprint.declared_name, "R_0603_Fork")
+        self.assertEqual(footprint.attribute("Value").value, "forked")
         self.assertEqual(destination.read_bytes(), footprint.to_bytes())
+        self.assertEqual(
+            destination.read_bytes(),
+            self.original.replace(
+                b'(footprint "R_0603"', b'(footprint "R_0603_Fork"'
+            ).replace(b'(property "Value" "R_0603"', b'(property "Value" "forked"'),
+        )
         self.assertEqual(self.file.read_bytes(), self.original)
         self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o640)
         self.assertFalse(footprint.is_modified)
         self.assertIs(self.library.footprint("R_0603_Fork"), footprint)
         self.assertIs(footprint.library, self.library)
         self.assertIn("R_0603_Fork", [s.name for s in self.library.summaries])
-        self.assertIsNot(self.library.footprint("R_0603"), footprint)
+        self.assertEqual(self.library.footprints, (footprint,))
+        sibling = self.library.footprint("R_0603")
+        self.assertIsNot(sibling, footprint)
+        with self.assertRaises(FootprintLifecycleError):
+            footprint.save_as(self.file, overwrite=True)  # sibling is open
+        self.assertEqual(self.library.footprints, (sibling, footprint))
+        self.assertEqual(self.file.read_bytes(), self.original)
+        sibling.discard()
         with self.assertRaises(FileExistsError):
             footprint.save_as(self.file)
         footprint.set_attribute("Value", "over")
         footprint.save_as(self.file, overwrite=True)
         self.assertEqual(self.file.read_bytes(), footprint.to_bytes())
         self.assertEqual(footprint.path, self.file)
+        self.assertEqual(footprint.declared_name, "R_0603")
+        self.assertEqual(self.library.footprints, (footprint,))
+        self.assertIs(self.library.footprint("R_0603"), footprint)
 
     def test_save_as_outside_detaches_from_the_library(self) -> None:
         footprint = self.library.footprint("R_0603")
-        elsewhere = self.root / "Elsewhere.kicad_mod"
+        elsewhere = self.real_root / "Elsewhere.kicad_mod"
         footprint.save_as(elsewhere)
         self.assertIsNone(footprint.library)
         self.assertEqual(self.library.footprints, ())
-        self.assertEqual(elsewhere.read_bytes(), self.original)
+        self.assertEqual(
+            elsewhere.read_bytes(),
+            self.original.replace(
+                b'(footprint "R_0603"', b'(footprint "Elsewhere"'
+            ).replace(b'(property "Value" "R_0603"', b'(property "Value" "Elsewhere"'),
+        )
+        self.assertEqual(footprint.declared_name, "Elsewhere")
         footprint.set_attribute("Value", "detached")
         footprint.close()
         self.assertIn(b'"Value" "detached"', elsewhere.read_bytes())
@@ -327,15 +387,15 @@ class SaveAsTests(PersistenceCase):
         footprint = self.library.footprint("R_0603")
         footprint.set_attribute("Value", "pending")
         pending = footprint.to_bytes()
-        linked_parent = self.root / "linked"
+        linked_parent = self.real_root / "linked"
         linked_parent.symlink_to(self.path, target_is_directory=True)
         dangling = self.path / "Dangling.kicad_mod"
-        dangling.symlink_to(self.root / "missing")
+        dangling.symlink_to(self.real_root / "missing")
         for destination in (
             dangling,
             linked_parent / "New.kicad_mod",
-            self.root / "absent" / "New.kicad_mod",
-            self.root / "NotAFootprint.txt",
+            self.real_root / "absent" / "New.kicad_mod",
+            self.real_root / "NotAFootprint.txt",
             self.path / "bad:name.kicad_mod",
         ):
             with self.subTest(destination=destination):
@@ -343,8 +403,52 @@ class SaveAsTests(PersistenceCase):
                     footprint.save_as(destination)
                 self.assertEqual(footprint.path, self.file)
                 self.assertEqual(footprint.to_bytes(), pending)
+                self.assertEqual(footprint.declared_name, "R_0603")
                 self.assertTrue(footprint.is_modified)
+        with (
+            patch(
+                "kicad_primitives._symbol_persist.os.fsync",
+                side_effect=OSError("failed"),
+            ),
+            self.assertRaises(OSError),
+        ):
+            footprint.save_as(self.path / "Fails.kicad_mod")
+        self.assertEqual(footprint.path, self.file)
+        self.assertEqual(footprint.to_bytes(), pending)
+        self.assertEqual(footprint.declared_name, "R_0603")
+        self.assertFalse((self.path / "Fails.kicad_mod").exists())
         self.assertEqual(self.file.read_bytes(), self.original)
+
+    def test_save_as_into_another_open_library_joins_it(self) -> None:
+        other_dir = self.real_root / "Other.pretty"
+        other_dir.mkdir()
+        other = FootprintLibrary.open(other_dir)
+        self.addCleanup(other.discard)
+        footprint = self.library.footprint("R_0603")
+        footprint.save_as(other_dir / "Moved.kicad_mod")
+        self.assertIs(footprint.library, other)
+        self.assertIs(other.footprint("Moved"), footprint)
+        self.assertEqual(self.library.footprints, ())
+        self.assertEqual([s.name for s in other.summaries], ["Moved"])
+        self.assertEqual(other.summary("Moved").declared_name, "Moved")
+        other.footprint("Moved").set_attribute("Value", "joined")
+        other.close()
+        self.assertIn(b'"Value" "joined"', (other_dir / "Moved.kicad_mod").read_bytes())
+        self.assertTrue(footprint.is_closed)
+        # An occupied destination in the other library is refused before writing.
+        other = FootprintLibrary.open(other_dir)
+        occupant = other.footprint("Moved")
+        second = self.library.footprint("Ganged_A1_B12")
+        with self.assertRaises(FootprintLifecycleError):
+            second.save_as(other_dir / "Moved.kicad_mod", overwrite=True)
+        self.assertIs(other.footprint("Moved"), occupant)
+        self.assertIs(second.library, self.library)
+        # A directory that is not an open library detaches.
+        closed_dir = self.real_root / "Closed.pretty"
+        closed_dir.mkdir()
+        second.save_as(closed_dir / "Detached.kicad_mod")
+        self.assertIsNone(second.library)
+        self.assertEqual(self.library.footprints, ())
 
 
 class CloseTests(PersistenceCase):
