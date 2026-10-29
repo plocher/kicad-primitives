@@ -9,6 +9,7 @@ open, read, modify, validate, write, close (ADR 0009).
 
 from __future__ import annotations
 
+import os
 import stat
 from collections.abc import Iterable
 from os import PathLike
@@ -231,21 +232,20 @@ class Footprint:
         """Check that the content can be written; run no KiCad.
 
         Raises ``UnsupportedOperationError`` for a format other than the
-        write format, ``InvalidFootprintError`` when the pending source does
-        not parse back as one footprint, ``UnicodeEncodeError`` for content
-        that cannot be encoded, and ``OSError`` subclasses when the
-        destination directory does not exist or is not writable.
+        write format or a destination that is a link or multiply linked
+        file, ``InvalidFootprintError`` when the pending source does not
+        parse back as one footprint, ``UnicodeEncodeError`` for content that
+        cannot be encoded, ``PermissionError`` for a destination or directory
+        without write permission, and other ``OSError`` subclasses for a
+        missing or symlinked destination directory. It does not compare
+        content with the file on disk; that is ``save()``'s conflict check.
         """
         self._check_open()
         _footprint_parse.require_writeable(self._source.version)
         output = self._source.document.render().encode("utf-8")
         _footprint_parse.read_source(output)
         target = self._path if destination is None else Path(destination).absolute()
-        parent = target.parent
-        if not parent.is_dir():
-            raise NotADirectoryError(f"Destination directory does not exist: {parent}")
-        if target.exists() and not target.is_file():
-            raise IsADirectoryError(f"Destination is not a file: {target}")
+        _check_destination(target)
 
     def save(self, *, overwrite: bool = False) -> None:
         """Write this footprint to its path under the ADR 0009 write promises.
@@ -283,11 +283,15 @@ class Footprint:
     def save_as(self, path: str | PathLike[str], *, overwrite: bool = False) -> None:
         """Write one new file and rebind this footprint to it only after success.
 
-        The destination must not exist unless ``overwrite=True``. Its parent
-        must be an existing, writable, non-symlink directory. The original
-        file is not changed. A destination inside the owning library joins
-        that library under its new stem; a destination elsewhere detaches the
-        footprint from the library (``library`` becomes ``None``).
+        As KiCad's Save As does, the written content carries the new stem as
+        its internal name, and as its Value when the Value equalled the old
+        stem. The destination must not exist unless ``overwrite=True``. Its
+        parent must be an existing, writable, non-symlink directory. The
+        original file is not changed. A destination inside an open library
+        (this one or another) joins that library under its new stem; a
+        destination elsewhere detaches the footprint (``library`` becomes
+        ``None``). A destination that another open footprint already owns
+        raises ``FootprintLifecycleError`` before anything is written.
         """
         self._check_open()
         destination = Path(path).expanduser().absolute()
@@ -295,7 +299,21 @@ class Footprint:
             raise ValueError(f"Destination must end with {_SUFFIX}: {destination}")
         _require_name(destination.stem)
         self.validate(destination)
-        output = self.to_bytes()
+        target_library = _library_at(destination.parent)
+        if target_library is not None:
+            occupant = target_library._open.get(destination.stem)
+            if occupant is not None and occupant is not self:
+                raise FootprintLifecycleError(
+                    f"Destination is open as another footprint: {destination}"
+                )
+        source = self._source
+        if destination.stem != self.name:
+            source = _footprint_parse.read_source(
+                _footprint_parse.renamed_source(
+                    source, self.name, destination.stem
+                ).encode("utf-8")
+            )
+        output = source.document.render().encode("utf-8")
         if overwrite and destination.exists():
             _symbol_persist.save_source(
                 destination,
@@ -311,11 +329,15 @@ class Footprint:
                 mode=self._mode,
             )
         old = self._path
+        self._source = source
         self._path = destination
         self._fingerprint = Fingerprint.of(output)
         self._modified = False
         if self._library is not None:
-            self._library._rebound(self, old, destination)
+            self._library._released_path(self, old)
+        self._library = target_library
+        if target_library is not None:
+            target_library._adopt(self)
 
     def discard(self) -> None:
         """Exit without writing; terminal, not a reset for continued editing."""
@@ -351,10 +373,53 @@ class Footprint:
             self.discard()
 
 
-class FootprintLibrary:
-    """One ``.pretty`` directory: cached summaries, live footprints, directory operations."""
+def _check_destination(target: Path) -> None:
+    """Refuse what ``save()``/``save_as()`` would refuse, without reading content."""
+    for parent in (target.parent, *target.parent.parents):
+        try:
+            info = parent.lstat()
+        except FileNotFoundError as exc:
+            raise NotADirectoryError(
+                f"Destination directory does not exist: {parent}"
+            ) from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise NotADirectoryError(
+                f"Destination requires existing non-symlink directories: {parent}"
+            )
+    mode = stat.S_IMODE(target.parent.stat().st_mode)
+    if not mode & 0o222 or not mode & 0o111 or not os.access(target.parent, os.W_OK):
+        raise PermissionError(f"Destination directory is not writable: {target.parent}")
+    try:
+        info = target.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(info.st_mode):
+        raise IsADirectoryError(f"Destination is not a file: {target}")
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise UnsupportedOperationError(
+            f"Save requires a regular, non-symlink, singly linked file: {target}"
+        )
+    if not stat.S_IMODE(info.st_mode) & 0o222:
+        raise PermissionError(f"Footprint has no write permission bits: {target}")
 
-    def __init__(self, path: Path, on_close: OnClose) -> None:
+
+def _library_at(directory: Path) -> FootprintLibrary | None:
+    """The open library registered for *directory*, if any."""
+    found = _registry.lookup(_KIND, directory)
+    return found if isinstance(found, FootprintLibrary) else None
+
+
+class FootprintLibrary:
+    """One ``.pretty`` directory: cached summaries, live footprints, directory operations.
+
+    Construct through :meth:`open`; the constructor is private.
+    """
+
+    def __init__(
+        self, path: Path, on_close: OnClose, *, _via_open: bool = False
+    ) -> None:
+        if not _via_open:
+            raise TypeError("Use FootprintLibrary.open(target) to open a library")
         if on_close not in _ON_CLOSE:
             raise ValueError(f"on_close must be one of {_ON_CLOSE}, not {on_close!r}")
         if not path.is_dir():
@@ -378,20 +443,28 @@ class FootprintLibrary:
     ) -> FootprintLibrary:
         """Open one library by registered nickname or by directory path.
 
-        A ``str`` that is a registered footprint nickname in *tables* (or in
-        the default ``LibraryTables.open()`` context) opens that library's
-        resolved path; any other ``str`` and every ``Path`` is a path. The
-        same directory, by resolved real path, opens to the same object until
-        it is closed or discarded; *on_close* is taken from the first open.
-        Opening parses every ``.kicad_mod`` once into :attr:`summaries`.
+        A ``str`` that is a registered footprint nickname in *tables* opens
+        that library's resolved path; see ``docs/footprint-libraries.md`` for
+        the rule when *tables* is omitted. The library binds to the resolved
+        real path of the directory. The same directory opens to the same
+        object until it is closed or discarded; a second open with a
+        different *on_close* raises ``ValueError``. Opening parses every
+        ``.kicad_mod`` once into :attr:`summaries`.
         """
+        if on_close not in _ON_CLOSE:
+            raise ValueError(f"on_close must be one of {_ON_CLOSE}, not {on_close!r}")
         location = _registry.resolve_target(
             target, library_type="footprint", tables=tables
-        )
+        ).resolve()
         existing = _registry.lookup(_KIND, location)
         if isinstance(existing, FootprintLibrary):
+            if existing.on_close != on_close:
+                raise ValueError(
+                    f"Library is already open with on_close={existing.on_close!r}: "
+                    f"{location}"
+                )
             return existing
-        library = cls(location, on_close)
+        library = cls(location, on_close, _via_open=True)
         _registry.register(_KIND, location, library)
         return library
 
@@ -425,7 +498,8 @@ class FootprintLibrary:
     def _scan(self) -> None:
         present: set[str] = set()
         for path in sorted(self._path.iterdir()):
-            if path.suffix != _SUFFIX or not path.is_file():
+            # A dangling link is listed, and reported, as KiCad lists it.
+            if path.suffix != _SUFFIX or not (path.is_file() or path.is_symlink()):
                 continue
             name = path.stem
             present.add(name)
@@ -447,17 +521,15 @@ class FootprintLibrary:
         self._stamps.pop(name, None)
 
     def _released(self, footprint: Footprint) -> None:
-        if self._open.get(footprint.name) is footprint:
-            del self._open[footprint.name]
+        self._released_path(footprint, footprint.path)
 
-    def _rebound(self, footprint: Footprint, old: Path, new: Path) -> None:
-        if self._open.get(old.stem) is footprint:
-            del self._open[old.stem]
-        if new.parent.resolve() == self._path.resolve():
-            self._open[new.stem] = footprint
-            self._load(new)
-        else:
-            footprint._library = None
+    def _released_path(self, footprint: Footprint, path: Path) -> None:
+        if self._open.get(path.stem) is footprint:
+            del self._open[path.stem]
+
+    def _adopt(self, footprint: Footprint) -> None:
+        self._open[footprint.name] = footprint
+        self._load(footprint.path)
 
     @property
     def path(self) -> Path:
@@ -605,9 +677,12 @@ class FootprintLibrary:
 
         The new file carries *new_name* as its internal name, and its Value
         when the Value equalled *old_name*. The old file is deleted after
-        the new one exists. An open handle is rebound to the new path with
-        the same substitution applied to its pending content; its edit mark
-        is unchanged.
+        the new one exists; if that delete fails, both files exist and
+        ``refresh()`` lists both. An open handle is rebound to the new path
+        with the same substitution applied to its pending content; its edit
+        mark is unchanged. When the file on disk is no longer the file the
+        open handle read, ``FootprintConflictError`` is raised and nothing
+        is written.
         """
         self._check_open()
         source = self._file(old_name)
@@ -619,6 +694,11 @@ class FootprintLibrary:
         if destination.exists() or destination.is_symlink():
             raise FileExistsError(f"Footprint already exists: {destination}")
         raw = source.read_bytes()
+        held = self._open.get(old_name)
+        if held is not None and not held._fingerprint.matches(raw):
+            raise FootprintConflictError(
+                f"Footprint changed on disk since it was opened: {source}"
+            )
         parsed = _footprint_parse.read_source(raw)
         renamed = _footprint_parse.renamed_source(parsed, old_name, new_name).encode(
             "utf-8"
