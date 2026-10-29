@@ -110,6 +110,37 @@ The package does not predict or excuse expected electrical changes.
 An edit that changes pin types, net names, or connections changes the circuit, and the comparison reports that.
 The set of acceptable changes is large and specific to each use case. Only the client can decide which differences it accepts.
 
+### Artifact lifecycle
+
+Two client camps drive the package.
+Read-only tools (jBOM, kproj) open a project and produce derived artifacts.
+Domain editors (schematic, PCB, symbol, footprint, later worksheets and others) change a project.
+
+Every artifact has one lifecycle: **open, read, modify, validate, write, close**.
+The read-only flow is the same lifecycle with modify, validate, and write omitted.
+There is no separate read-only type and no read-view versus editor split.
+A clean close is a no-op for both camps (ADR 0008 as amended).
+
+Each step is a public primitive:
+
+- `validate()` checks that in-memory content is well formed, matches its writable format, and can be written to its destination. It raises with specifics. It does not run KiCad or compare netlists. A client can validate without writing, which is what a dry run needs.
+- `save()` writes pending bytes. It runs `validate()` first, because an invalid artifact must not reach disk. It does nothing else.
+- Domain editors contribute only their content: pending bytes per file.
+
+### One file writer
+
+One private module replaces per-artifact save code.
+It takes a set of (path, old bytes, new bytes), where no old bytes means create and no new bytes means delete.
+It checks each file, stages every write to a same-directory temporary file, renames in order, and deletes last.
+Temporary names never end in a KiCad extension, so KiCad cannot load them.
+This is the ordinary rule for replacing files safely, not policy. The existing single-file save is the one-file case of it.
+
+After staging, only a concurrent writer or a system failure can stop the commit.
+Each rename is atomic, so every file is either old or new, never partial.
+The error names the files that did not commit, baselines advance only for committed files, and `save()` again finishes the rest.
+There is no rollback layer. For independent files, such as a `.pretty` library, this is low probability, low impact, and easy to repair.
+Multi-file documents that reference each other, such as a schematic hierarchy, are assessed in the composite-split ticket.
+
 ### Consequences for existing operations
 
 Simple primitives that stay as they are:
@@ -118,14 +149,14 @@ Simple primitives that stay as they are:
 - Symbol edits: attributes, pins, bodies, rectangles, texts, create, rename, delete, copy, `resolve()`.
 - Table reads and edits: `libraries()`, `resolve()`, `table()`, `entries`, `add_entry`, `rename`, `set_uri`, `delete`.
 - `PlacedSymbol.set_attribute` and `delete_attribute`.
-- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with integrity checks only. The symbol `.bak` file is native save behavior.
+- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with integrity checks only. The symbol `.bak` file is native save behavior. Both gain a public `validate()` and move onto the shared file writer when it exists.
 - `discard()`, and `close()` per ADR 0008 as amended. Close calls only that artifact's own `save()`.
 - `Project.erc()`, `Project.netlist()`, `Project.export_svgs()`, `SymbolLibrary.export_svgs()`, `export_netlist()`, `Netlist.open()`, `connectivity_sets()`. Running KiCad is their stated purpose. Staging pending content is how they do that one job.
 
 Composite operations to split (follow-up ticket, owner grilling first). Each removed bundle becomes a named recipe:
 
 1. **`Project.save()` and `Schematic.save()`.** Split into:
-   - a write primitive: peer-lock guard, integrity checks, staged writes, no KiCad, no ZIP;
+   - `validate()` and a write primitive on the shared file writer: peer-lock guard, integrity checks, staged writes, no KiCad, no ZIP;
    - `project.snapshot_history()` for ZIP publication and retention;
    - a recipe for the old behavior: capture netlist before edits, compare after, write, snapshot.
 2. **`Project.close()`.** After the split, a dirty close calls only the write primitive. The "unpublished history" retry is removed.
@@ -139,7 +170,7 @@ Borderline items for the owner to decide:
 
 ### Consequences for #39
 
-- `FootprintLibrary.save()` checks every file, stages every write, then commits. It does not verify or archive.
+- `FootprintLibrary` follows the lifecycle above. It adds the shared file writer, contributes only its pending bytes per file, and has a public `validate()`. Its `save()` does not verify or archive.
 - `LibraryTables.find_libraries()` requires explicit roots.
 - `LibraryTables.portable_uri(path)` returns the `${VAR}` form of a path. Clients register with `add_entry(nickname, uri)`. There is no `add_library` helper that chooses a nickname or URI style.
 
