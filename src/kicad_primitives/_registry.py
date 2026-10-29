@@ -10,7 +10,7 @@ from __future__ import annotations
 from os import PathLike
 from pathlib import Path
 
-from .tables import LibraryTables, LibraryType, MissingLibraryError
+from .tables import LibraryTables, LibraryTablesError, LibraryType, MissingLibraryError
 
 _OPEN: dict[tuple[str, Path], object] = {}
 
@@ -23,19 +23,31 @@ def resolve_target(
 ) -> Path:
     """Map an open target to an absolute path.
 
-    A ``str`` that is a registered nickname of *library_type* resolves through
-    *tables* (or a default ``LibraryTables.open()`` context when *tables* is
-    ``None``). Any other ``str`` and every ``PathLike`` is a filesystem path.
+    Every ``PathLike`` is a filesystem path. With explicit *tables*, a ``str``
+    is first tried as a registered nickname of *library_type*; an
+    unregistered ``str`` is a path. Without *tables*, a ``str`` that names an
+    existing path is that path at once; otherwise the default
+    ``LibraryTables.open()`` context is consulted, and any table failure
+    (missing nickname, malformed or unreadable table) falls back to the
+    string as a path.
     """
-    if isinstance(target, str):
-        if not target.strip():
-            raise ValueError("Library target cannot be empty")
-        context = LibraryTables.open() if tables is None else tables
+    if not isinstance(target, str):
+        return Path(target).absolute()
+    if not target.strip():
+        raise ValueError("Library target cannot be empty")
+    as_path = Path(target).absolute()
+    if tables is not None:
         try:
-            return context.resolve(target, library_type=library_type).resolved_path
+            return tables.resolve(target, library_type=library_type).resolved_path
         except MissingLibraryError:
-            return Path(target).absolute()
-    return Path(target).absolute()
+            return as_path
+    if as_path.exists():
+        return as_path
+    try:
+        context = LibraryTables.open()
+        return context.resolve(target, library_type=library_type).resolved_path
+    except (LibraryTablesError, OSError):
+        return as_path
 
 
 def registry_key(kind: str, path: Path) -> tuple[str, Path]:
