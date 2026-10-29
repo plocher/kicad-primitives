@@ -134,7 +134,7 @@ Each step is a public primitive:
 
 Every write makes these promises:
 
-- **No silent overwrite.** A write refuses when the file on disk is not the file this artifact read. The artifact remembers what it read at `open()`; the caller never handles that record.
+- **No silent overwrite.** A write refuses when the file on disk is not the file this artifact read, and raises a conflict error that names the file. The artifact remembers what it read at `open()`; the caller never handles that record. The client decides what happens next: reopen and redo, `save_as()` elsewhere, or `save(overwrite=True)` to write anyway. The flag is the only way through, it is visible at the call site, and native backups such as the symbol `.bak` still capture the file on disk before it is replaced. `save_as(path, overwrite=True)` is the same decision for an existing destination.
 - **No partial file.** A reader sees the old file or the new file, never a mix. A failed write leaves the original untouched.
 - **No stray KiCad files.** Nothing the writer creates while working can be mistaken for a KiCad file.
 - **No in-memory original.** Native backups such as the symbol `.bak` are made from the file on disk.
@@ -162,7 +162,7 @@ Simple primitives that stay as they are:
 - Symbol edits: attributes, pins, bodies, rectangles, texts, create, rename, delete, copy, `resolve()`.
 - Table reads and edits: `libraries()`, `resolve()`, `table()`, `entries`, `add_entry`, `rename`, `set_uri`, `delete`.
 - `PlacedSymbol.set_attribute` and `delete_attribute`.
-- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with the promises above only. The symbol `.bak` file is native save behavior. Both gain a public `validate()` and a flag-based `is_modified`, and drop their stored byte copies.
+- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with the promises above only. The symbol `.bak` file is native save behavior. Both gain a public `validate()`, a flag-based `is_modified`, and the explicit `overwrite=True` escape, and drop their stored byte copies.
 - `discard()`, and `close()` per ADR 0008 as amended. Close calls only that artifact's own `save()`.
 - `Project.erc()`, `Project.netlist()`, `Project.export_svgs()`, `SymbolLibrary.export_svgs()`, `export_netlist()`, `Netlist.open()`, `connectivity_sets()`. Running KiCad is their stated purpose. Staging pending content is how they do that one job.
 
