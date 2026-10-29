@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import unicodedata
 from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,24 +21,34 @@ if TYPE_CHECKING:
 _OUTPUT = "kicad-primitives-svg-output"
 
 
-def _expected_files(pending: PendingHierarchy) -> dict[str, tuple[str, Path] | None]:
-    """Map KiCad's ``root-sheet-...`` file names to (sheet path, source).
+def _page_name(root_stem: str, names: tuple[str, ...]) -> str:
+    """Return KiCad 10's SVG page file name, NFC-normalized for comparison.
 
-    KiCad names each page from the root file stem and the chain of sheet names.
+    KiCad 10.0.1 ``SCHEMATIC::GetUniqueFilenameForCurrentSheet`` joins the root
+    file stem and each raw sheet name with ``-``. ``SCH_PLOTTER`` then replaces
+    ``/`` and ``\\`` with ``_`` and adds ``.svg``; it applies no other sanitizing
+    (kicad-source-mirror 2db9e5a72b7cf1e71bb8dff5257a88d4b41f812f,
+    ``eeschema/schematic.cpp`` and ``eeschema/sch_plotter.cpp``).
+    """
+    stem = "-".join((root_stem, *names)).replace("/", "_").replace("\\", "_")
+    return unicodedata.normalize("NFC", f"{stem}.svg")
+
+
+def _expected_files(pending: PendingHierarchy) -> dict[str, tuple[str, Path] | None]:
+    """Map KiCad's page file names to (sheet path, source).
+
     A colliding name maps to ``None``: the package cannot prove which sheet it is.
     """
     by_path = {document.path: document for document in pending.documents}
     expected: dict[str, tuple[str, Path] | None] = {}
 
     def visit(path: Path, names: tuple[str, ...]) -> None:
-        stem = "-".join((pending.root.stem, *names))
-        sheet_path = "/" + "".join(f"{name}/" for name in names)
-        expected[f"{stem}.svg"] = (
-            None if f"{stem}.svg" in expected else (sheet_path, path)
-        )
+        name = _page_name(pending.root.stem, names)
+        sheet_path = "/" + "".join(f"{item}/" for item in names)
+        expected[name] = None if name in expected else (sheet_path, path)
         for sheet in by_path[path].sheets:
             child = (path.parent / sheet.filename).resolve()
-            if sheet.name and child in by_path:
+            if child in by_path:
                 visit(child, (*names, sheet.name))
 
     visit(pending.root, ())
@@ -92,15 +103,18 @@ def export_schematic_svgs(
         )
         if not produced:
             raise SchematicSvgError("SVG export produced no files")
-        names = {path.name for path in produced}
+        # macOS file systems may return NFD names; compare in NFC.
+        payloads = {
+            unicodedata.normalize("NFC", path.name): path.read_bytes()
+            for path in produced
+        }
         missing = [
-            name for name, origin in expected.items() if origin and name not in names
+            name for name, origin in expected.items() if origin and name not in payloads
         ]
         if missing:
             raise SchematicSvgError(
                 f"SVG export omits proved hierarchy sheets: {', '.join(missing)}"
             )
-        payloads = {path.name: path.read_bytes() for path in produced}
     _check_new_destination(
         destination, unsupported_error=UnsupportedSchematicOperationError
     )

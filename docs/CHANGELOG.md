@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix SVG sheet mapping for non-ASCII and separator sheet names: apply KiCad 10's page-name rule (`/` and `\` become `_`) and compare in Unicode NFC (`docs/schematics.md`; #64).
+
 - Restore Python 3.11 import compatibility: `TitleBlock.comments` uses an immutable `default_factory` instead of a shared `MappingProxyType` default, which Python 3.11 dataclasses reject. Public type and behavior are unchanged (#70).
 
 - Add `Project.export_svgs(output_dir)`: render full-hierarchy schematic SVGs of the pending snapshot through the shared staging seam, without saving or the write guard. Refuse existing or unsafe output directories; publish only after a validated render. Return `SchematicSvgExport` with per-file `sheet_path`/`source_path` mapping and `ProjectSnapshot` provenance; acquisition failures raise `SchematicSvgError`. No plot options (donor use is full hierarchy or the root page). Add an opt-in native gate (`docs/schematics.md`; #64).
