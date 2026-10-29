@@ -1,0 +1,9 @@
+(footprint "Future"
+	(version 20990101)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "Newer format than the write format")
+	(tags "")
+	(embedded_fonts no)
+)
