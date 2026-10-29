@@ -87,7 +87,10 @@ class RectangleDefinition:
 
 @dataclass(frozen=True)
 class TextDefinition:
-    """Immutable body text values; full effects remain opaque source."""
+    """Immutable body text values; full effects remain opaque source.
+
+    ``rotation`` is the raw number from the file's ``at`` node, not converted.
+    """
 
     text: str
     x: float

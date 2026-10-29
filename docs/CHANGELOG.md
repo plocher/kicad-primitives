@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Raise `SchematicSvgError` when two sheets map to one SVG page name. Run `Project.netlist()` and `Project.export_svgs()` with the original project directory as backend CWD, like ERC. Document temporary `Netlist.path`/`source` for project obtains, raw `SymbolText.rotation` units, the full `export_svgs` error list, and deferred live connectivity in the README (#64, #65, #66).
+
 - `ErcSnapshot` now holds the shared `ProjectSnapshot` as `project`, plus its library-table and config-home fields. Remove the duplicate `ErcDocumentSnapshot`; use `ProjectSnapshot.documents` (`SnapshotDocument`). No alias (`docs/schematics.md`; #65).
 
 - Fix SVG sheet mapping for non-ASCII and separator sheet names: apply KiCad 10's page-name rule (`/` and `\` become `_`) and compare in Unicode NFC (`docs/schematics.md`; #64).

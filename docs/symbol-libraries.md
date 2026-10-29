@@ -125,6 +125,8 @@ Prefer **unit 0** for shared boxes/text instead of copying the same artwork into
 `SymbolBody.rectangles` and `texts` return live `SymbolRectangle` and `SymbolText` handles in source order.
 `SymbolRectangle.set(start=, end=)` changes start and/or end points.
 `SymbolText.set(text=, x=, y=, rotation=)` changes the text value, position, and/or rotation.
+`SymbolText.rotation` is the raw number in the file's `at` node. The package does not convert units.
+KiCad symbol files can store body text angles in tenths of a degree, for example `900` for 90 degrees. `set(rotation=)` writes the given number unchanged.
 Pass at least one argument. Equal values are lexical no-ops, even when source spelling differs (for example `-2.540`).
 Changed values replace only the target atoms. Stroke, fill, effects, and unrelated bytes stay unchanged.
 `delete()` removes one node and its leading separator, then makes that handle stale.

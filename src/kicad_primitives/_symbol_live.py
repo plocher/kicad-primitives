@@ -511,7 +511,12 @@ class SymbolText(_BodyGraphic):
 
     @property
     def rotation(self) -> float:
-        """Current rotation."""
+        """Current rotation, as the raw number in the file's ``at`` node.
+
+        The package does not convert units. KiCad symbol files can store body
+        text angles in tenths of a degree (for example ``900`` for 90 degrees).
+        ``set(rotation=...)`` writes the given number unchanged.
+        """
         self._check()
         return self._data.rotation
 

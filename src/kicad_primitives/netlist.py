@@ -98,6 +98,10 @@ class Netlist:
     ``provenance`` is set only by :meth:`kicad_primitives.projects.Project.netlist`.
     It records the project settings and exact hierarchy content that were
     exported. File-based opens and obtains leave it ``None``.
+
+    ``path`` is the file that was parsed and ``source`` is KiCad's recorded
+    design source. For :meth:`~kicad_primitives.projects.Project.netlist` both
+    name deleted temporary stage paths; use ``provenance`` for original paths.
     """
 
     path: Path
@@ -191,6 +195,17 @@ def export_netlist(
         KicadCliNotFoundError: discovery failed.
         NetlistExportError: CLI non-zero exit or missing output file.
     """
+    return _export_netlist(schematic_path, output_path, kicad_cli=kicad_cli, cwd=None)
+
+
+def _export_netlist(
+    schematic_path: str | PathLike[str],
+    output_path: str | PathLike[str] | None,
+    *,
+    kicad_cli: str | PathLike[str] | None,
+    cwd: Path | None,
+) -> Path:
+    """Run the export; *cwd* sets the backend working directory when given."""
     schematic = Path(schematic_path).expanduser().resolve()
     if not schematic.is_file():
         raise FileNotFoundError(f"Schematic not found: {schematic}")
@@ -217,13 +232,20 @@ def export_netlist(
         str(schematic),
     ]
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        # Pass cwd only when set, so the public export call stays unchanged.
+        if cwd is None:
+            completed = subprocess.run(
+                command, check=False, capture_output=True, text=True, timeout=120
+            )
+        else:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=cwd,
+            )
     except OSError as exc:
         raise NetlistExportError(f"Failed to run kicad-cli: {exc}") from exc
     if completed.returncode != 0:
@@ -250,11 +272,19 @@ def obtain_netlist(
     saved ``.net`` (for example a machine without KiCad) take staleness on
     themselves via :meth:`Netlist.open` or :func:`export_netlist`.
     """
+    return _obtain_netlist(schematic_path, kicad_cli=kicad_cli, cwd=None)
+
+
+def _obtain_netlist(
+    schematic_path: str | PathLike[str],
+    *,
+    kicad_cli: str | PathLike[str] | None,
+    cwd: Path | None,
+) -> Netlist:
+    """Export to a temporary file, parse it, and delete it."""
     with tempfile.TemporaryDirectory(prefix="kicad-primitives-netlist-") as tmp:
-        path = export_netlist(
-            schematic_path,
-            Path(tmp) / "fresh.net",
-            kicad_cli=kicad_cli,
+        path = _export_netlist(
+            schematic_path, Path(tmp) / "fresh.net", kicad_cli=kicad_cli, cwd=cwd
         )
         return Netlist.open(path)
 

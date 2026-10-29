@@ -65,7 +65,8 @@ content to judge freshness. File-based `Netlist.open` and `obtain_netlist`
 results have `provenance=None`.
 
 `Netlist.path` and `Netlist.source` name the deleted temporary export and
-staged root. Use `provenance` for original paths.
+staged root. Use `provenance` for original paths. Like ERC, the backend runs
+with the original project directory as its working directory.
 
 The hierarchy rules match save verification: the root schematic and project
 share a basename, and sheets are parent-relative inside the project directory.

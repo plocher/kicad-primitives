@@ -131,11 +131,37 @@ class SchematicSvgExportTests(unittest.TestCase):
                 self.assertEqual(mapping[page], (f"/{name}/", self.child))
                 self.assertEqual(mapping["board.svg"], ("/", self.path))
 
+    def test_sheets_sharing_a_page_name_fail_before_backend(self) -> None:
+        original = self.path.read_bytes()
+        sheet = (
+            b'(sheet (at 0 0) (size 10 10) (property "Sheetname" "{name}") '
+            b'(property "Sheetfile" "sub/child.kicad_sch"))'
+        )
+        for index, (first, second) in enumerate((("A/B", "A_B"), ("X", "X"))):
+            with self.subTest(first=first, second=second):
+                extra = (
+                    sheet.replace(b"{name}", first.encode())
+                    + b" "
+                    + sheet.replace(b"{name}", second.encode())
+                )
+                self.path.write_bytes(
+                    original.replace(
+                        b"(generator eeschema)", b"(generator eeschema) " + extra
+                    )
+                )
+                project = Project.open(self.directory)
+                out = self.base / f"collide-{index}"
+                with self.assertRaises(SchematicSvgError):
+                    project.export_svgs(out, kicad_cli=self.base / "missing")
+                self.assertFalse(out.exists())
+
     def test_backend_command_uses_staged_root_and_no_extra_plot_options(self) -> None:
         record = self.base / "record.json"
         with patch.dict(os.environ, {"KP_RECORD": str(record)}):
             self.export()
-        argv = json.loads(record.read_text())["argv"]
+        seen = json.loads(record.read_text())
+        argv = seen["argv"]
+        self.assertEqual(Path(seen["cwd"]).resolve(), self.directory)
         self.assertEqual(argv[:4], ["sch", "export", "svg", "--output"])
         self.assertEqual(len(argv), 6)
         self.assertEqual(Path(argv[-1]).name, "board.kicad_sch")
