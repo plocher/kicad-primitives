@@ -265,7 +265,6 @@ class Footprint:
                 self._path,
                 output,
                 mode=self._mode,
-                unsupported_error=InvalidFootprintError,
             )
         else:
             baseline: _symbol_persist.Baseline = self._fingerprint
@@ -276,7 +275,6 @@ class Footprint:
                 baseline,
                 output,
                 conflict_error=FootprintConflictError,
-                unsupported_error=InvalidFootprintError,
                 label="Footprint",
             )
         self._fingerprint = Fingerprint.of(output)
@@ -304,7 +302,6 @@ class Footprint:
                 destination.read_bytes(),
                 output,
                 conflict_error=FootprintConflictError,
-                unsupported_error=InvalidFootprintError,
                 label="Footprint",
             )
         else:
@@ -312,7 +309,6 @@ class Footprint:
                 destination,
                 output,
                 mode=self._mode,
-                unsupported_error=InvalidFootprintError,
             )
         old = self._path
         self._path = destination
@@ -538,9 +534,7 @@ class FootprintLibrary:
         return footprint
 
     def _write_new(self, path: Path, raw: bytes, *, mode: int = 0o644) -> None:
-        _symbol_persist.save_new_source(
-            path, raw, mode=mode, unsupported_error=InvalidFootprintError
-        )
+        _symbol_persist.save_new_source(path, raw, mode=mode)
         self._load(path)
 
     def create(self, name: str) -> None:
