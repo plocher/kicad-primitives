@@ -25,24 +25,28 @@ from tests.functional.test_schematic_editing import SOURCE
 # Fake backend: one SVG per staged sheet using KiCad's root-sheet naming, each
 # embedding the staged Value text so tests can see pending content.
 FAKE_CLI = """#!/usr/bin/env python3
-import json, os, pathlib, re, sys
+import json, os, pathlib, re, sys, unicodedata
 args = sys.argv[1:]
 root = pathlib.Path(args[-1])
 out = pathlib.Path(args[args.index('--output') + 1])
 record = os.environ.get('KP_RECORD')
 if record:
-    pathlib.Path(record).write_text(json.dumps({'argv': args}))
+    pathlib.Path(record).write_text(json.dumps({'argv': args, 'cwd': os.getcwd()}))
 mode = os.environ.get('KP_MODE', '')
+name = re.search(r'"Sheetname" "([^"]*)"', root.read_text()).group(1)
+child = (root.stem + '-' + name).replace('/', '_')
 pages = {root.stem: root}
 if mode != 'omit-child':
-    pages[root.stem + '-Child'] = root.parent / 'sub/child.kicad_sch'
+    pages[child] = root.parent / 'sub/child.kicad_sch'
 if mode == 'extra':
     pages[root.stem + '-Unknown'] = root
 if mode == 'none':
     pages = {}
 for stem, sheet in pages.items():
     value = re.search(r'"Value" "([^"]*)"', sheet.read_text()).group(1)
-    (out / (stem + '.svg')).write_text('<svg>' + value + '</svg>')
+    # Like macOS, store decomposed (NFD) file names.
+    target = out / unicodedata.normalize('NFD', stem + '.svg')
+    target.write_text('<svg>' + value + '</svg>')
 print('Done.')
 """
 
@@ -106,6 +110,26 @@ class SchematicSvgExportTests(unittest.TestCase):
             hashlib.sha256(root.to_bytes()).hexdigest(),
         )
         self.assertTrue(result.snapshot.documents[0].is_modified)
+
+    def test_non_ascii_and_sanitized_sheet_names_map_by_kicad_rule(self) -> None:
+        original = self.path.read_bytes()
+        cases = (("\u00dcn\u00ef", "board-\u00dcn\u00ef.svg"), ("A/B", "board-A_B.svg"))
+        for index, (name, page) in enumerate(cases):
+            with self.subTest(name=name):
+                self.path.write_bytes(
+                    original.replace(
+                        b'"Sheetname" "Child"', f'"Sheetname" "{name}"'.encode()
+                    )
+                )
+                project = Project.open(self.directory)
+                out = self.base / f"svg-{index}"
+                with patch.dict(os.environ, {"KP_MODE": ""}):
+                    result = project.export_svgs(out, kicad_cli=self.cli)
+                mapping = {
+                    f.path.name: (f.sheet_path, f.source_path) for f in result.files
+                }
+                self.assertEqual(mapping[page], (f"/{name}/", self.child))
+                self.assertEqual(mapping["board.svg"], ("/", self.path))
 
     def test_backend_command_uses_staged_root_and_no_extra_plot_options(self) -> None:
         record = self.base / "record.json"

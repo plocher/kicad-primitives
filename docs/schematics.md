@@ -390,8 +390,10 @@ A later file-copy failure can leave a partial new directory. It never overwrites
 
 `SchematicSvgExport` holds `output_dir`, `files`, the `ProjectSnapshot` provenance (`snapshot`), and backend `stdout`/`stderr`.
 Each `SchematicSvgFile` holds the produced `path`, the human `sheet_path` (`"/"` for the root, `"/A/B/"` for nested sheets), and the original `source_path`.
-KiCad names each page `<root-stem>-<sheet name>-….svg`. The package proves the mapping from that rule and the captured hierarchy.
-A file that it cannot map, for example after KiCad file-name sanitizing or a name collision, keeps `sheet_path=None` and `source_path=None`.
+KiCad 10 names each page `<root-stem>-<sheet name>-….svg` from raw sheet names, then replaces `/` and `\` with `_`.
+It applies no other file-name sanitizing (`SCHEMATIC::GetUniqueFilenameForCurrentSheet` and `SCH_PLOTTER`, KiCad 10.0.1 source).
+The package proves the mapping from that rule and the captured hierarchy. It compares names in Unicode NFC, because macOS can return decomposed (NFD) names.
+Only a file that the rule cannot account for keeps `sheet_path=None` and `source_path=None`.
 A proved sheet without a produced file raises `SchematicSvgError`.
 
 The command is `kicad-cli sch export svg --output <stage> <root>`. No plot options are exposed.
@@ -485,5 +487,5 @@ The native gate uses a disposable two-sheet hierarchy copy:
 uv run python tests/verify_schematic_svg.py --kicad-cli /path/to/kicad-cli
 ```
 
-It checks KiCad file names, root/child mapping, a rendered pending Value, unchanged sources, and existing-output refusal.
+It checks KiCad file names, root/child mapping, a non-ASCII sheet name with `/`, a rendered pending Value, unchanged sources, and existing-output refusal.
 Finding totals depend on the original reference context. The gate does not filter legitimate missing-footprint findings.

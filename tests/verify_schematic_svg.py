@@ -2,6 +2,7 @@
 
 import argparse
 import shutil
+import unicodedata
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -48,9 +49,35 @@ def main() -> None:
             pass
         else:
             raise AssertionError("existing output directory was reused")
+
+        # Non-ASCII and separator sheet names: KiCad writes the page itself.
+        renamed = base / "renamed"
+        renamed.mkdir()
+        for path in fixture.glob("*.kicad_*"):
+            shutil.copyfile(path, renamed / path.name)
+        root_file = renamed / "issue23403.kicad_sch"
+        source = root_file.read_bytes()
+        assert source.count(b'"Sheetname" "shared1"') == 1
+        root_file.write_bytes(
+            source.replace(b'"Sheetname" "shared1"', '"Sheetname" "Ünï/x"'.encode())
+        )
+        renamed_project = Project.open(renamed)
+        _root, renamed_child = renamed_project.schematics()
+        result = renamed_project.export_svgs(
+            base / "svg-renamed", kicad_cli=args.kicad_cli
+        )
+        mapping = {
+            unicodedata.normalize("NFC", f.path.name): (f.sheet_path, f.source_path)
+            for f in result.files
+        }
+        assert mapping["issue23403-Ünï_x.svg"] == ("/Ünï/x/", renamed_child.path), (
+            mapping
+        )
+        assert len(mapping) == 2, mapping
         print(
             "Native SVG export passed: two-sheet hierarchy mapping, pending Value "
-            "rendered, sources unchanged, existing output refused."
+            "rendered, sources unchanged, existing output refused, non-ASCII and "
+            "'/' sheet name mapped."
         )
 
 
