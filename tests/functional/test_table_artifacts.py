@@ -148,15 +148,39 @@ class TableArtifactTests(unittest.TestCase):
         self.assertTrue(table.path.is_file())
         table.close()
 
-    def test_close_requires_a_current_successful_decision_even_when_clean(self) -> None:
+    def test_clean_close_writes_nothing_and_never_creates_a_missing_table(
+        self,
+    ) -> None:
+        inode = self.path.stat().st_ino
         table = self.tables.table("symbol", "global")
-        with self.assertRaises(RuntimeError):
-            table.close()
-        table.save()
-        table.entry("Old").set_uri("/old.kicad_sym")
+        table.entry("Old").set_uri(table.entry("Old").uri)
         table.close()
+        table.close()
+        self.assertEqual(self.path.read_bytes(), self.original)
+        self.assertEqual(self.path.stat().st_ino, inode)
         with self.assertRaises(RuntimeError):
             table.to_bytes()
+        missing = self.tables.table("footprint", "global")
+        missing.close()
+        self.assertFalse(missing.path.exists())
+
+    def test_with_block_saves_on_normal_exit_and_discards_on_exception(
+        self,
+    ) -> None:
+        with self.tables.table("symbol", "global") as table:
+            table.entry("Old").set_uri("/saved.kicad_sym")
+        self.assertTrue(table.is_closed)
+        saved = self.path.read_bytes()
+        self.assertIn(b'"/saved.kicad_sym"', saved)
+        tables = LibraryTables.open(config_home=self.home)
+        with (
+            self.assertRaises(KeyError),
+            tables.table("symbol", "global") as table,
+        ):
+            table.entry("Old").set_uri("/abandoned.kicad_sym")
+            raise KeyError("client failure")
+        self.assertTrue(table.is_closed)
+        self.assertEqual(self.path.read_bytes(), saved)
 
     def test_discard_is_terminal_and_never_writes(self) -> None:
         table = self.tables.table("symbol", "global")
@@ -170,28 +194,26 @@ class TableArtifactTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             table.add_entry("Late", "/late.kicad_sym")
 
-    def test_later_edits_and_failed_clean_save_invalidate_a_saved_decision(
+    def test_close_saves_pending_edits_and_a_conflict_keeps_the_table_open(
         self,
     ) -> None:
         table = self.tables.table("symbol", "global")
-        table.save()
         entry = table.entry("Old")
         entry.set_uri("/changed.kicad_sym")
-        with self.assertRaises(RuntimeError):
-            table.close()
-        entry.set_uri("/old.kicad_sym")
-        self.assertFalse(table.is_modified)
-        with self.assertRaises(RuntimeError):
-            table.close()
-        table.save()
         foreign = self.original.replace(b'"Old"', b'"Foreign"')
         self.path.write_bytes(foreign)
         with self.assertRaises(LibraryTableConflictError):
-            table.save()
-        with self.assertRaises(RuntimeError):
             table.close()
+        self.assertFalse(table.is_closed)
+        self.assertTrue(table.is_modified)
         self.assertEqual(self.path.read_bytes(), foreign)
         table.discard()
+        self.path.write_bytes(self.original)
+        table = LibraryTables.open(config_home=self.home).table("symbol", "global")
+        table.entry("Old").set_uri("/changed.kicad_sym")
+        table.close()
+        self.assertTrue(table.is_closed)
+        self.assertIn(b'"/changed.kicad_sym"', self.path.read_bytes())
 
     def test_single_file_save_as_rebinds_only_after_success_and_preserves_original(
         self,
@@ -248,8 +270,6 @@ class TableArtifactTests(unittest.TestCase):
                     table.save_as(target)
                 self.assertEqual(table.path, self.path)
                 self.assertFalse(table.is_modified)
-                with self.assertRaises(RuntimeError):
-                    table.close()
                 self.assertEqual(self.path.read_bytes(), self.original)
         self.assertEqual(existing.read_bytes(), b"do not replace")
         self.assertTrue(link.is_symlink())
@@ -289,8 +309,8 @@ class TableArtifactTests(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), b"racing writer")
         self.assertEqual(table.path, self.path)
         self.assertEqual(table.to_bytes(), expected)
-        with self.assertRaises(RuntimeError):
-            table.close()
+        table.discard()
+        self.assertEqual(self.path.read_bytes(), self.original)
         self.assertFalse(any(p.suffix == ".tmp" for p in self.root.iterdir()))
 
     def test_overwrite_conflicts_links_modes_and_replacement_failure(self) -> None:
@@ -308,8 +328,7 @@ class TableArtifactTests(unittest.TestCase):
             table.save()
         self.assertEqual(self.path.read_bytes(), self.original)
         self.assertEqual(table.to_bytes(), expected)
-        with self.assertRaises(RuntimeError):
-            table.close()
+        self.assertTrue(table.is_modified)
         table.save()
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         self.assertFalse(self.path.with_suffix(".bak").exists())
@@ -317,8 +336,6 @@ class TableArtifactTests(unittest.TestCase):
         os.link(self.path, alias)
         with self.assertRaises(ValueError):
             table.save()
-        with self.assertRaises(RuntimeError):
-            table.close()
         alias.unlink()
         self.path.chmod(0o444)
         self.addCleanup(self.path.chmod, 0o644)

@@ -16,8 +16,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from types import MappingProxyType
-from typing import Literal
+from types import MappingProxyType, TracebackType
+from typing import Literal, Self
 
 from lossless_sexpr import ListNode, SourceSpan, TextEdit, apply_edits, parse, quote
 
@@ -89,7 +89,7 @@ class LibraryTableConflictError(LibraryTablesError, RuntimeError):
 
 
 class LibraryTableLifecycleError(LibraryTablesError, RuntimeError):
-    """A table is closed, an entry is stale, or no current close decision exists."""
+    """A table is closed or discarded, or an entry is stale."""
 
 
 def _require_table_text(label: str, value: str, *, allow_empty: bool = False) -> str:
@@ -130,7 +130,6 @@ class LibraryTable:
         )
         self._entries = tuple(TableEntry(self, i) for i in range(len(self._records)))
         self._closed = False
-        self._close_authorized = False
 
     def _check_open(self) -> None:
         if self._closed:
@@ -153,7 +152,6 @@ class LibraryTable:
         self._source = source
         self._records = records
         self._entries = tuple(handles)
-        self._close_authorized = False
 
     @property
     def library_type(self) -> LibraryType:
@@ -237,9 +235,8 @@ class LibraryTable:
         return self._source.encode("utf-8")
 
     def save(self) -> None:
-        """Persist this file only; authorize close only after successful persistence."""
+        """Persist this file only; failures retain pending changes for retry."""
         self._check_open()
-        self._close_authorized = False
         output = self.to_bytes()
         if self._baseline is None:
             _symbol_persist.save_new_source(
@@ -255,12 +252,10 @@ class LibraryTable:
                 label="Library table",
             )
         self._baseline = output
-        self._close_authorized = True
 
     def save_as(self, path: str | PathLike[str]) -> None:
         """Save one new file and rebind only on success; never overwrite a destination."""
         self._check_open()
-        self._close_authorized = False
         destination = Path(path).expanduser().absolute()
         self._context._check_rebind(self, destination)
         mode = 0o600
@@ -281,7 +276,6 @@ class LibraryTable:
         )
         self._context._rebind(self, destination)
         self._baseline = output
-        self._close_authorized = True
 
     def discard(self) -> None:
         """Abandon this artifact and invalidate its entries without writing."""
@@ -292,12 +286,35 @@ class LibraryTable:
             entry._alive = False
 
     def close(self) -> None:
-        """Exit without writing, requiring a successful current save or terminal discard."""
+        """Exit, saving first only when there are pending changes.
+
+        A clean table closes without writing, and a never-existing clean table
+        is not created. A dirty table runs :meth:`save`. If that save fails,
+        the error propagates and the table stays open with its pending
+        changes. Close is idempotent.
+        """
         if self._closed:
             return
-        if not self._close_authorized:
-            raise LibraryTableLifecycleError("Save, save as, or discard before close")
+        if self.is_modified:
+            self.save()
         self.discard()
+
+    def __enter__(self) -> Self:
+        """Use the open table as a context manager."""
+        self._check_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close on normal exit; discard without writing when an exception exits."""
+        if exc_type is None:
+            self.close()
+        else:
+            self.discard()
 
 
 class TableEntry:

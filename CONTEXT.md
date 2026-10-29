@@ -19,9 +19,10 @@ Terminal artifact exit without writing. Invalidate owned editable handles.
 This is not rollback, reload, or a reset that permits continued editing.
 
 **Close**:
-Artifact exit without implicit persistence.
-A current successful save/save-as decision is required, even for a clean open.
-Terminal discard already permits an idempotent close.
+Artifact exit that persists pending changes.
+A clean artifact closes without writing. A dirty artifact saves first.
+If that save fails, the artifact stays open with its pending changes.
+Close after exit is idempotent. A `with` block discards instead of closing when an exception exits it.
 
 **Flag**:
 A typed behavior switch on a symbol or footprint, such as DNP or exclusion from BOM, board, or simulation.

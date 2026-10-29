@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 from os import PathLike
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 from . import _symbol_parse, _symbol_persist
 from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
@@ -66,7 +68,6 @@ class SymbolLibrary:
         self._source = _symbol_parse.read_source(raw)
         self._baseline = raw
         self._closed = False
-        self._close_authorized = False
         self._symbols = tuple(Symbol(self, data) for data in self._source.symbols)
 
     def _accept_source(
@@ -97,7 +98,6 @@ class SymbolLibrary:
             handle._alive = False
         self._source = updated
         self._symbols = tuple(handles)
-        self._close_authorized = False
 
     def _check_open(self) -> None:
         if self._closed:
@@ -275,19 +275,17 @@ class SymbolLibrary:
 
         Changed output first captures native ``Foo.bak`` backup bytes, then
         replaces the regular singly linked source atomically. Exact no-op saves
-        replace neither file. Success authorizes close only for this state.
-        This is not a two-file transaction or coordination with KiCad or
-        another writer: a final check/replace race remains possible. OS errors
-        propagate; unsuccessful saves retain edits in memory for inspection/retry.
+        replace neither file. This is not a two-file transaction or coordination
+        with KiCad or another writer: a final check/replace race remains
+        possible. OS errors propagate; unsuccessful saves retain edits in memory
+        for inspection/retry.
         """
         self._check_open()
-        self._close_authorized = False
         if self.version != _symbol_parse.WRITE_VERSION:
             raise UnsupportedOperationError(f"Format {self.version} is read-only")
         output = self.to_bytes()
         _symbol_persist.save_library_source(self._path, self._baseline, output)
         self._baseline = output
-        self._close_authorized = True
 
     def save_as(self, path: str | PathLike[str]) -> None:
         """Write one new file and rebind only after success, leaving source intact.
@@ -297,7 +295,6 @@ class SymbolLibrary:
         source-byte conflict check. A new destination has no prior-file backup.
         """
         self._check_open()
-        self._close_authorized = False
         if self.version != _symbol_parse.WRITE_VERSION:
             raise UnsupportedOperationError(f"Format {self.version} is read-only")
         destination = Path(path).expanduser().absolute()
@@ -306,7 +303,6 @@ class SymbolLibrary:
         _symbol_persist.save_new_source(destination, output, mode=info.st_mode & 0o7777)
         self._path = destination
         self._baseline = output
-        self._close_authorized = True
 
     def discard(self) -> None:
         """Exit without writing and invalidate editable handles; never reload or reset."""
@@ -317,9 +313,32 @@ class SymbolLibrary:
             symbol._alive = False
 
     def close(self) -> None:
-        """Exit without writing after a successful current save or terminal discard."""
+        """Exit, saving first only when there are pending changes.
+
+        A clean library closes without writing. A dirty library runs
+        :meth:`save`. If that save fails, the error propagates and the library
+        stays open with its pending changes, so the caller can retry,
+        ``save_as`` elsewhere, or :meth:`discard`. Close is idempotent.
+        """
         if self._closed:
             return
-        if not self._close_authorized:
-            raise LibraryLifecycleError("Save, save as, or discard before close")
+        if self.is_modified:
+            self.save()
         self.discard()
+
+    def __enter__(self) -> Self:
+        """Use the open library as a context manager."""
+        self._check_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close on normal exit; discard without writing when an exception exits."""
+        if exc_type is None:
+            self.close()
+        else:
+            self.discard()

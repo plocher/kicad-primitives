@@ -62,10 +62,48 @@ class ProjectLifecycleTests(unittest.TestCase):
         """Return the created Project snapshots, not arbitrary ZIP files."""
         return tuple(sorted((self.root / "board-backups").glob("board-*.zip")))
 
-    def test_clean_project_save_captures_full_file_set_and_settles_close(self) -> None:
+    def test_clean_open_close_writes_nothing_and_dirty_close_saves(self) -> None:
+        before = {
+            p.name: (p.read_bytes(), p.stat().st_ino) for p in (self.pro, self.sch)
+        }
+        clean = Project.open(self.pro)
+        clean.schematic().symbol("R1").attribute("Value")
+        clean.close(kicad_cli=self.root / "must-not-run")
+        self.assertTrue(clean.is_closed)
+        self.assertFalse(self.archives())
+        for name, (raw, inode) in before.items():
+            self.assertEqual(
+                ((self.root / name).read_bytes(), (self.root / name).stat().st_ino),
+                (raw, inode),
+            )
         project = Project.open(self.pro)
-        with self.assertRaises(RuntimeError):
-            project.close()
+        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.close(kicad_cli=self.verifier())
+        self.assertTrue(project.is_closed)
+        self.assertEqual(self.sch.read_bytes(), SOURCE.replace(b'"10K"', b'"22K"'))
+        self.assertEqual(len(self.archives()), 1)
+
+    def test_with_block_saves_on_normal_exit_and_discards_on_exception(
+        self,
+    ) -> None:
+        with (
+            patch.dict(os.environ, {"KICAD_CLI": str(self.verifier())}),
+            Project.open(self.pro) as project,
+        ):
+            project.schematic().symbol("R1").set_attribute("Value", "22K")
+        self.assertTrue(project.is_closed)
+        saved = SOURCE.replace(b'"10K"', b'"22K"')
+        self.assertEqual(self.sch.read_bytes(), saved)
+        self.assertEqual(len(self.archives()), 1)
+        with self.assertRaises(KeyError), Project.open(self.pro) as project:
+            project.schematic().symbol("R1").set_attribute("Value", "33K")
+            raise KeyError("client failure")
+        self.assertTrue(project.is_closed)
+        self.assertEqual(self.sch.read_bytes(), saved)
+        self.assertEqual(len(self.archives()), 1)
+
+    def test_clean_project_save_captures_full_file_set(self) -> None:
+        project = Project.open(self.pro)
         before = {
             p.name: (p.read_bytes(), p.stat().st_ino) for p in (self.pro, self.sch)
         }
@@ -79,8 +117,9 @@ class ProjectLifecycleTests(unittest.TestCase):
                 self.assertEqual((self.root / name).stat().st_ino, inode)
         self.assertFalse(project.is_modified)
         project.schematic().symbol("R1").set_attribute("Value", "10K")
-        project.close()
+        project.close(kicad_cli=self.root / "must-not-run")
         self.assertTrue(project.is_closed)
+        self.assertEqual(len(self.archives()), 1)
 
     def test_discard_exits_without_io_and_rejects_owned_operational_handles(
         self,
@@ -198,8 +237,6 @@ class ProjectLifecycleTests(unittest.TestCase):
         pcb.write_bytes(pcb.read_bytes() + b"\n")
         with self.assertRaises(SchematicConflictError):
             project.save()
-        with self.assertRaises(RuntimeError):
-            project.close()
         pcb.unlink()
         with self.assertRaises(SchematicConflictError):
             project.save()
@@ -222,7 +259,7 @@ class ProjectLifecycleTests(unittest.TestCase):
             project.save()
         self.assertFalse(self.archives())
 
-    def test_prebuilt_zip_failure_does_not_write_source_or_authorize_close(
+    def test_prebuilt_zip_failure_does_not_write_source(
         self,
     ) -> None:
         project = Project.open(self.pro)
@@ -238,10 +275,10 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(self.sch.read_bytes(), SOURCE)
         self.assertTrue(schematic.is_modified)
         self.assertFalse(self.archives())
-        with self.assertRaises(RuntimeError):
-            project.close()
+        project.discard()
+        self.assertEqual(self.sch.read_bytes(), SOURCE)
 
-    def test_publication_failure_retains_saved_baseline_and_clean_retry_makes_history(
+    def test_publication_failure_retains_saved_baseline_and_close_retries_history(
         self,
     ) -> None:
         project = Project.open(self.pro)
@@ -258,12 +295,10 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(self.sch.read_bytes(), SOURCE.replace(b'"10K"', b'"22K"'))
         self.assertFalse(schematic.is_modified)
         self.assertFalse(self.archives())
-        with self.assertRaises(RuntimeError):
-            project.close()
-        project.save(kicad_cli=self.root / "not-needed")
+        project.close(kicad_cli=self.root / "not-needed")
+        self.assertTrue(project.is_closed)
         with zipfile.ZipFile(self.archives()[0]) as archive:
             self.assertEqual(archive.read(self.sch.name), self.sch.read_bytes())
-        project.close()
 
     def test_partial_source_failure_advances_only_successful_baselines_and_has_no_archive(
         self,
@@ -291,14 +326,12 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertTrue(child.is_modified)
         self.assertEqual(child_path.read_bytes(), child_original)
         self.assertFalse(self.archives())
-        with self.assertRaises(RuntimeError):
-            project.close()
         project.save(kicad_cli=self.verifier())
         self.assertFalse(project.is_modified)
         with zipfile.ZipFile(self.archives()[0]) as archive:
             self.assertEqual(archive.read("sub/child.kicad_sch"), child.to_bytes())
 
-    def test_document_save_archives_selected_output_not_pending_sibling_and_does_not_settle_root(
+    def test_document_save_archives_selected_output_not_pending_sibling(
         self,
     ) -> None:
         project, child_path = self.hierarchy()
@@ -314,24 +347,26 @@ class ProjectLifecycleTests(unittest.TestCase):
             self.assertEqual(archive.read("sub/child.kicad_sch"), child_original)
         self.assertTrue(child.is_modified)
         self.assertTrue(project.is_modified)
-        with self.assertRaises(RuntimeError):
-            project.close()
+        project.discard()
+        self.assertEqual(child_path.read_bytes(), child_original)
 
-    def test_failed_clean_save_and_later_real_edits_revoke_prior_decision(self) -> None:
+    def test_exact_revert_and_failed_clean_save_still_close_without_writing(
+        self,
+    ) -> None:
         project = Project.open(self.pro)
-        project.save()
         schematic = project.schematic()
         schematic.symbol("R1").set_attribute("Value", "22K")
         schematic.symbol("R1").set_attribute("Value", "10K")
         self.assertFalse(project.is_modified)
-        with self.assertRaises(RuntimeError):
-            project.close()
-        project.save()
         self.pro.write_bytes(self.pro.read_bytes() + b"\n")
+        foreign = self.pro.read_bytes()
         with self.assertRaises(SchematicConflictError):
             project.save()
-        with self.assertRaises(RuntimeError):
-            project.close()
+        project.close(kicad_cli=self.root / "must-not-run")
+        self.assertTrue(project.is_closed)
+        self.assertEqual(self.pro.read_bytes(), foreign)
+        self.assertEqual(self.sch.read_bytes(), SOURCE)
+        self.assertFalse(self.archives())
 
     def test_unreadable_linked_or_unsafe_archive_member_fails_before_original_replacement(
         self,
@@ -448,8 +483,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(self.sch.read_bytes(), SOURCE)
         self.assertTrue(project.is_modified)
         self.assertFalse(self.archives())
-        with self.assertRaises(RuntimeError):
-            project.close()
+        project.discard()
 
     def test_later_pending_edit_during_source_write_keeps_frozen_baseline_and_archive(
         self,
@@ -482,8 +516,6 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertTrue(schematic.is_modified)
         with zipfile.ZipFile(self.archives()[0]) as archive:
             self.assertEqual(archive.read(self.sch.name), frozen)
-        with self.assertRaises(RuntimeError):
-            project.close()
         project.save(kicad_cli=self.verifier())
         self.assertFalse(project.is_modified)
         self.assertEqual(self.sch.read_bytes(), frozen.replace(b'"22K"', b'"33K"'))
@@ -515,7 +547,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertTrue(project.is_modified)
         self.assertFalse(self.archives())
 
-    def test_retention_failure_leaves_complete_new_archive_but_no_close_authorization(
+    def test_retention_failure_leaves_complete_new_archive_and_close_retries_history(
         self,
     ) -> None:
         project = Project.open(self.pro, backup_size_limit_bytes=1)
@@ -536,14 +568,12 @@ class ProjectLifecycleTests(unittest.TestCase):
             project.save(kicad_cli=self.verifier())
         self.assertEqual(len(self.archives()), 2)
         self.assertFalse(project.is_modified)
-        with self.assertRaises(RuntimeError):
-            project.close()
         for path in self.archives():
             with zipfile.ZipFile(path) as archive:
                 self.assertIsNone(archive.testzip())
-        project.save(kicad_cli=self.root / "not-needed")
+        project.close(kicad_cli=self.root / "not-needed")
+        self.assertTrue(project.is_closed)
         self.assertEqual(len(self.archives()), 1)
-        project.close()
 
     def test_identical_content_under_new_filename_is_a_distinct_complete_snapshot(
         self,
@@ -610,8 +640,8 @@ class ProjectLifecycleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     context.save()
                 self.assertEqual(pcb.read_bytes(), raw)
-                with self.assertRaises(RuntimeError):
-                    context.close()
+                context.close()
+                self.assertEqual(pcb.read_bytes(), raw)
 
     def test_terminal_project_rejects_retained_embedded_and_placed_queries(
         self,
@@ -770,9 +800,11 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertFalse(project.is_modified)
         self.assertFalse(self.archives())
         self.assertTrue(lock.exists())
-        with self.assertRaises(RuntimeError):
-            project.close()
+        with self.assertRaises(ProjectWriteBlockedError):
+            project.close(kicad_cli=self.root / "not-needed")
+        self.assertFalse(project.is_closed)
+        self.assertFalse(self.archives())
         lock.unlink()
-        project.save(kicad_cli=self.root / "not-needed")
+        project.close(kicad_cli=self.root / "not-needed")
+        self.assertTrue(project.is_closed)
         self.assertEqual(len(self.archives()), 1)
-        project.close()

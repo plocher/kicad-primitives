@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Amend ADR 0008 close semantics. Open then close never writes or fails. A dirty `close()` runs the normal save and stays open if that save fails. `discard()` stays terminal. `SymbolLibrary`, `LibraryTable`, and `Project` are context managers: normal exit closes, an exception discards. `Project.close(kicad_cli=...)` also retries ZIP history that an earlier save did not publish. Remove the save-decision bookkeeping (`docs/adr/0008-artifact-objects-and-explicit-persistence.md`, `docs/projects.md`, `docs/symbol-libraries.md`, `docs/tables.md`).
+
 - Add ADR 0006 A **Surface** sections to the Projects, Schematics, Symbol libraries, Tables, and Connectivity usage pages: supported, defined-but-failing, in-progress 1.0, and deferred post-1.0 operations. Add the section to the documentation contract's required order (#67).
 - Raise `SchematicSvgError` when two sheets map to one SVG page name. Run `Project.netlist()` and `Project.export_svgs()` with the original project directory as backend CWD, like ERC. Document temporary `Netlist.path`/`source` for project obtains, raw `SymbolText.rotation` units, the full `export_svgs` error list, and deferred live connectivity in the README (#64, #65, #66).
 

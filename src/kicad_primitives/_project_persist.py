@@ -106,8 +106,6 @@ def save_project(
 ) -> None:
     """Persist frozen selected outputs and a complete actual post-save snapshot."""
     project._check_open()
-    authorized = project._close_authorized
-    project._close_authorized = False
     generation = project._generation
     cached = tuple(project._schematics.values())
     initial_targets = cached if selected is None else selected
@@ -152,6 +150,9 @@ def save_project(
         _context(project)
         written: dict[Path, os.stat_result] = {}
         _project_backup.check_fresh(project, snapshot, written)
+        if changed:
+            # Source writes start here. Until history publishes, close must retry save.
+            project._history_pending = True
         for document in changed:
             project._check_open()
             _project_backup.check_fresh(project, snapshot, written)
@@ -172,6 +173,7 @@ def save_project(
         project.ensure_writes_allowed()
         _project_backup.publish(project, snapshot)
         _project_backup.check_fresh(project, snapshot, written)
+        project._history_pending = False
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
         if isinstance(exc, (ProjectBackupError, ProjectWriteBlockedError)):
             raise
@@ -183,6 +185,3 @@ def save_project(
         raise ProjectLifecycleError(
             "A newer pending Project state was not settled by this save"
         )
-    project._close_authorized = selected is None or (
-        authorized and not project.is_modified
-    )

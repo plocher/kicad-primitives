@@ -21,7 +21,7 @@ _EMPTY_BOARD = b'(kicad_pcb (version 20260206) (generator "pcbnew") (generator_v
 
 
 def main() -> None:
-    """Prove current save decisions and exact post-save snapshot members natively."""
+    """Prove clean close, explicit saves, and exact post-save snapshot members natively."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kicad-cli", type=Path)
     args = parser.parse_args()
@@ -58,15 +58,15 @@ def main() -> None:
         prl = pro.with_suffix(".kicad_prl")
         assert prl.is_file()
         originals[prl] = (prl.read_bytes(), prl.stat().st_ino)
+        probe = Project.open(pro)
+        probe.schematic().symbol("R3")
+        probe.close(kicad_cli=root / "must-not-run")
+        assert probe.is_closed
+        assert {p: (p.read_bytes(), p.stat().st_ino) for p in originals} == originals
+        assert not (root / "cpNode-IOX-backups").exists()
         project = Project.open(pro)
         schematic = project.schematic()
         placed = schematic.symbol("R3")
-        try:
-            project.close()
-        except ProjectLifecycleError:
-            pass
-        else:
-            raise AssertionError("A clean Project closed without an explicit decision")
         placed.set_attribute("Value", "22K")
         pending = schematic.to_bytes()
         for path in (pro, sch, pcb):
@@ -121,9 +121,9 @@ def main() -> None:
         assert len(tuple(archives[0].parent.glob("*.zip"))) == 2
         clean.close()
         print(
-            "Native Project lifecycle passed: verified schematic save, native PCB acceptance, "
-            "native peer-lock controls, exact full-file-set ZIP, unchanged JSON/PCB/no-op inodes, "
-            "stable/dead handles, terminal discard."
+            "Native Project lifecycle passed: clean close without writes, verified schematic "
+            "save, native PCB acceptance, native peer-lock controls, exact full-file-set ZIP, "
+            "unchanged JSON/PCB/no-op inodes, stable/dead handles, terminal discard."
         )
 
 

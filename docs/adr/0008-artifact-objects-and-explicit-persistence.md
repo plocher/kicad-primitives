@@ -3,6 +3,7 @@
 Date: 2026-10-26
 
 Status: Architectural direction and independent-artifact lifecycle accepted by the owner on 2026-10-26.
+Close and context-manager semantics amended by the owner on 2026-10-29 (see [Amendment: close persists pending changes](#amendment-2026-10-29-close-persists-pending-changes)).
 
 Related work: [Schematic symbol attribute editing](https://github.com/plocher/kicad-primitives/issues/36).
 Alignment: [Editable library and table nouns with explicit lifecycle](https://github.com/plocher/kicad-primitives/issues/54).
@@ -31,7 +32,7 @@ This decision makes that distinction explicit.
 - Keep edits in memory until the client explicitly requests persistence.
 - Let clients inspect whether their work changed an artifact or its owned content.
 - Support a lifecycle in which clients choose save, save as, or discard, then close.
-- Do not silently save on mutation or close.
+- Do not silently save on mutation. (The 2026-10-29 amendment makes close persist pending changes.)
 - Use the locked vocabulary in `CONTEXT.md`.
 - Do not retain misleading pre-1.0 interfaces solely for compatibility when there are no external consumers.
 
@@ -137,13 +138,13 @@ They share meanings, not a generic session, workflow, or transaction base class.
 
 - `save()` explicitly persists current content at the current destination.
 - `save_as(path)` explicitly persists one new file and rebinds this artifact only after success.
-- `close()` initially errors, even for a clean artifact that has never been edited.
-- Successful save/save-as authorizes close only for the current state.
-- Later edits invalidate that decision. Exact no-op edits do not.
-- Every failed save/save-as invalidates the decision, including a failed clean preflight after a previous success.
+- `close()` on a clean artifact writes nothing and ends it. Open then close is always a no-op.
+- `close()` on an artifact with pending changes runs `save()` first, then ends it.
+- If that save fails, `close()` raises the save error and the artifact stays open with its pending changes.
 - `discard()` is terminal exit without writing. It is not rollback, reload, or a baseline reset for continued use.
+- A `with` block closes on normal exit and discards on an exception.
 - Close and discard invalidate owned editable handles. A later close is idempotent.
-- No mutation, close, discard, or finalizer implicitly persists.
+- No mutation, discard, or finalizer implicitly persists.
 
 Save-as refuses an existing destination, including a symlink or racing file.
 It requires existing, non-symlink, writable destination parents and does not create parent directories.
@@ -187,9 +188,11 @@ Explicit host assertions on a guard helper do not become unchecked-save tokens.
 No lock acquisition or stale-lock deletion is introduced.
 Unchanged source bytes/inodes need no replacement.
 Project settings and PCB content remain byte-preserved, without introducing a settings writer or board editor.
-Project close/discard follows the accepted terminal lifecycle above.
-Document-only saves do not establish a complete Project save decision.
-Actual later edits and failed saves revoke it. Frozen outputs and generation checks prevent newer pending state from being silently settled.
+Project close/discard follows the lifecycle above.
+`Project.close(kicad_cli=...)` runs a full `Project.save()` when any owned document has pending changes.
+It also saves when an earlier save wrote source files but did not publish ZIP history.
+That retry keeps history complete without blocking a clean close.
+Frozen outputs and generation checks prevent newer pending state from being silently settled.
 
 Native archive evidence is pinned to KiCad 10.0.1 in #55.
 Use `<name>-backups/<name>-YYYY-MM-DD_HHMMSS.zip` with enabled history and the native 100 MiB default budget.
@@ -210,9 +213,54 @@ An oversized sole latest archive makes the size budget soft.
 
 These are bounded optimistic safeguards, not a crash-atomic Project transaction.
 Advance each source baseline only after its file succeeds.
-Later source/publication/retention failure can leave earlier files saved but must not authorize close.
-A subsequent clean save retries complete history publication.
+Later source/publication/retention failure can leave earlier files saved with history incomplete.
+A subsequent save, or `close()`, retries complete history publication.
 Usage details and failure limits are in [projects.md](../projects.md).
+
+## Amendment 2026-10-29: close persists pending changes
+
+### Problem
+The accepted rule made `close()` fail until a successful save, even for a clean artifact that was never edited.
+A read-only use, such as open a project, make a BOM, and close, therefore needed a save or a discard.
+The owner rejected this. It repeats the defect of KiCad's embedded API, where read-only actions mark a file dirty and write it.
+The owner did not intend that rule. It entered the ADR without review.
+
+A close that refuses is also unusable in a `finally:` block or a `with` block.
+Cleanup code must end the artifact. It cannot leave it open.
+
+### Constraints
+- Open then close must not write and must not fail.
+- Close must always be able to end an artifact. It cannot refuse.
+- Error paths must not write half-finished edits by accident.
+- A failed save must not lose pending edits.
+- Keep `discard()` terminal and keep the existing save safeguards.
+
+### Candidates
+A. Close on dirty content raises until save or discard. Clean close is a no-op.
+This is the smallest change. A `finally:` close on dirty content raises, and the edits are lost anyway.
+B. Close on dirty content discards. This matches a database rollback.
+A normal script that forgets `save()` loses its work without notice.
+C. Close on dirty content saves. A `with` block saves on normal exit and discards on an exception.
+Scripts persist their work by default. Error paths in a `with` block write nothing.
+A bare `try`/`finally` close saves, so error handlers that want no write call `discard()`, or `save_as()` for a lifeboat copy, first.
+
+### Decision
+Choose C. The owner selected it.
+- `close()` on clean content writes nothing.
+- `close()` on dirty content runs the artifact's normal `save()`, with all its safeguards.
+- If that save fails, `close()` raises and the artifact stays open with its pending changes. The caller can retry, `save_as()`, or `discard()`.
+- `discard()` stays terminal.
+- `__exit__` closes on normal exit and discards when an exception is active.
+- `Project.close(kicad_cli=...)` passes the backend path to its save. A `with` block uses ADR 0007 discovery.
+
+This removes the save-decision bookkeeping. `is_modified` and incomplete Project history are the only inputs to close.
+It replaces the earlier constraint "Do not silently save on mutation or close" for close only.
+Mutations, discard, and finalizers still never write.
+
+### Consequences
+- `SymbolLibrary`, `LibraryTable`, and `Project` follow this rule. New artifacts, such as footprint libraries, use it too.
+- A dirty `Project.close()` can run `kicad-cli` for electrical verification and publishes a ZIP snapshot.
+- Tests that expected a clean close to fail now expect a no-op close.
 
 ## Current gaps and consequences
 

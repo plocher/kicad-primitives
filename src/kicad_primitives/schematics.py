@@ -483,7 +483,6 @@ class Schematic:
             object.__setattr__(old, "footprint", new.footprint)
         object.__setattr__(self, "_document", updated._document)
         if changed and self._project is not None:
-            self._project._close_authorized = False
             self._project._generation += 1
 
     def symbol(self, reference: str) -> PlacedSymbol:

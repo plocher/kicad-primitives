@@ -244,7 +244,6 @@ Other documents remain pending and contribute their saved baselines.
 `project.save()` stages all changed owned documents together.
 Both operations publish exact post-save Project ZIP history after their selected source files succeed.
 Unselected pending sibling source is not archived as if saved.
-Only a complete successful `Project.save()` establishes the root close decision.
 The package checks all inputs again after verification and before persistence.
 Known preflight failures stop before any original file changes.
 Files then save separately. A later I/O failure can leave earlier files saved.
@@ -254,11 +253,10 @@ The latest explicit restore selection survives an exact old-baseline revert duri
 If that save advances the baseline, retry proves the requested reverse correction against the bytes actually persisted.
 The final check/replace race remains possible.
 
-No mutation, finalizer, close, or discard action implicitly saves.
+No mutation, finalizer, or discard action saves.
 Use `project.discard()` for terminal zero-write exit, not reload or rollback.
-`project.close()` requires a current complete save decision even for a clean open.
+`project.close()` writes nothing when clean and runs a full `project.save()` when dirty.
 Owned document/placed/embedded operations fail after Project exit.
-Later edits and failed saves revoke the decision; exact no-op edits preserve it.
 Bounded Project save-as retains these document/placed/embedded identities while rebinding their paths after complete success.
 ZIP history, budgets, and partial-I/O limits are defined in [projects.md](projects.md#zip-snapshots).
 
@@ -436,7 +434,7 @@ A nonzero exit, no SVG output, or an omitted proved sheet raises `SchematicSvgEr
   A restore intent captured before parent exit remains valid and does not reread that parent at save.
 - `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
 - `ProjectWriteBlockedError`: the project write guard blocks persistence.
-- `ProjectLifecycleError`: the owning Project exited or lacks a current complete save decision.
+- `ProjectLifecycleError`: the owning Project exited, or newer pending state changed during a save.
 - `ProjectBackupError`: snapshot/save-history failure; some source files may already have been persisted.
 - `ErcAcquisitionError`: ERC execution or report intake failed, not a design finding.
 - `ErcContextError`: the original library context cannot be staged faithfully.

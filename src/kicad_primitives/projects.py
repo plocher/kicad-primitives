@@ -12,8 +12,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from os import PathLike
 from pathlib import Path
-from types import MappingProxyType
-from typing import TYPE_CHECKING
+from types import MappingProxyType, TracebackType
+from typing import TYPE_CHECKING, Self
 
 from ._snapshot_types import ProjectSnapshot, SnapshotDocument
 
@@ -43,7 +43,7 @@ class ProjectWriteBlockedError(PermissionError):
 
 
 class ProjectLifecycleError(RuntimeError):
-    """The Project is closed or lacks a current complete save decision."""
+    """The Project is closed, or its pending state changed during a save."""
 
 
 class ProjectBackupError(OSError):
@@ -79,7 +79,8 @@ class Project:
             raise ValueError("backup_size_limit_bytes cannot be negative")
         self._backup_size_limit_bytes = backup_size_limit_bytes
         self._closed = False
-        self._close_authorized = False
+        # True after source writes whose ZIP history has not yet published.
+        self._history_pending = False
         self._generation = 0
 
     def _check_open(self) -> None:
@@ -100,13 +101,36 @@ class Project:
         """Terminally abandon the Project without writing or resetting baselines."""
         self._closed = True
 
-    def close(self) -> None:
-        """Exit without writing after a complete current save decision or discard."""
+    def close(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
+        """Exit, saving first only when there is something to persist.
+
+        A clean Project closes without writing. Pending changes, or source
+        writes from an earlier save whose ZIP history did not publish, run
+        :meth:`save` with *kicad_cli*. If that save fails, the error propagates
+        and the Project stays open with its pending state. Close is idempotent.
+        """
         if self._closed:
             return
-        if not self._close_authorized:
-            raise ProjectLifecycleError("Save, save as, or discard before close")
+        if self.is_modified or self._history_pending:
+            self.save(kicad_cli=kicad_cli)
         self.discard()
+
+    def __enter__(self) -> Self:
+        """Use the open Project as a context manager."""
+        self._check_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close on normal exit; discard without writing when an exception exits."""
+        if exc_type is None:
+            self.close()
+        else:
+            self.discard()
 
     @property
     def is_modified(self) -> bool:
@@ -170,7 +194,7 @@ class Project:
         and optional unchanged raw PCB. Verify changed schematic electrical state.
         Preserve unchanged source bytes/inodes. Publish ZIP history after source
         writes, even for a clean explicit save. Later I/O/history failure may leave
-        earlier files saved but never authorizes close. No project transaction,
+        earlier files saved; a later save or close retries history. No project transaction,
         implicit persistence, autosave scheduler, or Git history is supplied.
         """
         self._check_open()

@@ -106,7 +106,7 @@ library.rename_symbol("PartCopy", "Part2")
 library.delete_symbol("Empty")
 preview = library.to_bytes()  # No disk write.
 library.save()               # Explicit write to the opened path.
-library.close()              # No write. Requires a successful current decision.
+library.close()              # Clean now, so no write. A dirty close saves first.
 other.discard()              # Abandon the unsaved Other import and exit.
 ```
 
@@ -178,20 +178,27 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 
 ## Persistence and errors
 
-### Explicit decisions and terminal exit
+### Close, discard, and `with`
 `path` reports the artifact's current destination. `is_modified` compares pending bytes with the successful open/save baseline.
-`save()` and `save_as(path)` settle the current state only after successful persistence.
-`close()` initially errors even for a clean, never-edited library.
-A successful save/save-as authorizes close for that current state.
-Later edits invalidate the decision. Exact no-op edits do not.
-Every failed save/save-as clears the decision, including a failed clean preflight after a previous success.
+`save()` and `save_as(path)` advance that baseline only after successful persistence.
+`close()` on a clean library writes nothing. Open then close never writes and never fails.
+`close()` on a dirty library runs `save()`, with its backup and conflict safeguards, then exits.
+If that save fails, `close()` raises the save error. The library stays open with its pending changes.
+Then retry, `save_as()` elsewhere, or `discard()`.
 
 `discard()` is terminal exit without writing. It is not rollback, reload, or a baseline reset for continued editing.
 Close and discard invalidate owned Symbol/Body/Pin/Rectangle/Text handles.
 Operational access then raises an explicit lifecycle or stale-handle error.
 `path`, `is_closed`, and previously captured immutable inspection values remain diagnostic data.
-Close is idempotent after terminal exit. There is no implicit persistence or finalizer.
+Close is idempotent after exit. Mutations, discard, and finalizers never write.
 Open a new artifact to start another editing lifetime.
+
+```python
+with SymbolLibrary.open("Example.kicad_sym") as library:
+    library.symbol("Part").set_attribute("Description", "New")
+# Normal exit: close() saved the change.
+# An exception inside the block: discard(), nothing written.
+```
 
 ### Same-location save and native backup
 
@@ -231,7 +238,7 @@ No parent directories are created. Use a canonical destination directory.
 
 Save-as can fork a read-only library or readable linked source because it does not overwrite that source.
 It still checks the captured source-byte baseline and rejects external changes or deletion without refreshing pending content.
-A failed save-as retains the prior path, baseline, and pending changes. It does not authorize close.
+A failed save-as retains the prior path, baseline, and pending changes.
 A new destination needs no backup. A subsequent changed `save()` there creates its own `.bak`.
 Project same-location ZIP history is separate from this single-file operation.
 Bounded Project save-as is a separate operation; Git `.history` support remains deferred.
@@ -243,7 +250,7 @@ Errors exported from `kicad_primitives.symbols`:
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
 - `StaleSymbolError`: an editable symbol, body, pin, rectangle, or text no longer belongs to live source.
-- `LibraryLifecycleError`: closed library or missing current successful close decision.
+- `LibraryLifecycleError`: closed or discarded library.
 - `KicadCliNotFoundError`: `export_svgs` could not resolve `kicad-cli`.
 - `SymbolLibraryError`: shared base for the package errors.
 
