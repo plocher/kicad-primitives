@@ -124,22 +124,28 @@ A clean close is a no-op for both camps (ADR 0008 as amended).
 Each step is a public primitive:
 
 - `validate()` checks that in-memory content is well formed, matches its writable format, and can be written to its destination. It raises with specifics. It does not run KiCad or compare netlists. A client can validate without writing, which is what a dry run needs.
-- `save()` writes pending bytes. It runs `validate()` first, because an invalid artifact must not reach disk. It does nothing else.
-- Domain editors contribute only their content: pending bytes per file.
+- `save()` writes the artifact's pending bytes (`to_bytes()`). It runs `validate()` first, because an invalid artifact must not reach disk. It does nothing else.
+- `is_modified` is a flag. Each setter sets it after a real change; an equal-value set is a no-op and leaves it alone. The artifact does not keep a copy of the original bytes to compare against.
 
-### One file writer
+### Source fingerprint and the single-file writer
 
-One private module replaces per-artifact save code.
-It takes a set of (path, old bytes, new bytes), where no old bytes means create and no new bytes means delete.
-It checks each file, stages every write to a same-directory temporary file, renames in order, and deletes last.
-Temporary names never end in a KiCad extension, so KiCad cannot load them.
-This is the ordinary rule for replacing files safely, not policy. The existing single-file save is the one-file case of it.
+`open()` captures a fingerprint of the file it read (mtime, size, and content hash; the mix is an implementation detail).
+The artifact holds it privately. The caller never sees it.
+At write time the artifact passes the fingerprint to the private writer, which refuses when the file on disk no longer matches.
+After a successful write the artifact refreshes the fingerprint from the file it wrote.
+A native backup such as the symbol `.bak` copies the file on disk before replacement. It needs no in-memory original.
 
-After staging, only a concurrent writer or a system failure can stop the commit.
-Each rename is atomic, so every file is either old or new, never partial.
-The error names the files that did not commit, baselines advance only for committed files, and `save()` again finishes the rest.
-There is no rollback layer. For independent files, such as a `.pretty` library, this is low probability, low impact, and easy to repair.
-Multi-file documents that reference each other, such as a schematic hierarchy, are assessed in the composite-split ticket.
+The writer stages to a same-directory temporary file whose name never ends in a KiCad extension, flushes, then renames atomically.
+The existing single-file save already does this. It becomes the shared writer for every single-file artifact.
+A multi-file writer is not needed until a document set that references itself, such as a schematic hierarchy, is split out of `Project.save()`. That is assessed in the composite-split ticket.
+
+### Footprint libraries are two levels
+
+A `.pretty` library is a directory of independent `.kicad_mod` files, not one file.
+
+- `FootprintLibrary` is the directory. Opening it lists footprint names and reads no footprint content. It opens a footprint by name, and returns the same object for the same name while that footprint is open. It has no pending state, no `save()`, and no `is_modified`.
+- `Footprint` is one file with the full lifecycle: open, read, modify, validate, write, close.
+- `delete(name)` and `rename(old, new)` are directory operations and take effect at once. They are not content edits. Rename follows KiCad: write under the new name, update the internal name and a Value that equalled the old name, delete the old file. Delete invalidates an open footprint handle; rename rebinds its path.
 
 ### Consequences for existing operations
 
@@ -149,14 +155,14 @@ Simple primitives that stay as they are:
 - Symbol edits: attributes, pins, bodies, rectangles, texts, create, rename, delete, copy, `resolve()`.
 - Table reads and edits: `libraries()`, `resolve()`, `table()`, `entries`, `add_entry`, `rename`, `set_uri`, `delete`.
 - `PlacedSymbol.set_attribute` and `delete_attribute`.
-- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with integrity checks only. The symbol `.bak` file is native save behavior. Both gain a public `validate()` and move onto the shared file writer when it exists.
+- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with integrity checks only. The symbol `.bak` file is native save behavior. Both gain a public `validate()`, a flag-based `is_modified`, and the open-captured fingerprint in place of a stored byte copy.
 - `discard()`, and `close()` per ADR 0008 as amended. Close calls only that artifact's own `save()`.
 - `Project.erc()`, `Project.netlist()`, `Project.export_svgs()`, `SymbolLibrary.export_svgs()`, `export_netlist()`, `Netlist.open()`, `connectivity_sets()`. Running KiCad is their stated purpose. Staging pending content is how they do that one job.
 
 Composite operations to split (follow-up ticket, owner grilling first). Each removed bundle becomes a named recipe:
 
 1. **`Project.save()` and `Schematic.save()`.** Split into:
-   - `validate()` and a write primitive on the shared file writer: peer-lock guard, integrity checks, staged writes, no KiCad, no ZIP;
+   - `validate()` and a write primitive: peer-lock guard, integrity checks, staged writes, no KiCad, no ZIP. Whether a hierarchy needs a multi-file writer is decided here;
    - `project.snapshot_history()` for ZIP publication and retention;
    - a recipe for the old behavior: capture netlist before edits, compare after, write, snapshot.
 2. **`Project.close()`.** After the split, a dirty close calls only the write primitive. The "unpublished history" retry is removed.
@@ -168,9 +174,24 @@ Borderline items for the owner to decide:
 - **Peer-lock checks inside write primitives.** A write while KiCad holds the file can lose the user's work, so this proposal treats the check as integrity. `ensure_writes_allowed(dry_run=..., inside_kicad=...)` is a policy helper. It could become a plain query.
 - **Process-wide open registry (#39).** The owner asked for it. It keeps one live object per file and makes no workflow decision. It passes the test.
 
+### Library-item rename and project references (follow-up)
+
+In KiCad 10.0.1, renaming a footprint in the editor touches only the library file.
+Boards keep their own copy under the old `Lib:Name`, and a later "update from library" fails with not found.
+Renaming a library nickname in the table preferences prompts to update open documents.
+
+Three primitives cover this, and a recipe chains them:
+
+1. Rename the item in the library (#39 for footprints; symbols already have `rename_symbol`).
+2. Find every placement that references `Lib:Old` across a project's schematics and board (schematic side partly exists; board side belongs with #34).
+3. Rewrite those references to `Lib:New` on each placement (a `lib_id` setter on placed symbols; placed footprints with #34).
+
+The recipe "rename library item and repoint a project" is the first named example for the recipes layer.
+The same shape applies to library nickname renames (`TableEntry.rename()` exists; the repoint primitive is the same follow-up).
+
 ### Consequences for #39
 
-- `FootprintLibrary` follows the lifecycle above. It adds the shared file writer, contributes only its pending bytes per file, and has a public `validate()`. Its `save()` does not verify or archive.
+- `FootprintLibrary` and `Footprint` follow the two-level model above. `Footprint` has a public `validate()` and writes one file through the shared single-file writer. Nothing verifies or archives.
 - `LibraryTables.find_libraries()` requires explicit roots.
 - `LibraryTables.portable_uri(path)` returns the `${VAR}` form of a path. Clients register with `add_entry(nickname, uri)`. There is no `add_library` helper that chooses a nickname or URI style.
 
