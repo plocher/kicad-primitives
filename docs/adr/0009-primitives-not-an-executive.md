@@ -142,10 +142,13 @@ A multi-file writer is not needed until a document set that references itself, s
 ### Footprint libraries are two levels
 
 A `.pretty` library is a directory of independent `.kicad_mod` files, not one file.
+The model follows KiCad's footprint library editor: a cached, filterable table of contents on one side, one editor per opened footprint, edit marks, and a "save all?" decision at quit.
 
-- `FootprintLibrary` is the directory. Opening it lists footprint names and reads no footprint content. It opens a footprint by name, and returns the same object for the same name while that footprint is open. It has no pending state, no `save()`, and no `is_modified`.
-- `Footprint` is one file with the full lifecycle: open, read, modify, validate, write, close.
-- `delete(name)` and `rename(old, new)` are directory operations and take effect at once. They are not content edits. Rename follows KiCad: write under the new name, update the internal name and a Value that equalled the old name, delete the old file. Delete invalidates an open footprint handle; rename rebinds its path.
+- `FootprintLibrary` is the directory. Opening it parses every file once into `summaries`: immutable values with name, description, tags, attributes, pad counts, and path. Clients filter and sort them as plain data without opening anything. `library.refresh()` rescans the directory and re-parses changed files. Nothing refreshes by itself, as with KiCad's refresh button, so tooling that runs alongside KiCad or other tools calls `refresh()` when it wants a current view.
+- `library.footprint(name)` opens one live `Footprint` on demand and returns the same object while it is open. A live footprint holds its own open-time fingerprint; `refresh()` does not touch it, and a save over a file that changed underneath is still refused.
+- `Footprint` is one file with the full lifecycle: open, read, modify, validate, write, close. `footprint.is_modified` is its edit mark. `library.is_modified` is true when any open footprint is modified. Save clears the marks.
+- `create`, `copy`, `delete(name)`, and `rename(old, new)` are directory operations and take effect at once. They are not content edits. Rename follows KiCad: write under the new name, update the internal name and a Value that equalled the old name, delete the old file. Delete invalidates an open footprint handle; rename rebinds its path.
+- The library has nothing of its own to write. Its close is a decision about its open footprints, chosen once at open: `FootprintLibrary.open(path, on_close="save")`. `save` (default, the owner's choice) saves every modified open footprint, then closes all of them, like "quit, save all" and like dirty close on every other artifact. `discard` throws open edits away. `raise` refuses while any footprint is modified and names them, so the client decides per footprint. A library `with` block applies the flag on normal exit and discards on an exception.
 
 ### Consequences for existing operations
 
@@ -191,7 +194,7 @@ The same shape applies to library nickname renames (`TableEntry.rename()` exists
 
 ### Consequences for #39
 
-- `FootprintLibrary` and `Footprint` follow the two-level model above. `Footprint` has a public `validate()` and writes one file through the shared single-file writer. Nothing verifies or archives.
+- `FootprintLibrary` and `Footprint` follow the two-level model above: cached `summaries` with explicit `refresh()`, on-demand live footprints, edit marks, and the `on_close` flag with `save` as default. `Footprint` has a public `validate()` and writes one file through the shared single-file writer. Nothing verifies or archives.
 - `LibraryTables.find_libraries()` requires explicit roots.
 - `LibraryTables.portable_uri(path)` returns the `${VAR}` form of a path. Clients register with `add_entry(nickname, uri)`. There is no `add_library` helper that chooses a nickname or URI style.
 
