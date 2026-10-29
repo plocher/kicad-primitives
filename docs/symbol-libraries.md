@@ -3,7 +3,7 @@
 ## Scope
 
 [ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) sets the package-wide artifact-object editing direction.
-The library owns live editable Symbol, SymbolBody, and SymbolPin objects.
+The library owns live editable Symbol, SymbolBody, SymbolPin, SymbolRectangle, and SymbolText objects.
 Edits change pending source. Only an explicit `save()` writes that source.
 
 `kicad_primitives.symbols.SymbolLibrary` opens one explicit `.kicad_sym` path.
@@ -40,11 +40,12 @@ for body in effective.bodies:
 ```
 
 `SymbolAttribute` holds one named value and its declaration provenance.
-Symbol, SymbolBody, and SymbolPin are stable source-backed handles.
-Attributes, rectangles, and body texts are immutable inspection values.
+Symbol, SymbolBody, SymbolPin, SymbolRectangle, and SymbolText are stable source-backed handles.
+Attributes are immutable inspection values.
+`resolve()` bodies hold immutable `RectangleDefinition` and `TextDefinition` values.
 KiCad stores attributes in `(property …)` nodes.
 A live handle shows current values after edits and symbol renames.
-A deleted symbol or pin handle raises `StaleSymbolError`, even after recreation under the same name or number.
+A deleted symbol, pin, rectangle, or text handle raises `StaleSymbolError`, even after recreation under the same name or number.
 The read-only `SymbolDefinition` from `resolve()` is an immutable inheritance view, not an editing target.
 Stroke/fill, fonts, unrelated metadata, and unrecognized nodes remain in the source without a public parser escape hatch.
 The service exposes attribute visibility/autoplace/position, pin position/orientation/length/shape/hidden state, and minimal rectangle/text geometry—not a full graphics or text-effects model.
@@ -84,8 +85,11 @@ pin = body.add_pin("2", "OUT", "output", x=5.08, y=0.0, rotation=180.0, length=2
 pin.set(name="Y", hidden=True)
 pin.delete()
 shared = part.ensure_body(0, 1)  # shared body, not artwork copied into every unit
-shared.add_rectangle(start=(-2.54, 2.54), end=(2.54, -2.54))
-shared.add_text("LABEL", x=0.0, y=3.81)
+box = shared.add_rectangle(start=(-2.54, 2.54), end=(2.54, -2.54))
+label = shared.add_text("LABEL", x=0.0, y=3.81)
+box.set(end=(5.08, -2.54))            # only the changed atoms
+label.set(text="NEW", rotation=90.0)  # effects stay unchanged
+shared.texts[0].delete()              # handle becomes stale
 library.export_svgs("/tmp/symbol-svgs")  # kicad-cli inspection hook; optional kicad_cli=
 library.create_symbol("Empty")
 library.create_symbol("Child", extends="Part")
@@ -117,7 +121,16 @@ Duplicate pin numbers on the same body fail on insert; ambiguous numbers fail on
 Graphics **B anchors** (not full artwork-editor parity):
 `ensure_body` creates an empty `(unit, body_style)` body when missing (no-op when present).
 Prefer **unit 0** for shared boxes/text instead of copying the same artwork into every placed unit.
-`SymbolBody.add_rectangle` and `add_text` insert minimal geometry and text on that body.
+`SymbolBody.add_rectangle` and `add_text` insert minimal geometry and text on that body and return live handles.
+`SymbolBody.rectangles` and `texts` return live `SymbolRectangle` and `SymbolText` handles in source order.
+`SymbolRectangle.set(start=, end=)` changes start and/or end points.
+`SymbolText.set(text=, x=, y=, rotation=)` changes the text value, position, and/or rotation.
+Pass at least one argument. Equal values are lexical no-ops, even when source spelling differs (for example `-2.540`).
+Changed values replace only the target atoms. Stroke, fill, effects, and unrelated bytes stay unchanged.
+`delete()` removes one node and its leading separator, then makes that handle stale.
+These nodes have no UUID. A handle is identified by its ordinal among the same kind on its body.
+Package edits keep that ordinal stable: inserts append, and a handle delete shifts later handles of the same body.
+If the count of a kind on a body drops in any other way, all handles of that kind on that body become stale rather than guess a match.
 `export_svgs` writes SVG via private `kicad-cli` discovery (explicit path, `KICAD_CLI`, platform defaults, `PATH`); it exports current in-memory bytes through a temp file. It is an inspection hook for contact-sheet style checks, not an HTML product.
 
 Private modifiers, placement/effects on untouched attributes, other definitions, newline spelling, and unrelated bytes survive unchanged.
@@ -151,7 +164,7 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 - No unit split/restructure beyond `ensure_body` on this surface.
 - `copy_symbol_from` does not open tables or resolve nicknames; pass opened libraries.
 - `ensure_body` creates empty bodies only; it does not restructure multi-unit definitions.
-- Rectangle/text inserts are minimal geometry; stroke/fill and full text-effects authoring stay out of scope.
+- Rectangle/text authoring is minimal: start/end, text value, position, rotation, and delete. Stroke/fill, text effects, and other graphic primitives stay out of scope (post-1.0).
 - `export_svgs` needs a resolvable `kicad-cli`; pure file edits do not.
 - No public parser, span, node, or `cli` module types.
 
@@ -166,7 +179,7 @@ Later edits invalidate the decision. Exact no-op edits do not.
 Every failed save/save-as clears the decision, including a failed clean preflight after a previous success.
 
 `discard()` is terminal exit without writing. It is not rollback, reload, or a baseline reset for continued editing.
-Close and discard invalidate owned Symbol/Body/Pin handles.
+Close and discard invalidate owned Symbol/Body/Pin/Rectangle/Text handles.
 Operational access then raises an explicit lifecycle or stale-handle error.
 `path`, `is_closed`, and previously captured immutable inspection values remain diagnostic data.
 Close is idempotent after terminal exit. There is no implicit persistence or finalizer.
@@ -221,7 +234,7 @@ Errors exported from `kicad_primitives.symbols`:
 - `AmbiguousSymbolError` / `AmbiguousAttributeError` / `AmbiguousPinError`: non-unique identity.
 - `InheritanceError`: effective definition cannot be established.
 - `FileConflictError`: opened file changed or disappeared.
-- `StaleSymbolError`: an editable symbol, body, or pin no longer belongs to live source.
+- `StaleSymbolError`: an editable symbol, body, pin, rectangle, or text no longer belongs to live source.
 - `LibraryLifecycleError`: closed library or missing current successful close decision.
 - `KicadCliNotFoundError`: `export_svgs` could not resolve `kicad-cli`.
 - `SymbolLibraryError`: shared base for the package errors.
@@ -243,6 +256,7 @@ uv run mypy --strict --follow-untyped-imports src/kicad_primitives
 ```
 
 Fixture and assertion provenance is recorded in `tests/functional/test_symbol_inspection.py`.
+Rectangle and body-text adjust gates are in `tests/functional/test_symbol_graphics_adjust.py`.
 Donor pin-contract and overview library assertions move here; the consumer's HTML controls and Railroad policy do not.
 No new behave framework is introduced.
 

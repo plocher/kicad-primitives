@@ -9,7 +9,14 @@ from pathlib import Path
 
 from . import _symbol_parse, _symbol_persist
 from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
-from ._symbol_live import StaleSymbolError, Symbol, SymbolBody, SymbolPin
+from ._symbol_live import (
+    StaleSymbolError,
+    Symbol,
+    SymbolBody,
+    SymbolPin,
+    SymbolRectangle,
+    SymbolText,
+)
 from ._symbol_types import (
     AmbiguousAttributeError,
     AmbiguousPinError,
@@ -18,11 +25,11 @@ from ._symbol_types import (
     InheritanceError,
     InvalidLibraryError,
     LibraryLifecycleError,
+    RectangleDefinition,
     SymbolAttribute,
     SymbolDefinition,
     SymbolLibraryError,
-    SymbolRectangle,
-    SymbolText,
+    TextDefinition,
     UnsupportedOperationError,
 )
 
@@ -35,6 +42,7 @@ __all__ = [
     "InvalidLibraryError",
     "KicadCliNotFoundError",
     "LibraryLifecycleError",
+    "RectangleDefinition",
     "StaleSymbolError",
     "Symbol",
     "SymbolAttribute",
@@ -45,6 +53,7 @@ __all__ = [
     "SymbolPin",
     "SymbolRectangle",
     "SymbolText",
+    "TextDefinition",
     "UnsupportedOperationError",
 ]
 

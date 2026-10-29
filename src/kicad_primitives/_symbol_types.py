@@ -76,8 +76,8 @@ class PinDefinition:
 
 
 @dataclass(frozen=True)
-class SymbolRectangle:
-    """Minimal rectangle geometry on a body (stroke/fill remain opaque source)."""
+class RectangleDefinition:
+    """Immutable rectangle geometry on a body (stroke/fill remain opaque source)."""
 
     start_x: float
     start_y: float
@@ -86,8 +86,8 @@ class SymbolRectangle:
 
 
 @dataclass(frozen=True)
-class SymbolText:
-    """Minimal body text; full effects remain opaque source."""
+class TextDefinition:
+    """Immutable body text values; full effects remain opaque source."""
 
     text: str
     x: float
@@ -104,8 +104,8 @@ class BodyDefinition:
     body_style: int
     pins: tuple[PinDefinition, ...]
     origin_symbol: str
-    rectangles: tuple[SymbolRectangle, ...] = ()
-    texts: tuple[SymbolText, ...] = ()
+    rectangles: tuple[RectangleDefinition, ...] = ()
+    texts: tuple[TextDefinition, ...] = ()
 
     def pin(self, number: str) -> PinDefinition:
         """Get one pin by number within this body; raise if missing or ambiguous."""
