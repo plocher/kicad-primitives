@@ -52,18 +52,17 @@ Canonical decision: [ADR 0008](docs/adr/0008-artifact-objects-and-explicit-persi
 This package is a library of KiCad capabilities, not a client application or workflow engine.
 Clients open an artifact, select its objects, inspect or change them, inspect pending changes, and choose save, save as, or discard.
 Expose focused operations on the relevant objects, such as `PlacedSymbol.set_attribute`, rather than project-level target-selection workflows.
-Mutations change in-memory content. Persistence is explicit. Do not silently save on mutation or close.
+Mutations change in-memory content. Do not save on mutation, discard, or finalization. `close()` saves pending changes (ADR 0008 amendment).
 Clients own selection, iteration, approvals, batch reports, and application dry-run behavior.
 The library owns KiCad invariants, source preservation, change tracking, and applicable persistence safeguards.
 Project ownership supplies schematic and PCB context. It does not force every edit onto `Project`.
 `set_attribute` means create if absent, update if different, and exact no-op if equal. Reject ambiguity.
 Reference annotation and flags have their own semantics.
-Independent `SymbolLibrary` and physical `LibraryTable` artifacts implement the lifecycle defined in ADR 0008.
-`close()` errors even for a clean, never-edited open until a successful explicit save decision exists.
-Save/save-as authorizes close only for the current state. Later edits and every failed save attempt invalidate that decision.
-Exact no-op edits preserve a successful decision.
+`SymbolLibrary`, physical `LibraryTable`, and `Project` artifacts implement the lifecycle defined in ADR 0008 and its 2026-10-29 amendment.
+Open then close never writes and never fails. A clean `close()` is a no-op exit.
+A dirty `close()` runs the normal `save()`. If that save fails, close raises and the artifact stays open with its pending changes.
 `discard()` is terminal exit without writing. It invalidates owned editable handles, not a reset for continued editing.
-Close after discard is idempotent. No mutation, close, discard, or finalizer implicitly persists.
+A `with` block closes on normal exit and discards on an exception. Close after exit is idempotent.
 Single-file save-as refuses existing or unsafe destinations and rebinds only after success.
 Changed independent symbol-library overwrites require native `Foo.bak` backup behavior. Table saves do not invent a backup.
 `Project` now implements strict same-location file-set saves, post-save native-style ZIP snapshots, and terminal close/discard semantics.

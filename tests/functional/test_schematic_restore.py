@@ -499,8 +499,6 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         self.assertEqual(self.path.read_bytes(), frozen)
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
         self.assertTrue(self.project.is_modified)
-        with self.assertRaises(ProjectLifecycleError):
-            self.project.close()
         self.project.save(kicad_cli=cli)
         self.assertEqual(self.path.read_bytes(), SOURCE.encode())
         self.assertFalse(self.project.is_modified)

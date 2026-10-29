@@ -11,7 +11,7 @@ It opens schematic **content** through `schematic()` / `schematics()` (see
 Owned schematic objects edit attributes in memory.
 `Project.save()` persists the supported file set and publishes a complete post-save ZIP snapshot.
 Changed schematics require electrical verification. Unchanged JSON and raw PCB companions retain their bytes and inodes.
-`close()` requires a current successful Project save decision, even after a clean open.
+`close()` on a clean Project writes nothing. A dirty `close()` runs `save()` first.
 `discard()` terminally abandons the Project without writing.
 PCB editing models remain unsupported. Library tables: [tables.md](tables.md).
 `Project.erc()` returns full-hierarchy electrical rule reports against pending source without saving it.
@@ -22,7 +22,7 @@ The package remains pre-alpha (`0.0.0` informational).
 ## Surface (ADR 0006 A)
 
 - **Supported:** open and discover a project; hierarchical schematic files; read-only `text_variables`; owned schematic documents; `save()`, `save_as()`, `discard()`, and `close()` with ZIP history; native peer-lock guards; pending-snapshot `erc()`, `netlist()`, and `export_svgs()`.
-- **Defined, explicit failure:** save or save-as outside the bounded hierarchy and relocation profile; persistence while a native peer lock exists; close without a current successful save decision.
+- **Defined, explicit failure:** save or save-as outside the bounded hierarchy and relocation profile; persistence while a native peer lock exists, including the save that a dirty close runs.
 - **1.0 work in progress:** PCB document reads, DRC reports, and Gerber/drill export ([#34](https://github.com/plocher/kicad-primitives/issues/34)). Until then there is no PCB model on `Project`.
 - **Deferred past 1.0:** `.kicad_pro` settings editing, sheet instance paths and multi-instance sheets, variants, Git `.history` interoperability ([#58–60](https://github.com/plocher/kicad-primitives/issues/58)), and PCB editing.
 
@@ -99,18 +99,26 @@ The selected companions must remain present and fresh. A changed companion selec
 Unlike lenient path discovery, save never skips a missing sheet or silently cuts a cycle.
 External, absolute, variable-based, or linked hierarchy paths and ambiguous Sheetfile identities fail explicitly.
 
-### Current decisions and terminal exit
-`project.close()` initially raises `ProjectLifecycleError`, including for a clean, never-edited Project.
-A complete successful `project.save()` authorizes close only for that current state.
-Later actual edits revoke that decision. Exact no-op edits do not.
-Every failed save attempt revokes it, even after a previous successful clean save.
-A document-only `schematic.save()` does not establish a Project-wide decision.
+### Close, discard, and `with`
+`project.close(kicad_cli=...)` on a clean Project writes nothing, runs no KiCad process, and creates no ZIP.
+Open, read, and close is therefore safe for read-only clients such as BOM generators.
+A dirty `close()` runs the full `project.save(kicad_cli=...)`, including verification and ZIP history, then exits.
+Close also saves when an earlier save wrote source files but did not publish ZIP history.
+If that save fails, `close()` raises and the Project stays open with its pending state.
+Then fix the cause and retry, `save_as()` elsewhere, or `discard()`.
 
 `project.discard()` is terminal exit without writing, not reload or rollback.
 Owned schematic, placed-symbol, and embedded-symbol operations then reject access.
 Diagnostic paths, `is_closed`, and previously captured immutable values remain available.
-Close after terminal exit is idempotent. No mutation, discard, close, or finalizer saves implicitly.
-Newer edits during verification or file I/O remain pending and do not acquire a saved decision.
+Close after exit is idempotent. Mutations, discard, and finalizers never write.
+Newer edits during verification or file I/O remain pending and are not silently settled.
+
+```python
+with Project.open("/path/to/board") as project:
+    project.schematic().symbol("R1").set_attribute("Value", "22K")
+# Normal exit: close() saved (kicad-cli found through ADR 0007 discovery).
+# An exception inside the block: discard(), nothing written.
+```
 
 ### ZIP snapshots
 Each explicit save publishes a complete snapshot under `<name>-backups`.
@@ -153,9 +161,8 @@ Their baselines advance only after each actual successful write.
 A later source failure can leave earlier files saved, with unsaved documents still pending.
 Compression/member-read failures normally stop before source replacement because ZIP preparation comes first.
 A later publication or retention failure can leave source files saved and history incomplete.
-`ProjectBackupError` reports that failure and leaves close unauthorized.
-A subsequent clean save retries the full history step rather than silently settling the failed attempt.
-Do not infer that `is_modified == False` authorizes close.
+`ProjectBackupError` reports that failure. The Project records that history is incomplete.
+A subsequent save, or `close()`, retries the full history step rather than silently settling the failed attempt.
 Final optimistic filesystem check/publication races remain possible. Do not write concurrently with another application.
 
 Native Git-backed `.history` interoperability is deferred to research/grilling/design [#58–60](https://github.com/plocher/kicad-primitives/issues/58).
@@ -200,7 +207,6 @@ Proof retains named nets, component identity, every endpoint/type, and full expo
 Exact output bytes and the complete destination ZIP are prepared before the destination is reserved.
 Files publish with no-clobber writes; native source and destination peer locks remain enforced.
 Project/document/placed/embedded identities and path caches rebind only after all files and destination ZIP succeed.
-Later edits or failed attempts do not authorize close.
 A late I/O failure may leave an incomplete destination. The exception identifies that retained directory; the library never recursively deletes it.
 Original live identity and pending source remain available on failure.
 
@@ -272,7 +278,8 @@ It does not authorize a later filesystem save, which performs its own default na
 `dry_run=True` permits preview-only validation. There is no save force/allow-locked flag.
 Blocked saves raise `ProjectWriteBlockedError` (`PermissionError`) before unsafe persistence.
 Locks are checked again before each source replacement and before ZIP publication.
-If a new peer lock appears after an earlier file succeeded, completed baselines remain advanced and close stays unauthorized.
+If a new peer lock appears after an earlier file succeeded, completed baselines remain advanced and history stays incomplete.
+A later `close()` retries that save and raises `ProjectWriteBlockedError` while the lock remains.
 The guard does not remove the final check/write race or coordinate with another process.
 The package does not print diagnostics to stderr.
 
@@ -285,14 +292,14 @@ The package does not print diagnostics to stderr.
 - Lock guards detect actual native peer paths but do not acquire locks or coordinate processes.
 - Save-as supports the bounded ordinary internal-project profile above, not arbitrary relocation layouts.
 - ZIP history does not imply Git history or rollback APIs.
-- No mutation or close action implicitly saves.
+- No mutation, discard, or finalizer saves. A dirty `close()` saves by design.
 
 ## Errors
 
 - `InvalidProjectError`: missing project file, wrong open target, or unreadable
   project JSON.
 - `ProjectWriteBlockedError`: KiCad lock blocks non-dry-run writes outside KiCad.
-- `ProjectLifecycleError`: closed Project, missing current complete save decision, or a newer pending state that this save did not settle.
+- `ProjectLifecycleError`: closed or discarded Project, or a newer pending state that this save did not settle.
 - `ProjectBackupError`: unsafe/incomplete snapshot or save/history I/O failure. Some source writes may already have succeeded.
 - Existing schematic conflict, format, and electrical-verification errors propagate from owned-file persistence.
 - Ordinary `OSError` subclasses still apply to underlying filesystem failures.

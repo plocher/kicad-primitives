@@ -337,8 +337,8 @@ class ProjectSaveAsTests(unittest.TestCase):
                 self.assertFalse(self.destination.exists())
                 self.assertEqual(project.directory, self.source)
                 self.assertEqual(self.pro.read_bytes(), raw)
-                with self.assertRaises(ProjectLifecycleError):
-                    project.close()
+                project.close(kicad_cli=self.root / "must-not-run")
+                self.assertEqual(self.pro.read_bytes(), raw)
 
     def test_root_child_filename_collision_is_rejected_before_any_destination(
         self,
@@ -437,8 +437,8 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.assertEqual(
             (self.destination / "foreign-note").read_bytes(), b"do not remove"
         )
-        with self.assertRaises(ProjectLifecycleError):
-            project.close()
+        project.discard()
+        self.assertEqual(self.sch.read_bytes(), _SOURCE)
 
     def test_destination_link_replacement_during_zip_publication_cannot_rebind_root(
         self,
@@ -521,8 +521,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.assertEqual(placed.path, source / "issue23403.kicad_sch")
         self.assertEqual(placed.value, "LATE-PENDING-EDIT")
         self.assertTrue(project.is_modified)
-        with self.assertRaises(ProjectLifecycleError):
-            project.close()
+        project.discard()
         self.assertEqual(
             {path: (path.read_bytes(), path.stat().st_ino) for path in original},
             original,

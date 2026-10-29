@@ -42,7 +42,7 @@ class FileConflictError(SymbolLibraryError, RuntimeError):
 
 
 class LibraryLifecycleError(SymbolLibraryError, RuntimeError):
-    """A library is closed or lacks a successful current save decision."""
+    """A library or one of its handles is closed, discarded, or stale."""
 
 
 @dataclass(frozen=True)

@@ -262,7 +262,6 @@ def save_as(
 ) -> None:
     """Publish one new bounded layout, leaving originals and live identity intact on failure."""
     project._check_open()
-    project._close_authorized = False
     generation = project._generation
     if not isinstance(name, str):
         raise TypeError("new_project_name must be a filename stem")
@@ -461,7 +460,7 @@ def save_as(
         project._pcb_file = None if old_pcb is None else targets[old_pcb]
         project._pcb_baseline = None if old_pcb is None else outputs[targets[old_pcb]]
         project._schematics = {document.path: document for document in documents}
-        project._close_authorized = True
+        project._history_pending = False
     except Exception as exc:
         exc.add_note(
             f"Incomplete save-as destination retained at {destination}; no recursive cleanup was attempted"

@@ -1,4 +1,4 @@
-"""Independent symbol-library lifecycle is explicit and terminal on discard."""
+"""Independent symbol-library lifecycle: close saves pending edits; discard is terminal."""
 
 import os
 import stat
@@ -25,38 +25,66 @@ class LibraryLifecycleTests(unittest.TestCase):
         self.path.write_bytes(ORIGINAL)
         self.library = SymbolLibrary.open(self.path)
 
-    def test_clean_close_requires_save_and_exact_noop_preserves_its_decision(
-        self,
-    ) -> None:
-        with self.assertRaises(RuntimeError):
-            self.library.close()
-        self.library.save()
+    def test_clean_open_close_writes_nothing_and_is_idempotent(self) -> None:
+        inode = self.path.stat().st_ino
         self.library.symbol("A").set_attribute("Note", "old")
         self.library.symbol("A").body(1, 1).pin("1").set(name="P")
         self.library.close()
         self.library.close()
         self.assertTrue(self.library.is_closed)
         self.assertEqual(self.path.read_bytes(), ORIGINAL)
+        self.assertEqual(self.path.stat().st_ino, inode)
         self.assertFalse(self.path.with_suffix(".bak").exists())
         with self.assertRaises(RuntimeError):
             self.library.symbol("A")
 
-    def test_edits_and_failed_clean_save_revoke_previous_success(self) -> None:
-        self.library.save()
+    def test_close_saves_pending_edits_and_failed_save_keeps_library_open(
+        self,
+    ) -> None:
         symbol = self.library.symbol("A")
         symbol.set_attribute("Note", "changed")
-        with self.assertRaises(RuntimeError):
+        with (
+            patch(
+                "kicad_primitives._symbol_persist.os.replace",
+                side_effect=OSError("failed"),
+            ),
+            self.assertRaises(OSError),
+        ):
             self.library.close()
-        symbol.set_attribute("Note", "old")
-        self.assertFalse(self.library.is_modified)
-        with self.assertRaises(RuntimeError):
-            self.library.close()
-        self.library.save()
-        self.path.write_bytes(ORIGINAL.replace(b'"old"', b'"foreign"'))
+        self.assertFalse(self.library.is_closed)
+        self.assertTrue(self.library.is_modified)
+        self.assertEqual(self.path.read_bytes(), ORIGINAL)
+        self.library.close()
+        self.assertTrue(self.library.is_closed)
+        self.assertEqual(
+            self.path.read_bytes(), ORIGINAL.replace(b'"old"', b'"changed"')
+        )
+        self.assertEqual(self.path.with_suffix(".bak").read_bytes(), ORIGINAL)
+
+    def test_close_conflict_keeps_library_open_for_discard(self) -> None:
+        self.library.symbol("A").set_attribute("Note", "changed")
+        foreign = ORIGINAL.replace(b'"old"', b'"foreign"')
+        self.path.write_bytes(foreign)
         with self.assertRaises(FileConflictError):
-            self.library.save()
-        with self.assertRaises(RuntimeError):
             self.library.close()
+        self.assertFalse(self.library.is_closed)
+        self.library.discard()
+        self.library.close()
+        self.assertEqual(self.path.read_bytes(), foreign)
+
+    def test_with_block_saves_on_normal_exit_and_discards_on_exception(
+        self,
+    ) -> None:
+        with SymbolLibrary.open(self.path) as library:
+            library.symbol("A").set_attribute("Note", "saved")
+        self.assertTrue(library.is_closed)
+        saved = ORIGINAL.replace(b'"old"', b'"saved"')
+        self.assertEqual(self.path.read_bytes(), saved)
+        with self.assertRaises(KeyError), SymbolLibrary.open(self.path) as library:
+            library.symbol("A").set_attribute("Note", "abandoned")
+            raise KeyError("client failure")
+        self.assertTrue(library.is_closed)
+        self.assertEqual(self.path.read_bytes(), saved)
         self.library.discard()
 
     def test_discard_invalidates_owned_handles_and_never_resets_for_continued_use(
@@ -142,8 +170,7 @@ class LibraryLifecycleTests(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), b"prior backup")
         self.assertEqual(self.library.to_bytes(), pending)
         self.assertTrue(self.library.is_modified)
-        with self.assertRaises(RuntimeError):
-            self.library.close()
+        self.library.discard()
         self.assertFalse(any(p.suffix == ".tmp" for p in self.root.iterdir()))
 
     def test_source_failure_restores_prior_backup_or_removes_only_our_new_backup(
@@ -179,21 +206,16 @@ class LibraryLifecycleTests(unittest.TestCase):
                     self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o640)
                 else:
                     self.assertFalse(backup.exists())
-                with self.assertRaises(RuntimeError):
-                    library.close()
+                library.discard()
                 self.assertFalse(any(p.suffix == ".tmp" for p in self.root.iterdir()))
 
-    def test_save_as_failure_keeps_identity_pending_and_clears_a_clean_saved_decision(
-        self,
-    ) -> None:
+    def test_save_as_failure_keeps_identity_and_pending_edits(self) -> None:
         destination = self.root / "existing.kicad_sym"
         destination.write_bytes(b"do not replace")
-        self.library.save()
         with self.assertRaises(FileExistsError):
             self.library.save_as(destination)
         self.assertFalse(self.library.is_modified)
-        with self.assertRaises(RuntimeError):
-            self.library.close()
+        self.assertEqual(self.library.path, self.path)
         self.library.symbol("A").set_attribute("Note", "pending")
         pending = self.library.to_bytes()
         fresh = self.root / "new.kicad_sym"
@@ -390,8 +412,7 @@ class LibraryLifecycleTests(unittest.TestCase):
                     self.assertEqual(len(recoveries), 1)
                     self.assertEqual(recoveries[0].read_bytes(), b"prior backup")
                 self.assertTrue(library.is_modified)
-                with self.assertRaises(RuntimeError):
-                    library.close()
+                library.discard()
 
     def test_published_backup_never_adopts_a_same_inode_same_byte_foreign_version(
         self,
@@ -471,5 +492,4 @@ class LibraryLifecycleTests(unittest.TestCase):
                     self.assertEqual(len(recoveries), 1)
                     self.assertEqual(recoveries[0].read_bytes(), b"prior backup")
                 self.assertTrue(library.is_modified)
-                with self.assertRaises(RuntimeError):
-                    library.close()
+                library.discard()

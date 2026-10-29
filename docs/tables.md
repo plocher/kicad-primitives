@@ -4,7 +4,7 @@
 
 [ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) requires in-memory edits and explicit persistence.
 Physical `LibraryTable` artifacts now own buffered source and editable `TableEntry` objects.
-Edits do not write files. Clients choose save, save as, or terminal discard.
+Edits do not write files. Clients choose save, save as, close (saves pending changes), or terminal discard.
 
 `kicad_primitives.tables.LibraryTables` discovers, reads, resolves, and edits
 KiCad **symbol** and **footprint** library table files (`sym-lib-table`,
@@ -20,7 +20,7 @@ remains pre-alpha (`0.0.0` informational).
 ## Surface (ADR 0006 A)
 
 - **Supported:** config-home discovery; read and resolve global and project symbol and footprint tables; `${VAR}` expansion; nested `Table` rows; project shadowing; `add_entry`, `rename`, `set_uri`, and `delete` on physical tables; `save()`, `save_as()`, `discard()`, and `close()`.
-- **Defined, explicit failure:** ambiguous direct nicknames on an editing target; duplicate add or rename targets; external changes since open or save; close without a current successful save decision.
+- **Defined, explicit failure:** ambiguous direct nicknames on an editing target; duplicate add or rename targets; external changes since open or save, including the save that a dirty close runs.
 - **Stored, not interpreted:** remote and plugin library types keep their rows, but resolution treats `uri` as a filesystem path.
 - **Deferred past 1.0:** `design_block_lib_table` as a product API; remote and plugin resolution; multi-file table transactions.
 
@@ -143,13 +143,13 @@ Each physical table has `path`, `to_bytes()`, `is_modified`, `save()`, `save_as(
 `table_path(type, scope)` reports the discovered primary location. `table.path` reports that artifact's current destination.
 `tables.is_modified` aggregates pending state from open physical artifacts, not files that the context has never opened.
 
-`close()` requires an explicit successful save decision, even for a clean, never-edited artifact.
-A successful `save()` or `save_as()` authorizes close only for that current state.
-Later edits invalidate that decision. Exact no-op edits do not.
-Every failed save attempt invalidates the decision, even when pending bytes equal the baseline.
+`close()` on a clean table writes nothing. A missing table that was never edited is not created.
+`close()` on a dirty table runs `save()`, then exits.
+If that save fails, `close()` raises and the table stays open with its pending changes.
 `discard()` is terminal exit without writing, not rollback or reload.
 Close and discard invalidate the artifact's editable entries. A later `close()` is harmless.
-There is no implicit persistence on mutation, close, discard, or finalization.
+A `with` block closes on normal exit and discards on an exception.
+Mutations, discard, and finalizers never write.
 
 `save()` checks the disk baseline, including for no-op saves.
 Changed saves retain the existing single-file optimistic conflict, link, and permission safeguards.
@@ -179,7 +179,7 @@ Global and project tables can have the same basename. There is no combined conte
 - `MissingLibraryError`: nickname not found for direct selection or resolution.
 - `AmbiguousLibraryError`: repeated direct nickname on an editing target. Effective resolution still takes the last winning leaf.
 - `LibraryTableConflictError`: physical source changed or disappeared since open/save.
-- `LibraryTableLifecycleError`: closed artifact, stale entry, or missing current explicit close decision.
+- `LibraryTableLifecycleError`: closed or discarded artifact, or stale entry.
 - `LibraryTablesError`: shared base.
 - Ordinary `ValueError` for empty nicknames/URIs and duplicate add/rename targets.
 - Ordinary `OSError` subclasses for filesystem failures.
