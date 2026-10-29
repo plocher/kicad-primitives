@@ -8,11 +8,12 @@ localized add/remove/rename of leaf nicknames.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import platform
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -51,6 +52,10 @@ _TABLE_ROOT_NAMES: dict[LibraryType, str] = {
     "footprint": "fp_lib_table",
 }
 _NESTED_ENTRY_TYPE = "Table"
+_LIBRARY_SUFFIXES: dict[LibraryType, str] = {
+    "symbol": ".kicad_sym",
+    "footprint": ".pretty",
+}
 
 
 class LibraryTablesError(Exception):
@@ -603,6 +608,79 @@ class LibraryTables:
         return any(
             t.is_modified for t in self._physical_tables.values() if not t.is_closed
         )
+
+    @staticmethod
+    def find_libraries(
+        library_type: LibraryType,
+        roots: Iterable[str | PathLike[str]],
+        pattern: str = "*",
+    ) -> tuple[Path, ...]:
+        """List candidate library locations under explicit roots; read nothing.
+
+        Symbol candidates are ``*.kicad_sym`` files; footprint candidates are
+        ``*.pretty`` directories. The search descends every subdirectory of
+        each root except a ``.pretty`` directory itself. *pattern* is a
+        case-sensitive glob on the library name without its suffix. Results
+        are absolute, sorted, and may include libraries that are already
+        registered; the client compares them with :meth:`libraries`. A root
+        that is not an existing directory raises ``NotADirectoryError``.
+        """
+        _require_library_type(library_type)
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError("pattern must be a non-empty glob")
+        suffix = _LIBRARY_SUFFIXES[library_type]
+        bases = [Path(root).expanduser().absolute() for root in roots]
+        for base in bases:
+            if not base.is_dir():
+                raise NotADirectoryError(f"Discovery root is not a directory: {base}")
+        found: set[Path] = set()
+        for base in bases:
+            for current, directories, files in os.walk(base):
+                here = Path(current)
+                names = files if library_type == "symbol" else list(directories)
+                for name in names:
+                    candidate = here / name
+                    if candidate.suffix != suffix:
+                        continue
+                    if library_type == "symbol" and not candidate.is_file():
+                        continue
+                    if fnmatch.fnmatchcase(candidate.stem, pattern):
+                        found.add(candidate)
+                directories[:] = [d for d in directories if not d.endswith(".pretty")]
+        return tuple(sorted(found))
+
+    def portable_uri(self, path: str | PathLike[str]) -> str:
+        """Return *path* as a table URI, using a ``${VAR}`` prefix when one fits.
+
+        ``${KIPRJMOD}`` wins when the path is under the project directory.
+        Otherwise the longest matching absolute path variable from
+        :attr:`path_variables` is used; equal values prefer a versioned
+        ``KICADn_*`` name, then the alphabetically first name. A path under no
+        variable is returned absolute. URIs always use ``/`` separators. This
+        chooses a spelling, not a nickname; register it with
+        :meth:`LibraryTable.add_entry`.
+        """
+        location = Path(os.path.normpath(Path(path).expanduser().absolute()))
+        candidates: list[tuple[int, int, int, str]] = []
+        bases: dict[str, Path] = {}
+        for name, raw in self._path_variables.items():
+            if not raw:
+                continue
+            base = Path(raw).expanduser()
+            if not base.is_absolute():
+                continue
+            base = Path(os.path.normpath(base))
+            if location != base and base not in location.parents:
+                continue
+            priority = 0 if name == "KIPRJMOD" else 1
+            versioned = 0 if re.match(r"KICAD\d+_", name) else 1
+            candidates.append((priority, -len(base.parts), versioned, name))
+            bases[name] = base
+        if not candidates:
+            return location.as_posix()
+        name = min(candidates)[3]
+        relative = location.relative_to(bases[name]).as_posix()
+        return f"${{{name}}}" if relative == "." else f"${{{name}}}/{relative}"
 
     def _check_rebind(self, table: LibraryTable, destination: Path) -> None:
         other = self._physical_tables.get((destination.resolve(), table.library_type))
