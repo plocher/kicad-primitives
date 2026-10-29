@@ -165,10 +165,10 @@ def main() -> None:
                     isinstance(i.position.x, float) for v in findings for i in v.items
                 )
                 assert (
-                    report.snapshot.documents[0].sha256
+                    report.snapshot.project.documents[0].sha256
                     == hashlib.sha256(schematic.to_bytes()).hexdigest()
                 )
-                assert report.snapshot.documents[0].is_modified
+                assert report.snapshot.project.documents[0].is_modified
                 assert (
                     report.snapshot.symbol_table_sha256
                     == baseline.snapshot.symbol_table_sha256

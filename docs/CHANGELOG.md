@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `ErcSnapshot` now holds the shared `ProjectSnapshot` as `project`, plus its library-table and config-home fields. Remove the duplicate `ErcDocumentSnapshot`; use `ProjectSnapshot.documents` (`SnapshotDocument`). No alias (`docs/schematics.md`; #65).
+
 - Fix SVG sheet mapping for non-ASCII and separator sheet names: apply KiCad 10's page-name rule (`/` and `\` become `_`) and compare in Unicode NFC (`docs/schematics.md`; #64).
 
 - Restore Python 3.11 import compatibility: `TitleBlock.comments` uses an immutable `default_factory` instead of a shared `MappingProxyType` default, which Python 3.11 dataclasses reject. Public type and behavior are unchanged (#70).

@@ -329,9 +329,10 @@ The package maps `sheet.source_path` through captured hierarchy UUID chains only
 It returns `None` when it cannot prove that mapping. It never guesses from a leaf filename.
 Temporary stage paths are not reported as original source origins.
 
-`ErcSnapshot` records the original project path, captured project-settings SHA-256, and original config home.
-Its document entries record original paths, exact checked-content hashes, and pending-change state.
-It also records hashes of the effective symbol and footprint registration snapshots.
+`ErcSnapshot.project` is the shared `ProjectSnapshot` (also used by `Project.netlist()` and `Project.export_svgs()`).
+It records the original project path, captured project-settings SHA-256, and one `SnapshotDocument` per document:
+original path, exact checked-content hash, and pending-change state.
+`ErcSnapshot` adds the original config home and hashes of the effective symbol and footprint registration snapshots.
 The report preserves generation date, KiCad version, coordinate units, included severities, and typed ignored-check metadata.
 `stdout` and `stderr` retain backend diagnostics.
 

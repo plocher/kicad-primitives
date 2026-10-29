@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from kicad_primitives.projects import Project
+from kicad_primitives.projects import Project, ProjectSnapshot
 from kicad_primitives.schematics import (
     ErcAcquisitionError,
     ErcContextError,
@@ -168,10 +168,14 @@ class ProjectErcTests(unittest.TestCase):
         self.assertEqual(finding.items[0].position.y, -2.0)
         self.assertEqual(finding.items[1].uuid, CHILD_UUID)
         self.assertEqual(
-            report.snapshot.documents[0].sha256,
+            report.snapshot.project.documents[0].sha256,
             hashlib.sha256(root.to_bytes()).hexdigest(),
         )
-        self.assertTrue(report.snapshot.documents[1].is_modified)
+        self.assertTrue(report.snapshot.project.documents[1].is_modified)
+        self.assertIsInstance(report.snapshot.project, ProjectSnapshot)
+        self.assertEqual(
+            report.snapshot.project.project_file, self.project.project_file
+        )
         self.assertIn("Fontconfig", report.stderr)
         self.assertTrue(self.project.is_modified)
         for path, raw in original.items():

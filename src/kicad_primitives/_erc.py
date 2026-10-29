@@ -15,7 +15,6 @@ from lossless_sexpr import ListNode, parse
 from ._erc_context import library_table_snapshot
 from ._erc_types import (
     ErcAcquisitionError,
-    ErcDocumentSnapshot,
     ErcIgnoredCheck,
     ErcItem,
     ErcPosition,
@@ -212,12 +211,7 @@ def acquire_erc(
     origins = _sheet_origins(root, documents, dict(content))
     config_home, symbol_table, footprint_table = library_table_snapshot(project)
     snapshot = ErcSnapshot(
-        pending.snapshot.project_file,
-        pending.snapshot.project_sha256,
-        tuple(
-            ErcDocumentSnapshot(entry.path, entry.sha256, entry.is_modified)
-            for entry in pending.snapshot.documents
-        ),
+        pending.snapshot,
         config_home,
         hashlib.sha256(symbol_table).hexdigest(),
         hashlib.sha256(footprint_table).hexdigest(),

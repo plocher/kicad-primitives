@@ -18,7 +18,6 @@ from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quot
 from ._erc_types import (
     ErcAcquisitionError,
     ErcContextError,
-    ErcDocumentSnapshot,
     ErcIgnoredCheck,
     ErcItem,
     ErcPosition,
@@ -46,7 +45,6 @@ __all__ = [
     "EmbeddedSymbol",
     "ErcAcquisitionError",
     "ErcContextError",
-    "ErcDocumentSnapshot",
     "ErcIgnoredCheck",
     "ErcItem",
     "ErcPosition",
