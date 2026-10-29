@@ -26,11 +26,18 @@ def main() -> None:
         symbol = schematic.symbol("R3")
         symbol.set_attribute("Value", "22K")
         symbol.set_attribute("MPN", 'résistor "A"\\B')
+        # jBOM alias normalization: set canonical Power, delete alias W.
+        symbol.set_attribute("Power", symbol.attribute("W").value)
+        symbol.delete_attribute("W")
+        assert b'"W" "100mW"' in original
         assert schematic.path.read_bytes() == original
         project.save(kicad_cli=args.kicad_cli)
         after = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         assert after.component("R3").value == "22K"
         assert after.component("R3").fields["MPN"] == 'résistor "A"\\B'
+        assert after.component("R3").fields["Power"] == "100mW"
+        assert "W" not in after.component("R3").fields
+        assert before.component("R3").fields["W"] == "100mW"
         expected = sorted(
             (net.name, sorted((node.reference, node.pin) for node in net.nodes))
             for net in before.nets
@@ -47,7 +54,8 @@ def main() -> None:
         schematic.save(kicad_cli=args.kicad_cli)
         assert schematic.path.stat().st_ino == inode
         print(
-            "Native KiCad gate passed: Value, inserted escaped Unicode MPN, six singleton nets, explicit save, exact no-op."
+            "Native KiCad gate passed: Value, inserted escaped Unicode MPN, "
+            "W->Power alias deletion, six singleton nets, explicit save, exact no-op."
         )
 
 
