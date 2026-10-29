@@ -98,8 +98,10 @@ def _declared_semantics(
                     b.unit,
                     b.body_style,
                     b.origin_symbol,
-                    b.rectangles,
-                    b.texts,
+                    tuple(
+                        (r.start_x, r.start_y, r.end_x, r.end_y) for r in b.rectangles
+                    ),
+                    tuple((t.text, t.x, t.y, t.rotation) for t in b.texts),
                     tuple(
                         (
                             p.number,

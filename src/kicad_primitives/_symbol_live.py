@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeVar
 
 from . import _symbol_parse
 from ._symbol_types import (
@@ -12,10 +13,10 @@ from ._symbol_types import (
     PinDefinition as _PinData,
 )
 from ._symbol_types import (
+    RectangleDefinition,
     SymbolAttribute,
     SymbolLibraryError,
-    SymbolRectangle,
-    SymbolText,
+    TextDefinition,
 )
 from ._symbol_types import (
     SymbolDefinition as _SymbolData,
@@ -159,6 +160,8 @@ class SymbolBody:
         self._data = data
         self._alive = True
         self._pins: tuple[SymbolPin, ...] = ()
+        self._rectangles: tuple[SymbolRectangle, ...] = ()
+        self._texts: tuple[SymbolText, ...] = ()
         self._refresh(data)
 
     def _check(self) -> None:
@@ -181,6 +184,12 @@ class SymbolBody:
         for pin in old:
             pin._alive = False
         self._pins = tuple(pins)
+        self._rectangles = _refresh_graphics(
+            self._rectangles, data.rectangles, lambda v: SymbolRectangle(self, v)
+        )
+        self._texts = _refresh_graphics(
+            self._texts, data.texts, lambda v: SymbolText(self, v)
+        )
 
     @property
     def name(self) -> str:
@@ -214,15 +223,15 @@ class SymbolBody:
 
     @property
     def rectangles(self) -> tuple[SymbolRectangle, ...]:
-        """Immutable current rectangle geometry values."""
+        """Live rectangle handles in source order."""
         self._check()
-        return self._data.rectangles
+        return self._rectangles
 
     @property
     def texts(self) -> tuple[SymbolText, ...]:
-        """Immutable current body text values."""
+        """Live body text handles in source order."""
         self._check()
-        return self._data.texts
+        return self._texts
 
     def pin(self, number: str) -> SymbolPin:
         """Select one live pin, rejecting missing or repeated numbers."""
@@ -267,8 +276,8 @@ class SymbolBody:
 
     def add_rectangle(
         self, *, start: tuple[float, float], end: tuple[float, float]
-    ) -> None:
-        """Insert a rectangle on this body, preserving opaque stroke and fill."""
+    ) -> SymbolRectangle:
+        """Insert a rectangle on this body and return its live handle."""
         self._check()
         library = self._symbol._library
         library._accept_source(
@@ -283,9 +292,12 @@ class SymbolBody:
                 end_y=end[1],
             )
         )
+        return self._rectangles[-1]
 
-    def add_text(self, text: str, *, x: float, y: float, rotation: float = 0.0) -> None:
-        """Insert text on this declared body, retaining other content."""
+    def add_text(
+        self, text: str, *, x: float, y: float, rotation: float = 0.0
+    ) -> SymbolText:
+        """Insert text on this declared body and return its live handle."""
         self._check()
         library = self._symbol._library
         library._accept_source(
@@ -300,6 +312,208 @@ class SymbolBody:
                 rotation=rotation,
             )
         )
+        return self._texts[-1]
+
+
+_Handle = TypeVar("_Handle", "SymbolRectangle", "SymbolText")
+_View = TypeVar("_View", RectangleDefinition, TextDefinition)
+
+
+def _refresh_graphics(
+    old: tuple[_Handle, ...],
+    views: tuple[_View, ...],
+    factory: Callable[[_View], _Handle],
+) -> tuple[_Handle, ...]:
+    """Map handles by ordinal within one body.
+
+    Package edits keep ordinals stable: inserts append and handle deletes remove
+    their handle first. A count drop without that cannot be mapped safely, so all
+    old handles become stale instead of guessing.
+    """
+    if len(views) < len(old):
+        for handle in old:
+            handle._alive = False
+        old = ()
+    for handle, view in zip(old, views, strict=False):
+        handle._data = view  # type: ignore[assignment]
+    return old + tuple(factory(view) for view in views[len(old) :])
+
+
+class _BodyGraphic:
+    """Shared lifecycle for ordinal graphic handles owned by a body."""
+
+    _kind = ""
+
+    def __init__(self, body: SymbolBody) -> None:
+        self._body = body
+        self._alive = True
+
+    def _check(self) -> None:
+        self._body._check()
+        if not self._alive:
+            raise StaleSymbolError(f"Body {self._kind} has been deleted")
+
+    def _siblings(self) -> tuple[_BodyGraphic, ...]:
+        raise NotImplementedError
+
+    def _set_siblings(self, handles: tuple[_BodyGraphic, ...]) -> None:
+        raise NotImplementedError
+
+    def delete(self) -> None:
+        """Remove this graphic and invalidate its handle, without writing."""
+        self._check()
+        body = self._body
+        library = body._symbol._library
+        updated = _symbol_parse.delete_graphic(
+            library._source,
+            body._symbol.name,
+            body.unit,
+            body.body_style,
+            self._kind,
+            self._siblings().index(self),
+        )
+        self._alive = False
+        self._set_siblings(tuple(h for h in self._siblings() if h is not self))
+        library._accept_source(updated)
+
+
+class SymbolRectangle(_BodyGraphic):
+    """One live rectangle on a declared body, identified by its ordinal there."""
+
+    _kind = "rectangle"
+
+    def __init__(self, body: SymbolBody, data: RectangleDefinition) -> None:
+        super().__init__(body)
+        self._data = data
+
+    def _siblings(self) -> tuple[_BodyGraphic, ...]:
+        return self._body._rectangles
+
+    def _set_siblings(self, handles: tuple[_BodyGraphic, ...]) -> None:
+        self._body._rectangles = tuple(
+            h for h in handles if isinstance(h, SymbolRectangle)
+        )
+
+    def set(
+        self,
+        *,
+        start: tuple[float, float] | None = None,
+        end: tuple[float, float] | None = None,
+    ) -> None:
+        """Set start and/or end in memory; equal values preserve exact bytes.
+
+        Only the changed coordinate atoms are replaced. Stroke, fill, and other
+        source remain unchanged. At least one argument is required.
+        """
+        self._check()
+        body = self._body
+        library = body._symbol._library
+        library._accept_source(
+            _symbol_parse.replace_rectangle(
+                library._source,
+                body._symbol.name,
+                body.unit,
+                body.body_style,
+                body._rectangles.index(self),
+                start=start,
+                end=end,
+            )
+        )
+
+    @property
+    def start_x(self) -> float:
+        """Current start x."""
+        self._check()
+        return self._data.start_x
+
+    @property
+    def start_y(self) -> float:
+        """Current start y."""
+        self._check()
+        return self._data.start_y
+
+    @property
+    def end_x(self) -> float:
+        """Current end x."""
+        self._check()
+        return self._data.end_x
+
+    @property
+    def end_y(self) -> float:
+        """Current end y."""
+        self._check()
+        return self._data.end_y
+
+
+class SymbolText(_BodyGraphic):
+    """One live body text on a declared body, identified by its ordinal there."""
+
+    _kind = "text"
+
+    def __init__(self, body: SymbolBody, data: TextDefinition) -> None:
+        super().__init__(body)
+        self._data = data
+
+    def _siblings(self) -> tuple[_BodyGraphic, ...]:
+        return self._body._texts
+
+    def _set_siblings(self, handles: tuple[_BodyGraphic, ...]) -> None:
+        self._body._texts = tuple(h for h in handles if isinstance(h, SymbolText))
+
+    def set(
+        self,
+        *,
+        text: str | None = None,
+        x: float | None = None,
+        y: float | None = None,
+        rotation: float | None = None,
+    ) -> None:
+        """Set text value, position, and/or rotation in memory.
+
+        Equal values preserve exact bytes. Only changed atoms are replaced;
+        effects and other source remain unchanged. At least one argument is
+        required.
+        """
+        self._check()
+        body = self._body
+        library = body._symbol._library
+        library._accept_source(
+            _symbol_parse.replace_body_text(
+                library._source,
+                body._symbol.name,
+                body.unit,
+                body.body_style,
+                body._texts.index(self),
+                text=text,
+                x=x,
+                y=y,
+                rotation=rotation,
+            )
+        )
+
+    @property
+    def text(self) -> str:
+        """Current text value."""
+        self._check()
+        return self._data.text
+
+    @property
+    def x(self) -> float:
+        """Current x."""
+        self._check()
+        return self._data.x
+
+    @property
+    def y(self) -> float:
+        """Current y."""
+        self._check()
+        return self._data.y
+
+    @property
+    def rotation(self) -> float:
+        """Current rotation."""
+        self._check()
+        return self._data.rotation
 
 
 class SymbolPin:

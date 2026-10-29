@@ -22,9 +22,9 @@ from ._symbol_types import (
     AmbiguousSymbolError,
     InheritanceError,
     InvalidLibraryError,
+    RectangleDefinition,
     SymbolAttribute,
-    SymbolRectangle,
-    SymbolText,
+    TextDefinition,
     UnsupportedOperationError,
     _attribute_key,
 )
@@ -133,11 +133,11 @@ def pin_view(node: ListNode) -> SymbolPin:
     )
 
 
-def rectangle_view(node: ListNode) -> SymbolRectangle:
+def rectangle_view(node: ListNode) -> RectangleDefinition:
     start = one(node, "start", required=True)
     end = one(node, "end", required=True)
     assert start is not None and end is not None
-    return SymbolRectangle(
+    return RectangleDefinition(
         start_x=number(start, 1),
         start_y=number(start, 2),
         end_x=number(end, 1),
@@ -145,10 +145,10 @@ def rectangle_view(node: ListNode) -> SymbolRectangle:
     )
 
 
-def text_view(node: ListNode) -> SymbolText:
+def text_view(node: ListNode) -> TextDefinition:
     at = one(node, "at", required=True)
     assert at is not None
-    return SymbolText(
+    return TextDefinition(
         text=atom(node, 1).value,
         x=number(at, 1),
         y=number(at, 2),
@@ -1092,6 +1092,178 @@ def insert_body_text(
             "Body text insert did not establish the requested text"
         )
     return updated
+
+
+_GRAPHIC_KINDS = frozenset({"rectangle", "text"})
+
+
+def _graphic_context(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    kind: str,
+    index: int,
+) -> tuple[SymbolBody, ListNode]:
+    """Return the body view and the ``index``-th rectangle/text node of a body."""
+    assert kind in _GRAPHIC_KINDS
+    symbol = source.symbol(symbol_name)
+    body, body_node = _body_node(source, symbol, unit, body_style)
+    nodes = body_node.child_lists(kind)
+    if not 0 <= index < len(nodes):
+        raise KeyError((kind, index))
+    return body, nodes[index]
+
+
+def _graphic_values(body: SymbolBody, kind: str) -> tuple[object, ...]:
+    return body.rectangles if kind == "rectangle" else body.texts
+
+
+def _replace_number_atoms(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    kind: str,
+    index: int,
+    edits: tuple[tuple[str, int, float], ...],
+) -> ParsedLibrary:
+    """Replace numeric atoms that differ, reparsing after each atom edit."""
+    current = source
+    for head, position, desired in edits:
+        _body, node = _graphic_context(
+            current, symbol_name, unit, body_style, kind, index
+        )
+        child = one(node, head, required=True)
+        assert child is not None
+        if number(child, position) == desired:
+            continue
+        current = _apply_pin_edit(
+            current, atom(child, position).span, _format_number(desired)
+        )
+    return current
+
+
+def replace_rectangle(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    index: int,
+    *,
+    start: tuple[float, float] | None = None,
+    end: tuple[float, float] | None = None,
+) -> ParsedLibrary:
+    """Set rectangle start/end; equal values are lexical no-ops."""
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    if start is None and end is None:
+        raise ValueError("Rectangle set requires start or end")
+    body, _node = _graphic_context(
+        source, symbol_name, unit, body_style, "rectangle", index
+    )
+    old = body.rectangles[index]
+    sx, sy = (old.start_x, old.start_y) if start is None else _require_point(start)
+    ex, ey = (old.end_x, old.end_y) if end is None else _require_point(end)
+    updated = _replace_number_atoms(
+        source,
+        symbol_name,
+        unit,
+        body_style,
+        "rectangle",
+        index,
+        (("start", 1, sx), ("start", 2, sy), ("end", 1, ex), ("end", 2, ey)),
+    )
+    after = updated.symbol(symbol_name).body(unit, body_style)
+    if after.rectangles[index] != RectangleDefinition(sx, sy, ex, ey) or len(
+        after.rectangles
+    ) != len(body.rectangles):
+        raise InvalidLibraryError("Rectangle edit did not establish geometry")
+    return updated
+
+
+def replace_body_text(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    index: int,
+    *,
+    text: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    rotation: float | None = None,
+) -> ParsedLibrary:
+    """Set body text value and position; equal values are lexical no-ops."""
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    if all(value is None for value in (text, x, y, rotation)):
+        raise ValueError("Text set requires at least one field to update")
+    body, _node = _graphic_context(source, symbol_name, unit, body_style, "text", index)
+    old = body.texts[index]
+    desired = TextDefinition(
+        text=old.text
+        if text is None
+        else _require_pin_string("Body text", text, allow_empty=True),
+        x=old.x if x is None else _require_pin_number_coord("x", x),
+        y=old.y if y is None else _require_pin_number_coord("y", y),
+        rotation=old.rotation
+        if rotation is None
+        else _require_pin_number_coord("rotation", rotation),
+    )
+    current = source
+    if desired.text != old.text:
+        _body, node = _graphic_context(
+            current, symbol_name, unit, body_style, "text", index
+        )
+        current = _apply_pin_edit(current, atom(node, 1).span, quote(desired.text))
+    current = _replace_number_atoms(
+        current,
+        symbol_name,
+        unit,
+        body_style,
+        "text",
+        index,
+        (("at", 1, desired.x), ("at", 2, desired.y), ("at", 3, desired.rotation)),
+    )
+    after = current.symbol(symbol_name).body(unit, body_style)
+    if after.texts[index] != desired or len(after.texts) != len(body.texts):
+        raise InvalidLibraryError("Body text edit did not establish the request")
+    return current
+
+
+def delete_graphic(
+    source: ParsedLibrary,
+    symbol_name: str,
+    unit: int,
+    body_style: int,
+    kind: str,
+    index: int,
+) -> ParsedLibrary:
+    """Remove one rectangle/text node and its leading separator."""
+    _require_writeable(source)
+    unit, body_style = _require_unit_style(unit, body_style)
+    body, node = _graphic_context(source, symbol_name, unit, body_style, kind, index)
+    before = source.document.source
+    start = _leading_separator_start(before, node.span.start)
+    edited = _apply_source_edit(before, SourceSpan(start, node.span.end), "")
+    updated = read_source(edited.encode("utf-8"))
+    old = _graphic_values(body, kind)
+    remaining = _graphic_values(
+        updated.symbol(symbol_name).body(unit, body_style), kind
+    )
+    if remaining != old[:index] + old[index + 1 :]:
+        raise InvalidLibraryError(f"{kind} delete changed unexpected content")
+    return updated
+
+
+def _require_point(point: object) -> tuple[float, float]:
+    if not isinstance(point, tuple) or len(point) != 2:
+        raise TypeError("Point must be an (x, y) tuple")
+    return (
+        _require_pin_number_coord("x", point[0]),
+        _require_pin_number_coord("y", point[1]),
+    )
 
 
 def _require_symbol_name(name: object, *, label: str = "Symbol name") -> str:
