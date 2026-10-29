@@ -2,23 +2,21 @@
 
 ## Scope
 
-`kicad_primitives.netlist` reads and obtains KiCad **kicadsexpr** netlist
-files (`.net` exports).
-
-This is the ADR 0006 Connectivity **proven-core** exchange slice. It is **not**
-the full project-owned Connectivity area from ADR 0002 (inspect/trace/compare
-from live design context without treating a file as the model of record).
+Connectivity belongs to the project (ADR 0002).
+`Project.netlist()` obtains a netlist of the pending design with provenance.
+`kicad_primitives.netlist` provides the `Netlist` exchange model and reads and
+exports KiCad **kicadsexpr** netlist files (`.net`) by explicit path.
 
 A `.net` file is an **exchange dataset**. It can lack current provenance and
 freshness. Callers that keep a saved netlist accept staleness. Prefer
-`obtain_netlist` when KiCad is available and you need a fresh parse.
+`Project.netlist()` when KiCad is available and you need current design content.
 
 The package remains pre-alpha (`0.0.0` informational). There is no public
 `cli` module; export uses private ADR 0007 discovery.
 
-## Connectivity surface (ADR 0006 A)
+## Surface (ADR 0006 A)
 
-Connectivity belongs to the project (ADR 0002). The 1.0 surface is:
+The 1.0 surface is:
 
 - **Supported — obtain:** `Project.netlist()` exports the full pending
   hierarchy and returns a `Netlist` with `provenance`.

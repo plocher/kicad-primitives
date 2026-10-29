@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add ADR 0006 A **Surface** sections to the Projects, Schematics, Symbol libraries, Tables, and Connectivity usage pages: supported, defined-but-failing, in-progress 1.0, and deferred post-1.0 operations. Add the section to the documentation contract's required order (#67).
 - Raise `SchematicSvgError` when two sheets map to one SVG page name. Run `Project.netlist()` and `Project.export_svgs()` with the original project directory as backend CWD, like ERC. Document temporary `Netlist.path`/`source` for project obtains, raw `SymbolText.rotation` units, the full `export_svgs` error list, and deferred live connectivity in the README (#64, #65, #66).
 
 - `ErcSnapshot` now holds the shared `ProjectSnapshot` as `project`, plus its library-table and config-home fields. Remove the duplicate `ErcDocumentSnapshot`; use `ProjectSnapshot.documents` (`SnapshotDocument`). No alias (`docs/schematics.md`; #65).

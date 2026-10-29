@@ -17,6 +17,13 @@ It does **not** open symbol or footprint definition content, edit
 `design_block_lib_table` as a product API, or replace KiCad’s UI. The package
 remains pre-alpha (`0.0.0` informational).
 
+## Surface (ADR 0006 A)
+
+- **Supported:** config-home discovery; read and resolve global and project symbol and footprint tables; `${VAR}` expansion; nested `Table` rows; project shadowing; `add_entry`, `rename`, `set_uri`, and `delete` on physical tables; `save()`, `save_as()`, `discard()`, and `close()`.
+- **Defined, explicit failure:** ambiguous direct nicknames on an editing target; duplicate add or rename targets; external changes since open or save; close without a current successful save decision.
+- **Stored, not interpreted:** remote and plugin library types keep their rows, but resolution treats `uri` as a filesystem path.
+- **Deferred past 1.0:** `design_block_lib_table` as a product API; remote and plugin resolution; multi-file table transactions.
+
 ## Open
 
 ```python
