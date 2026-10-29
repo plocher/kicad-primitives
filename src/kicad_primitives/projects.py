@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from ._snapshot_types import ProjectSnapshot, SnapshotDocument
+
 if TYPE_CHECKING:
     from ._erc_types import ErcReport
+    from .netlist import Netlist
     from .schematics import Schematic
 
 __all__ = [
@@ -23,7 +27,9 @@ __all__ = [
     "Project",
     "ProjectBackupError",
     "ProjectLifecycleError",
+    "ProjectSnapshot",
     "ProjectWriteBlockedError",
+    "SnapshotDocument",
 ]
 
 
@@ -183,6 +189,31 @@ class Project:
         from ._erc import acquire_erc
 
         return acquire_erc(self, kicad_cli=kicad_cli)
+
+    def netlist(self, *, kicad_cli: str | PathLike[str] | None = None) -> Netlist:
+        """Obtain a netlist of the full pending hierarchy without saving.
+
+        Stage the captured ``.kicad_pro`` and every hierarchy document's
+        pending ``to_bytes()`` content, as save verification and :meth:`erc`
+        do. Do not save source, clear pending changes, or require the write
+        guard. The returned :class:`~kicad_primitives.netlist.Netlist` carries
+        ``provenance`` with the project and checked-content hashes. Acquisition
+        failures raise ``KicadCliNotFoundError``, ``NetlistExportError``, or
+        ``NetlistParseError``. See ``docs/netlist.md``.
+        """
+        self._check_open()
+        from ._pending_snapshot import capture_pending, staged_hierarchy
+        from .netlist import obtain_netlist
+
+        pending = capture_pending(self, operation="Netlist obtain")
+        with staged_hierarchy(
+            self, pending.content, prefix="kicad-primitives-netlist-"
+        ) as stage:
+            exchange = obtain_netlist(
+                stage / pending.root.relative_to(self._directory),
+                kicad_cli=kicad_cli,
+            )
+        return replace(exchange, provenance=pending.snapshot)
 
     def save_as(
         self,

@@ -2,9 +2,9 @@
 
 This module is the ADR 0006 Connectivity **B** exchange slice: read existing
 ``.net`` exports and obtain fresh ones via private ``kicad-cli`` discovery
-(ADR 0007). It is **not** the full project-owned Connectivity area (trace,
-live design model, or project-context service). A saved ``.net`` can be stale;
-callers that keep one accept that risk.
+(ADR 0007). Project-owned obtain over pending source is
+:meth:`kicad_primitives.projects.Project.netlist`; live trace is deferred.
+A saved ``.net`` can be stale; callers that keep one accept that risk.
 
 See ``docs/netlist.md``.
 """
@@ -24,6 +24,7 @@ from types import MappingProxyType
 from lossless_sexpr import AtomNode, ListNode, ParseError, parse
 
 from ._kicad_cli import KicadCliNotFoundError, resolve_kicad_cli
+from ._snapshot_types import ProjectSnapshot
 
 __all__ = [
     "KicadCliNotFoundError",
@@ -92,7 +93,12 @@ class NetlistComponent:
 
 @dataclass(frozen=True)
 class Netlist:
-    """Parsed KiCad kicadsexpr netlist exchange dataset."""
+    """Parsed KiCad kicadsexpr netlist exchange dataset.
+
+    ``provenance`` is set only by :meth:`kicad_primitives.projects.Project.netlist`.
+    It records the project settings and exact hierarchy content that were
+    exported. File-based opens and obtains leave it ``None``.
+    """
 
     path: Path
     source: str
@@ -101,6 +107,7 @@ class Netlist:
     nets: tuple[Net, ...]
     sheets: tuple[str, ...]
     sheet_files: Mapping[str, str]
+    provenance: ProjectSnapshot | None = None
 
     @classmethod
     def open(cls, path: str | PathLike[str]) -> Netlist:

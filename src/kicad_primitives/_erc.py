@@ -8,7 +8,6 @@ import subprocess
 from math import isfinite
 from os import PathLike
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, NoReturn, cast
 
 from lossless_sexpr import ListNode, parse
@@ -26,8 +25,7 @@ from ._erc_types import (
     ErcViolation,
 )
 from ._kicad_cli import resolve_kicad_cli
-from ._schematic_persist import _hierarchy
-from .schematics import UnsupportedSchematicOperationError
+from ._pending_snapshot import capture_pending, staged_hierarchy
 
 if TYPE_CHECKING:
     from .projects import Project
@@ -209,42 +207,28 @@ def _report(
 def acquire_erc(
     project: Project, *, kicad_cli: str | PathLike[str] | None
 ) -> ErcReport:
-    root = project.schematic_file
-    if root is None or root.stem != project.project_file.stem:
-        raise UnsupportedSchematicOperationError(
-            "ERC requires matching project and root schematic basenames"
-        )
-    documents = _hierarchy(
-        project
-    )  # strict source paths only; no save preflight or write guard
-    content = {document.path: document.to_bytes() for document in documents}
-    origins = _sheet_origins(root, documents, content)
+    pending = capture_pending(project, operation="ERC")
+    root, documents, content = pending.root, pending.documents, pending.content
+    origins = _sheet_origins(root, documents, dict(content))
     config_home, symbol_table, footprint_table = library_table_snapshot(project)
     snapshot = ErcSnapshot(
-        project.project_file,
-        hashlib.sha256(project._project_baseline).hexdigest(),
+        pending.snapshot.project_file,
+        pending.snapshot.project_sha256,
         tuple(
-            ErcDocumentSnapshot(
-                document.path,
-                hashlib.sha256(content[document.path]).hexdigest(),
-                document.is_modified,
-            )
-            for document in documents
+            ErcDocumentSnapshot(entry.path, entry.sha256, entry.is_modified)
+            for entry in pending.snapshot.documents
         ),
         config_home,
         hashlib.sha256(symbol_table).hexdigest(),
         hashlib.sha256(footprint_table).hexdigest(),
     )
     cli = resolve_kicad_cli(None if kicad_cli is None else Path(kicad_cli))
-    with TemporaryDirectory(prefix="kicad-primitives-erc-") as temporary:
-        stage = Path(temporary)
-        (stage / project.project_file.name).write_bytes(project._project_baseline)
-        (stage / "sym-lib-table").write_bytes(symbol_table)
-        (stage / "fp-lib-table").write_bytes(footprint_table)
-        for path, raw in content.items():
-            target = stage / path.relative_to(project.directory)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(raw)
+    with staged_hierarchy(
+        project,
+        content,
+        prefix="kicad-primitives-erc-",
+        extra={"sym-lib-table": symbol_table, "fp-lib-table": footprint_table},
+    ) as stage:
         output = stage / "erc.json"
         command = [
             str(cli),

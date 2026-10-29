@@ -31,6 +31,13 @@ def main() -> None:
         symbol.delete_attribute("W")
         assert b'"W" "100mW"' in original
         assert schematic.path.read_bytes() == original
+        pending = project.netlist(kicad_cli=args.kicad_cli)
+        assert pending.component("R3").value == "22K"
+        assert pending.component("R3").fields["Power"] == "100mW"
+        assert "W" not in pending.component("R3").fields
+        assert pending.provenance is not None
+        assert [d.is_modified for d in pending.provenance.documents] == [True]
+        assert schematic.path.read_bytes() == original and project.is_modified
         project.save(kicad_cli=args.kicad_cli)
         after = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         assert after.component("R3").value == "22K"
@@ -47,6 +54,10 @@ def main() -> None:
             for net in after.nets
         )
         assert expected == observed
+        assert expected == sorted(
+            (net.name, sorted((node.reference, node.pin) for node in net.nodes))
+            for net in pending.nets
+        )
         assert len(after.nets) == 6
         assert all(len(net.nodes) == 1 for net in after.nets)
         assert not project.is_modified
@@ -55,7 +66,8 @@ def main() -> None:
         assert schematic.path.stat().st_ino == inode
         print(
             "Native KiCad gate passed: Value, inserted escaped Unicode MPN, "
-            "W->Power alias deletion, six singleton nets, explicit save, exact no-op."
+            "W->Power alias deletion, pending Project.netlist, six singleton nets, "
+            "explicit save, exact no-op."
         )
 
 

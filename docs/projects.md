@@ -15,6 +15,7 @@ Changed schematics require electrical verification. Unchanged JSON and raw PCB c
 `discard()` terminally abandons the Project without writing.
 PCB editing models remain unsupported. Library tables: [tables.md](tables.md).
 `Project.erc()` returns full-hierarchy electrical rule reports against pending source without saving it.
+`Project.netlist()` obtains a full-hierarchy netlist of pending source with provenance; see [netlist.md](netlist.md).
 The package remains pre-alpha (`0.0.0` informational).
 
 ## Open a project
