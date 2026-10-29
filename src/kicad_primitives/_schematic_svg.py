@@ -34,18 +34,24 @@ def _page_name(root_stem: str, names: tuple[str, ...]) -> str:
     return unicodedata.normalize("NFC", f"{stem}.svg")
 
 
-def _expected_files(pending: PendingHierarchy) -> dict[str, tuple[str, Path] | None]:
+def _expected_files(pending: PendingHierarchy) -> dict[str, tuple[str, Path]]:
     """Map KiCad's page file names to (sheet path, source).
 
-    A colliding name maps to ``None``: the package cannot prove which sheet it is.
+    Two sheets with one page name would make KiCad overwrite a page, so that
+    raises ``SchematicSvgError`` before the backend runs.
     """
     by_path = {document.path: document for document in pending.documents}
-    expected: dict[str, tuple[str, Path] | None] = {}
+    expected: dict[str, tuple[str, Path]] = {}
 
     def visit(path: Path, names: tuple[str, ...]) -> None:
         name = _page_name(pending.root.stem, names)
         sheet_path = "/" + "".join(f"{item}/" for item in names)
-        expected[name] = None if name in expected else (sheet_path, path)
+        if name in expected:
+            raise SchematicSvgError(
+                f"Sheets {expected[name][0]!r} and {sheet_path!r} map to one "
+                f"SVG page name: {name}"
+            )
+        expected[name] = (sheet_path, path)
         for sheet in by_path[path].sheets:
             child = (path.parent / sheet.filename).resolve()
             if child in by_path:
@@ -90,6 +96,7 @@ def export_schematic_svgs(
                 capture_output=True,
                 text=True,
                 timeout=120,
+                cwd=project.directory,  # like ERC: original project directory
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise SchematicSvgError(f"SVG export execution failed: {exc}") from exc
@@ -108,9 +115,7 @@ def export_schematic_svgs(
             unicodedata.normalize("NFC", path.name): path.read_bytes()
             for path in produced
         }
-        missing = [
-            name for name, origin in expected.items() if origin and name not in payloads
-        ]
+        missing = [name for name in expected if name not in payloads]
         if missing:
             raise SchematicSvgError(
                 f"SVG export omits proved hierarchy sheets: {', '.join(missing)}"

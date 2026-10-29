@@ -43,7 +43,8 @@ for sheet in sorted(root.parent.rglob('*.kicad_sch')):
 record = os.environ.get('KP_RECORD')
 if record:
     pathlib.Path(record).write_text(json.dumps(
-        {'argv': sys.argv[1:], 'pro': root.with_suffix('.kicad_pro').read_text()}))
+        {'argv': sys.argv[1:], 'cwd': os.getcwd(),
+         'pro': root.with_suffix('.kicad_pro').read_text()}))
 out.write_text('(export (version E) (design (source "%s")) (components %s)'
                ' (nets (net (code 1) (name "N") %s)))'
                % (root, ' '.join(comps), ' '.join(nodes)))
@@ -128,6 +129,7 @@ class ProjectNetlistTests(unittest.TestCase):
             seen["argv"][:5], ["sch", "export", "netlist", "--format", "kicadsexpr"]
         )
         self.assertEqual(seen["pro"], captured)
+        self.assertEqual(Path(seen["cwd"]).resolve(), self.directory)
         staged_root = Path(seen["argv"][-1])
         self.assertEqual(staged_root.name, "board.kicad_sch")
         self.assertNotEqual(staged_root, self.path)

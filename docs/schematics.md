@@ -396,8 +396,9 @@ It applies no other file-name sanitizing (`SCHEMATIC::GetUniqueFilenameForCurren
 The package proves the mapping from that rule and the captured hierarchy. It compares names in Unicode NFC, because macOS can return decomposed (NFD) names.
 Only a file that the rule cannot account for keeps `sheet_path=None` and `source_path=None`.
 A proved sheet without a produced file raises `SchematicSvgError`.
+Two sheets that map to one page name would make KiCad overwrite a page, so that raises `SchematicSvgError` before KiCad runs.
 
-The command is `kicad-cli sch export svg --output <stage> <root>`. No plot options are exposed.
+The command is `kicad-cli sch export svg --output <stage> <root>`, run with the original project directory as working directory, like ERC. No plot options are exposed.
 Donor use is the full hierarchy (kproj `schematic_exporter`) and a root-only page (`--pages 1`). Select the root entry by `sheet_path == "/"`.
 Theme, black-and-white, drawing-sheet, and page-selection options are post-1.0.
 The stage holds only the project file and hierarchy schematics. A custom drawing sheet referenced by a relative path is not staged.

@@ -81,7 +81,7 @@ Implemented services today:
 - `kicad_primitives.schematics` via project context — placed attributes, selected concrete embedded restore, verified saves, typed pending `Project.erc()` reports, title block, and geometry read ([usage](docs/schematics.md)).
 - `kicad_primitives.tables.LibraryTables` — global/project symbol and footprint tables, `${VAR}` resolve, nested tables, localized add/remove/rename ([usage](docs/tables.md)).
 - `kicad_primitives.netlist` — kicadsexpr netlist **exchange** parse and obtain/export; project-owned obtain is `Project.netlist()` ([usage](docs/netlist.md)).
-PCB document models, project-owned Connectivity beyond exchange, and the remaining TOC areas are not implemented yet.
+PCB document models and the remaining TOC areas are not implemented yet. Live connectivity and pin-to-pin trace without an export are deferred past 1.0.
 PCB editing follows the same high-level patterns as schematic and library editing.
 Exposed unimplemented operations must fail explicitly before making changes.
 

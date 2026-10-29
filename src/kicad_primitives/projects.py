@@ -204,15 +204,17 @@ class Project:
         """
         self._check_open()
         from ._pending_snapshot import capture_pending, staged_hierarchy
-        from .netlist import obtain_netlist
+        from .netlist import _obtain_netlist
 
         pending = capture_pending(self, operation="Netlist obtain")
         with staged_hierarchy(
             self, pending.content, prefix="kicad-primitives-netlist-"
         ) as stage:
-            exchange = obtain_netlist(
+            # Like ERC, the original project directory is the backend CWD.
+            exchange = _obtain_netlist(
                 stage / pending.root.relative_to(self._directory),
                 kicad_cli=kicad_cli,
+                cwd=self._directory,
             )
         return replace(exchange, provenance=pending.snapshot)
 
@@ -228,9 +230,21 @@ class Project:
         not save source, clear pending changes, or require the write guard.
         *output_dir* must not exist, even as a symlink; its existing parents
         must be non-symlink, writable directories. Return each produced file
-        with its proved sheet mapping and snapshot provenance. Acquisition
-        failures raise ``SchematicSvgError`` or ``KicadCliNotFoundError`` and
-        never create the output directory. See ``docs/schematics.md``.
+        with its proved sheet mapping and snapshot provenance.
+        See ``docs/schematics.md``.
+
+        Raises:
+            FileExistsError: *output_dir* exists (including a symlink).
+            FileNotFoundError: a parent of *output_dir* is missing.
+            PermissionError: the parent directory is not writable.
+            UnsupportedSchematicOperationError: a symlinked parent, or an
+                unsupported hierarchy or project/root basename layout.
+            SchematicConflictError: a hierarchy sheet is missing.
+            KicadCliNotFoundError: ``kicad-cli`` discovery failed.
+            SchematicSvgError: two sheets map to one page name, the backend
+                fails or exceeds its 120 s timeout, produces no SVG, or omits a
+                proved sheet. The output directory is not created.
+            ProjectLifecycleError: the Project is closed or discarded.
         """
         self._check_open()
         from ._schematic_svg import export_schematic_svgs
