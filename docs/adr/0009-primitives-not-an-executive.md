@@ -52,8 +52,9 @@ Two kinds of protection stay inside primitives, because a client cannot provide 
 - **File integrity:** byte preservation, source-conflict and link checks, permission checks, staged writes with atomic replacement, refusal to write an unsupported format.
 - **Native file behavior that is part of the KiCad operation itself:** for example, the `.bak` file that KiCad's symbol-library save writes.
 
-Policy stays outside primitives and is offered as separate primitives:
+Policy stays outside primitives:
 connectivity verification, history snapshots and retention, ERC, library discovery roots, and URI style.
+The package still captures recommended sequencing, but in the open, as recipes (see below).
 
 ## Candidates
 
@@ -67,14 +68,47 @@ Cons: clients cannot pick their own sequence. Simple writes need KiCad. Close ca
 Pros: the smallest operations.
 Cons: every client must reimplement conflict, link, and atomic-write checks. One careless client can corrupt a design. This moves risk to the place that is least able to handle it.
 
-### C. Primitives with integrity inside, policy as separate primitives
+### C. Primitives with integrity inside, policy in an explicit recipe layer
 
-Pros: matches the owner's goal statement and ADR 0008. Integrity stays in one place. Clients compose verification, history, and checks in any order. KiCad runs only when a client asks for an operation that needs it.
-Cons: some current behavior must be split. Clients that want today's full save must call three primitives. ADR 0003's "verify on edit" becomes a test contract plus a client choice, not a hidden runtime step.
+Pros: matches the owner's goal statement and ADR 0008. Integrity stays in one place. Recommended sequences are visible, tested code that clients can call, copy, or ignore. KiCad runs only when a client asks for an operation that needs it.
+Cons: some current behavior must be split. Clients that want today's full save call a recipe or write the sequence. ADR 0003's "verify on edit" becomes a recipe and its tests, not a hidden runtime step.
+
+The objection to composite operations is not that sequencing exists. It is that they hide the sequencing. Prose alone does not fix that: snippets in docs are not run or tested, and each client copies and changes them. Candidate C therefore includes a code layer for policy.
 
 ## Proposed decision
 
 Choose C.
+
+### Recipe layer
+
+A module, `kicad_primitives.recipes`, holds short functions that sequence public primitives for a stated purpose.
+Example purpose: "check that the circuit did not change, then save".
+
+Rules:
+
+- **One-way dependency.** Recipes call primitives. Primitives never call recipes. A test enforces that recipe modules import only public names, never `_private` modules.
+- **No hidden state or decisions.** Each recipe is one readable function. Every policy choice is a parameter or a visible line.
+- **Optional.** No primitive requires a recipe. A client with a different policy writes its own sequence from the same primitives.
+- **Docs point at code.** Usage pages explain the purpose and order of each recipe and link to it. They do not duplicate it.
+- **Tests at the right level.** Primitive tests check one job. Recipe tests check the sequence and its outcome.
+
+### Connectivity verification is a client sequence
+
+The check answers one question: did the circuit stay the same?
+A client captures the netlist before editing, edits, captures it again, and compares:
+
+```python
+before = project.netlist()        # pending equals saved at this point
+# ... edits ...
+after = project.netlist()
+unchanged = connectivity_sets(before) == connectivity_sets(after)
+```
+
+All of these primitives exist today. No baseline-netlist primitive is added. Capturing "before" at the right time is the client's job.
+
+The package does not predict or excuse expected electrical changes.
+An edit that changes pin types, net names, or connections changes the circuit, and the comparison reports that.
+The set of acceptable changes is large and specific to each use case. Only the client can decide which differences it accepts.
 
 ### Consequences for existing operations
 
@@ -88,15 +122,15 @@ Simple primitives that stay as they are:
 - `discard()`, and `close()` per ADR 0008 as amended. Close calls only that artifact's own `save()`.
 - `Project.erc()`, `Project.netlist()`, `Project.export_svgs()`, `SymbolLibrary.export_svgs()`, `export_netlist()`, `Netlist.open()`, `connectivity_sets()`. Running KiCad is their stated purpose. Staging pending content is how they do that one job.
 
-Composite operations to split (follow-up ticket, owner grilling first):
+Composite operations to split (follow-up ticket, owner grilling first). Each removed bundle becomes a named recipe:
 
 1. **`Project.save()` and `Schematic.save()`.** Split into:
    - a write primitive: peer-lock guard, integrity checks, staged writes, no KiCad, no ZIP;
-   - connectivity verification, which a client builds from `netlist()` before and after edits plus `connectivity_sets()`, or a thin `verify_connectivity(baseline)` primitive if that is worth it;
-   - `project.snapshot_history()` for ZIP publication and retention.
+   - `project.snapshot_history()` for ZIP publication and retention;
+   - a recipe for the old behavior: capture netlist before edits, compare after, write, snapshot.
 2. **`Project.close()`.** After the split, a dirty close calls only the write primitive. The "unpublished history" retry is removed.
-3. **`Project.save_as()`.** Keep the operation that KiCad's own Save As performs: copy the project file set and rewrite project identity. Remove the built-in electrical proof and ZIP publication. Clients call them if they want them.
-4. **`EmbeddedSymbol.restore_from()`.** The in-memory restore stays a primitive. The deferred "restore intent" that changes later save verification is cross-operation coupling. It moves to the verification primitive's inputs.
+3. **`Project.save_as()`.** Keep the operation that KiCad's own Save As performs: copy the project file set and rewrite project identity. Remove the built-in electrical proof and ZIP publication. A recipe can add them.
+4. **`EmbeddedSymbol.restore_from()`.** The in-memory restore stays a primitive. Remove the deferred "restore intent" and the predicted pin-type signature that change later save verification. A restore that changes pin types changes the circuit. A client that compares netlists sees that difference and decides.
 
 Borderline items for the owner to decide:
 
@@ -111,7 +145,7 @@ Borderline items for the owner to decide:
 
 ### Relationship to earlier ADRs
 
-- This ADR amends ADR 0003. "Connectivity-preserving edits verify unchanged connectivity" becomes a functional-test contract and an available client primitive. It is no longer a hidden step inside save.
+- This ADR amends ADR 0003. "Connectivity-preserving edits verify unchanged connectivity" becomes a recipe, its tests, and a client choice. It is no longer a hidden step inside save. "Intentional electrical edits verify their requested changes" is withdrawn: the package reports differences and does not judge them.
 - This ADR clarifies ADR 0008. "Persistence safeguards" means file integrity, not verification or history policy.
 - ADR 0006 release scope does not change. Verification, ERC, and history remain capabilities. Only their packaging changes.
 
@@ -119,4 +153,4 @@ Borderline items for the owner to decide:
 
 1. The owner accepts, changes, or rejects this ADR.
 2. #39 follows it from the start.
-3. A separate ticket splits the existing composites, with owner grilling on each split. Tests move with the behavior: verification tests become tests of the verification primitive and of client sequences.
+3. A separate ticket splits the existing composites, with owner grilling on each split. Each split adds its recipe. Tests move with the behavior: save-verification tests become recipe tests.
