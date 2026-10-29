@@ -6,6 +6,7 @@ registry keeps one live object per library and makes no workflow decision.
 
 import os
 import unittest
+from contextlib import chdir
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -61,6 +62,45 @@ class SymbolOpenRegistryTests(unittest.TestCase):
         library = SymbolLibrary.open("Parts")
         self.addCleanup(library.discard)
         self.assertEqual(library.path, self.path)
+
+    def test_default_context_prefers_an_existing_path_and_survives_bad_tables(
+        self,
+    ) -> None:
+        broken_home = self.root / "broken"
+        broken_home.mkdir()
+        (broken_home / "sym-lib-table").write_text(
+            "(sym_lib_table (lib", encoding="utf-8"
+        )
+        environment = dict(os.environ)
+        os.environ["KICAD_CONFIG_HOME"] = str(broken_home)
+        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(environment)))
+        # An existing path string never consults the tables.
+        library = SymbolLibrary.open(str(self.path))
+        self.addCleanup(library.discard)
+        self.assertEqual(library.path, self.path)
+        # A malformed default table falls back to the string as a path.
+        with self.assertRaises(FileNotFoundError):
+            SymbolLibrary.open("NoSuchNickname")
+        # An explicit table context is still nickname-first.
+        self.assertIs(SymbolLibrary.open("Parts", tables=self.tables), library)
+        with self.assertRaises(FileNotFoundError):
+            SymbolLibrary.open("Missing", tables=self.tables)
+
+    def test_existing_relative_path_wins_over_a_stale_nickname(self) -> None:
+        environment = dict(os.environ)
+        os.environ["KICAD_CONFIG_HOME"] = str(self.config_home)
+        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(environment)))
+        shadow = self.root / "cwd" / "Parts"
+        shadow.mkdir(parents=True)
+        local = shadow / "Parts.kicad_sym"
+        local.write_bytes(ORIGINAL)
+        with chdir(shadow):
+            by_relative = SymbolLibrary.open("Parts.kicad_sym")
+            self.addCleanup(by_relative.discard)
+            self.assertEqual(by_relative.path, local)
+            by_nickname = SymbolLibrary.open("Parts")  # no such relative file
+            self.addCleanup(by_nickname.discard)
+            self.assertEqual(by_nickname.path, self.path)
 
     def test_pending_edits_are_visible_through_a_second_open(self) -> None:
         first = SymbolLibrary.open(self.path)
