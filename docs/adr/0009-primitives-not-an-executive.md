@@ -49,8 +49,10 @@ A public operation is a primitive when all of these are true:
 
 Two kinds of protection stay inside primitives, because a client cannot provide them safely:
 
-- **File integrity:** byte preservation, source-conflict and link checks, permission checks, staged writes with atomic replacement, refusal to write an unsupported format.
+- **File integrity:** byte preservation, refusal to overwrite a file that changed since it was read, refusal to write through links or without permission, no partial files, and refusal to write an unsupported format.
 - **Native file behavior that is part of the KiCad operation itself:** for example, the `.bak` file that KiCad's symbol-library save writes.
+
+A KiCad peer lock is not file integrity. It says KiCad has the file open, not that KiCad holds unsaved edits. Only the client knows which. Lock state is a query (`is_locked`, `lock_file`); write primitives do not consult it, and recipes that want the guard check it first.
 
 Policy stays outside primitives:
 connectivity verification, history snapshots and retention, ERC, library discovery roots, and URI style.
@@ -101,10 +103,11 @@ A client captures the netlist before editing, edits, captures it again, and comp
 before = project.netlist()        # pending equals saved at this point
 # ... edits ...
 after = project.netlist()
-unchanged = connectivity_sets(before) == connectivity_sets(after)
+unchanged = before == after
 ```
 
-All of these primitives exist today. No baseline-netlist primitive is added. Capturing "before" at the right time is the client's job.
+`Netlist.__eq__` compares electrical content: component identity and every pin-to-net connection. Export order and net codes do not count. `connectivity_sets()` remains a helper for a client that wants to see which connections differ.
+No baseline-netlist primitive is added. Capturing "before" at the right time is the client's job.
 
 The package does not predict or excuse expected electrical changes.
 An edit that changes pin types, net names, or connections changes the circuit, and the comparison reports that.
@@ -127,16 +130,17 @@ Each step is a public primitive:
 - `save()` writes the artifact's pending bytes (`to_bytes()`). It runs `validate()` first, because an invalid artifact must not reach disk. It does nothing else.
 - `is_modified` is a flag. Each setter sets it after a real change; an equal-value set is a no-op and leaves it alone. The artifact does not keep a copy of the original bytes to compare against.
 
-### Source fingerprint and the single-file writer
+### Write promises
 
-`open()` captures a fingerprint of the file it read (mtime, size, and content hash; the mix is an implementation detail).
-The artifact holds it privately. The caller never sees it.
-At write time the artifact passes the fingerprint to the private writer, which refuses when the file on disk no longer matches.
-After a successful write the artifact refreshes the fingerprint from the file it wrote.
-A native backup such as the symbol `.bak` copies the file on disk before replacement. It needs no in-memory original.
+Every write makes these promises:
 
-The writer stages to a same-directory temporary file whose name never ends in a KiCad extension, flushes, then renames atomically.
-The existing single-file save already does this. It becomes the shared writer for every single-file artifact.
+- **No silent overwrite.** A write refuses when the file on disk is not the file this artifact read. The artifact remembers what it read at `open()`; the caller never handles that record.
+- **No partial file.** A reader sees the old file or the new file, never a mix. A failed write leaves the original untouched.
+- **No stray KiCad files.** Nothing the writer creates while working can be mistaken for a KiCad file.
+- **No in-memory original.** Native backups such as the symbol `.bak` are made from the file on disk.
+
+How these are kept (a fingerprint of mtime, size, and content hash; a same-directory temporary file renamed into place) is an implementation detail and may change.
+One private writer keeps the promises for every single-file artifact.
 A multi-file writer is not needed until a document set that references itself, such as a schematic hierarchy, is split out of `Project.save()`. That is assessed in the composite-split ticket.
 
 ### Footprint libraries are two levels
@@ -145,7 +149,7 @@ A `.pretty` library is a directory of independent `.kicad_mod` files, not one fi
 The model follows KiCad's footprint library editor: a cached, filterable table of contents on one side, one editor per opened footprint, edit marks, and a "save all?" decision at quit.
 
 - `FootprintLibrary` is the directory. Opening it parses every file once into `summaries`: immutable values with name, description, tags, attributes, pad counts, and path. Clients filter and sort them as plain data without opening anything. `library.refresh()` rescans the directory and re-parses changed files. Nothing refreshes by itself, as with KiCad's refresh button, so tooling that runs alongside KiCad or other tools calls `refresh()` when it wants a current view.
-- `library.footprint(name)` opens one live `Footprint` on demand and returns the same object while it is open. A live footprint holds its own open-time fingerprint; `refresh()` does not touch it, and a save over a file that changed underneath is still refused.
+- `library.footprint(name)` opens one live `Footprint` on demand and returns the same object while it is open. `refresh()` does not touch a live footprint, and its write promises still hold: a save over a file that changed underneath is refused.
 - `Footprint` is one file with the full lifecycle: open, read, modify, validate, write, close. `footprint.is_modified` is its edit mark. `library.is_modified` is true when any open footprint is modified. Save clears the marks.
 - `create`, `copy`, `delete(name)`, and `rename(old, new)` are directory operations and take effect at once. They are not content edits. Rename follows KiCad: write under the new name, update the internal name and a Value that equalled the old name, delete the old file. Delete invalidates an open footprint handle; rename rebinds its path.
 - The library has nothing of its own to write. Its close is a decision about its open footprints, chosen once at open: `FootprintLibrary.open(path, on_close="save")`. `save` (default, the owner's choice) saves every modified open footprint, then closes all of them, like "quit, save all" and like dirty close on every other artifact. `discard` throws open edits away. `raise` refuses while any footprint is modified and names them, so the client decides per footprint. A library `with` block applies the flag on normal exit and discards on an exception.
@@ -158,24 +162,25 @@ Simple primitives that stay as they are:
 - Symbol edits: attributes, pins, bodies, rectangles, texts, create, rename, delete, copy, `resolve()`.
 - Table reads and edits: `libraries()`, `resolve()`, `table()`, `entries`, `add_entry`, `rename`, `set_uri`, `delete`.
 - `PlacedSymbol.set_attribute` and `delete_attribute`.
-- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with integrity checks only. The symbol `.bak` file is native save behavior. Both gain a public `validate()`, a flag-based `is_modified`, and the open-captured fingerprint in place of a stored byte copy.
+- `SymbolLibrary.save()` and `save_as()`, `LibraryTable.save()` and `save_as()`: write with the promises above only. The symbol `.bak` file is native save behavior. Both gain a public `validate()` and a flag-based `is_modified`, and drop their stored byte copies.
 - `discard()`, and `close()` per ADR 0008 as amended. Close calls only that artifact's own `save()`.
 - `Project.erc()`, `Project.netlist()`, `Project.export_svgs()`, `SymbolLibrary.export_svgs()`, `export_netlist()`, `Netlist.open()`, `connectivity_sets()`. Running KiCad is their stated purpose. Staging pending content is how they do that one job.
 
 Composite operations to split (follow-up ticket, owner grilling first). Each removed bundle becomes a named recipe:
 
 1. **`Project.save()` and `Schematic.save()`.** Split into:
-   - `validate()` and a write primitive: peer-lock guard, integrity checks, staged writes, no KiCad, no ZIP. Whether a hierarchy needs a multi-file writer is decided here;
-   - `project.snapshot_history()` for ZIP publication and retention;
-   - a recipe for the old behavior: capture netlist before edits, compare after, write, snapshot.
+   - `validate()` and a write primitive that keeps the write promises: no KiCad, no ZIP, no lock guard. Whether a hierarchy needs a multi-file writer is decided here;
+   - `project.backup()`: publish one ZIP snapshot and apply retention, the same feature KiCad calls backup;
+   - a recipe for the old behavior: check `is_locked`, capture netlist before edits, compare after, write, backup.
 2. **`Project.close()`.** After the split, a dirty close calls only the write primitive. The "unpublished history" retry is removed.
 3. **`Project.save_as()`.** Keep the operation that KiCad's own Save As performs: copy the project file set and rewrite project identity. Remove the built-in electrical proof and ZIP publication. A recipe can add them.
-4. **`EmbeddedSymbol.restore_from()`.** The in-memory restore stays a primitive. Remove the deferred "restore intent" and the predicted pin-type signature that change later save verification. A restore that changes pin types changes the circuit. A client that compares netlists sees that difference and decides.
+4. **`EmbeddedSymbol.restore_from()`**, renamed **`update_from_library(library, name)`**. A schematic carries its own copy of every symbol it uses (the `lib_symbols` cache). This primitive replaces that copy with the library's current definition, in memory: KiCad's "Update Symbol from Library". If the library symbol changed since the schematic cached it, for example a pin corrected from `output` to `passive`, the update carries that change and the netlist reflects it. Today's save predicts that pin-type change and checks the netlist against the prediction; that prediction is removed, along with the deferred "restore intent". `before != after` reports the change, and the client decides.
+5. **`ensure_writes_allowed()` and `write_is_permitted()`.** Removed. `is_locked` and `lock_file` remain as the query. A client or recipe that wants the guard checks them before writing. A lock with no pending KiCad edits does not forbid a controlled external write, especially to a library.
 
-Borderline items for the owner to decide:
+Decided by the owner:
 
-- **Peer-lock checks inside write primitives.** A write while KiCad holds the file can lose the user's work, so this proposal treats the check as integrity. `ensure_writes_allowed(dry_run=..., inside_kicad=...)` is a policy helper. It could become a plain query.
-- **Process-wide open registry (#39).** The owner asked for it. It keeps one live object per file and makes no workflow decision. It passes the test.
+- **Peer lock is a query, not a write guard** (item 5 above).
+- **Process-wide open registry (#39).** Accepted. It keeps one live object per file and makes no workflow decision.
 
 ### Library-item rename and project references (follow-up)
 
@@ -194,7 +199,8 @@ The same shape applies to library nickname renames (`TableEntry.rename()` exists
 
 ### Consequences for #39
 
-- `FootprintLibrary` and `Footprint` follow the two-level model above: cached `summaries` with explicit `refresh()`, on-demand live footprints, edit marks, and the `on_close` flag with `save` as default. `Footprint` has a public `validate()` and writes one file through the shared single-file writer. Nothing verifies or archives.
+- `FootprintLibrary` and `Footprint` follow the two-level model above: cached `summaries` with explicit `refresh()`, on-demand live footprints, edit marks, and the `on_close` flag with `save` as default. `Footprint` has a public `validate()` and writes one file under the write promises. Nothing verifies, archives, or checks locks.
+- `Netlist.__eq__` compares electrical content, so `before == after` is the verification check.
 - `LibraryTables.find_libraries()` requires explicit roots.
 - `LibraryTables.portable_uri(path)` returns the `${VAR}` form of a path. Clients register with `add_entry(nickname, uri)`. There is no `add_library` helper that chooses a nickname or URI style.
 
