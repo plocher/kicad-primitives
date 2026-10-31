@@ -1,4 +1,4 @@
-"""Bounded Project save-as: frozen files, known identity spans, explicit publication."""
+"""Bounded Project save-as: frozen files, known identity spans, then rebind (D8)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import os
 import stat
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from lossless_sexpr import parse
 
@@ -19,41 +18,25 @@ from . import (
     _schematic_persist,
     _symbol_persist,
 )
-from ._schematic_restore import predict_restored_signature
-from .netlist import export_netlist
 from .projects import (
     InvalidProjectError,
     Project,
-    ProjectLifecycleError,
-    ProjectWriteBlockedError,
     _companion,
-    _native_lock_path,
     _read_text_variables,
 )
 from .schematics import (
     SchematicConflictError,
-    SchematicVerificationError,
-    SheetFile,
     _sheet_file_from_document,
 )
 
 
-def _check_state(project: Project, generation: int) -> None:
-    project._check_open()
-    if project._generation != generation:
-        raise ProjectLifecycleError(
-            "A newer pending state was not included in Project save-as"
-        )
-
-
 def _current(
     project: Project,
-    generation: int,
     inputs: tuple[_project_files._Input, ...],
     directories: tuple[_project_assets._Directory, ...],
 ) -> None:
-    _check_state(project, generation)
-    project.ensure_writes_allowed()
+    """Check that every captured source is still the file that was read."""
+    project._check_open()
     _project_files.check(project.directory, inputs)
     _project_assets.check(directories)
     if _companion(project.directory, project.base_name, ".kicad_pcb") != (
@@ -62,7 +45,6 @@ def _current(
         raise SchematicConflictError(
             "Source companion membership changed during save-as"
         )
-    _check_state(project, generation)
 
 
 def _validate_layout(destination: Path, files: dict[Path, bytes], name: str) -> None:
@@ -132,96 +114,6 @@ def _project_metadata(
     return output
 
 
-def _write_stage(directory: Path, files: dict[Path, bytes]) -> None:
-    for relative, raw in files.items():
-        target = directory / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(raw)
-
-
-def _prove(
-    project: Project,
-    documents: tuple[SheetFile, ...],
-    frozen: dict[Path, bytes],
-    mapped: dict[Path, bytes],
-    destination: Path,
-    name: str,
-    generation: int,
-    inputs: tuple[_project_files._Input, ...],
-    directories: tuple[_project_assets._Directory, ...],
-    *,
-    kicad_cli: str | os.PathLike[str] | None,
-) -> None:
-    if project.schematic_file is None:
-        return
-    with TemporaryDirectory(prefix="kp-project-rename-proof-") as temporary:
-        root = Path(temporary)
-        old = root / "source"
-        new = root / "destination"
-        _write_stage(
-            old,
-            {
-                document.path.relative_to(project.directory): document._baseline
-                for document in documents
-            }
-            | {Path(project.project_file.name): project._project_baseline},
-        )
-        before = _schematic_persist._electrical_signature(
-            export_netlist(
-                old / project.schematic_file.name,
-                root / "before.net",
-                kicad_cli=kicad_cli,
-            ),
-            include_libparts=True,
-        )
-        _current(project, generation, inputs, directories)
-        changed = tuple(d for d in documents if frozen[d.path] != d._baseline)
-        expected = predict_restored_signature(before, documents, changed)
-        _write_stage(
-            old,
-            {
-                document.path.relative_to(project.directory): frozen[document.path]
-                for document in documents
-            },
-        )
-        pending = _schematic_persist._electrical_signature(
-            export_netlist(
-                old / project.schematic_file.name,
-                root / "pending.net",
-                kicad_cli=kicad_cli,
-            ),
-            include_libparts=True,
-        )
-        if pending != expected:
-            raise SchematicVerificationError(
-                "Pending save-as state does not match independent electrical effects"
-            )
-        _current(project, generation, inputs, directories)
-        _write_stage(
-            new, {path.relative_to(destination): raw for path, raw in mapped.items()}
-        )
-        renamed = _schematic_persist._electrical_signature(
-            export_netlist(
-                new / f"{name}.kicad_sch", root / "renamed.net", kicad_cli=kicad_cli
-            ),
-            include_libparts=True,
-        )
-        if renamed != pending:
-            raise SchematicVerificationError(
-                "Renamed Project changed full electrical identity"
-            )
-        _current(project, generation, inputs, directories)
-
-
-def _destination_locks(paths: tuple[Path, ...]) -> None:
-    for source in paths:
-        lock = _native_lock_path(source)
-        try:
-            lock.lstat()
-        except FileNotFoundError:
-            continue
-        raise ProjectWriteBlockedError(f"Native destination peer lock detected: {lock}")
-
 
 def _destination_outputs(
     outputs: dict[Path, bytes], installed: dict[Path, os.stat_result]
@@ -250,12 +142,9 @@ def save_as(
     project: Project,
     new_path: str | os.PathLike[str],
     name: str,
-    *,
-    kicad_cli: str | os.PathLike[str] | None,
 ) -> None:
-    """Publish one new bounded layout, leaving originals and live identity intact on failure."""
+    """Write one new bounded layout, then rebind; originals stay untouched."""
     project._check_open()
-    generation = project._generation
     if not isinstance(name, str):
         raise TypeError("new_project_name must be a filename stem")
     if (
@@ -275,9 +164,7 @@ def save_as(
     _symbol_persist._check_new_destination(
         destination, unsupported_error=InvalidProjectError
     )
-    project.ensure_writes_allowed()
     documents = _schematic_persist._hierarchy(project)
-    project.ensure_writes_allowed()
     if any(d.version != 20260306 for d in documents):
         raise InvalidProjectError(
             "Schematic relocation requires native format 20260306"
@@ -287,7 +174,7 @@ def save_as(
         and project.schematic_file.stem != project.base_name
     ):
         raise InvalidProjectError(
-            "Relocation proof requires matching source root/project basenames"
+            "Relocation requires matching source root/project basenames"
         )
     captured = {
         project.project_file: _project_files.read(
@@ -297,7 +184,7 @@ def save_as(
     frozen = {document.path: document.to_bytes() for document in documents}
     for document in documents:
         captured[document.path] = _project_files.read(
-            project.directory, document.path, baseline=document._baseline
+            project.directory, document.path, baseline=document._fingerprint
         )
     targets = {
         document.path: destination
@@ -347,32 +234,7 @@ def save_as(
     )
     _validate_layout(destination, outputs, name)
     inputs = tuple(captured.values())
-    _current(project, generation, inputs, directories)
-    _prove(
-        project,
-        documents,
-        frozen,
-        outputs,
-        destination,
-        name,
-        generation,
-        inputs,
-        directories,
-        kicad_cli=kicad_cli,
-    )
-    snapshot = _project_backup.build(
-        tuple(
-            _project_backup._Member(
-                source,
-                target.relative_to(destination).as_posix(),
-                captured[source].raw,
-                outputs[target],
-                captured[source].info,
-            )
-            for source, target in targets.items()
-        )
-    )
-    _current(project, generation, inputs, directories)
+    _current(project, inputs, directories)
     projections = {
         d.path: _sheet_file_from_document(
             targets[d.path], parse(outputs[targets[d.path]].decode("utf-8"))
@@ -399,18 +261,9 @@ def save_as(
                 project.directory
             )
             target_directory.mkdir(parents=True, exist_ok=True)
-        owned_targets = tuple(
-            targets[source]
-            for source in (
-                project.project_file,
-                *frozen,
-                *((project.pcb_file,) if project.pcb_file else ()),
-            )
-        )
         installed: dict[Path, os.stat_result] = {}
         for source, target in targets.items():
-            _current(project, generation, inputs, directories)
-            _destination_locks(owned_targets)
+            _current(project, inputs, directories)
             target.parent.mkdir(parents=True, exist_ok=True)
             installed[target] = _symbol_persist.save_new_source(
                 target,
@@ -419,15 +272,7 @@ def save_as(
                 unsupported_error=InvalidProjectError,
             )
         _destination_outputs(outputs, installed)
-        context = Project.open(destination / f"{name}.kicad_pro")
-        _schematic_persist._hierarchy(context)
-        _current(project, generation, inputs, directories)
-        context.ensure_writes_allowed()
-        _project_backup.publish(context, snapshot, context.backup_directory, None)
-        _current(project, generation, inputs, directories)
-        _destination_locks(owned_targets)
-        _destination_outputs(outputs, installed)
-        _current(project, generation, inputs, directories)
+        Project.open(destination / f"{name}.kicad_pro").schematic()
         old_project, old_pcb = project.project_file, project.pcb_file
         for document in documents:
             source = document.path

@@ -17,7 +17,9 @@ class _Input:
     info: os.stat_result
 
 
-def read(root: Path, path: Path, *, baseline: bytes | None = None) -> _Input:
+def read(
+    root: Path, path: Path, *, baseline: _symbol_persist.Baseline | None = None
+) -> _Input:
     """Capture one contained regular source without requiring overwrite permissions."""
     if not path.is_relative_to(root) or path.resolve() != path:
         raise InvalidProjectError(
@@ -33,7 +35,7 @@ def read(root: Path, path: Path, *, baseline: bytes | None = None) -> _Input:
         path.lstat()
     ):
         raise SchematicConflictError(f"Relocation source changed during read: {path}")
-    if baseline is not None and raw != baseline:
+    if baseline is not None and not _symbol_persist._matches(baseline, raw):
         raise SchematicConflictError(f"Relocation source changed since capture: {path}")
     return _Input(path, raw, info)
 

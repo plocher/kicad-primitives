@@ -2,10 +2,8 @@
 
 import json
 import os
-import shutil
 import stat
 import unittest
-import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -14,7 +12,6 @@ from kicad_primitives.projects import (
     InvalidProjectError,
     Project,
     ProjectLifecycleError,
-    ProjectWriteBlockedError,
 )
 
 _ROOT = "00000000-0000-4000-8000-000000000001"
@@ -58,23 +55,6 @@ class ProjectSaveAsTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def verifier(self) -> Path:
-        """Supply fixed full electrical evidence for metadata-preservation cases."""
-        path = self.root / "proof-cli"
-        path.write_text(
-            "#!/usr/bin/env python3\nimport pathlib,sys\n"
-            "pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text("
-            "'(export (version E) (components (comp (ref R1) "
-            "(libsource (lib Device) (part R)))) "
-            "(libparts (libpart (lib Device) (part R) "
-            "(pins (pin (num 1) (name ~) (type passive))))) "
-            '(nets (net (name "signal") (node (ref R1) (pin 1) '
-            "(pinfunction ~) (pintype passive)))))')\n",
-            encoding="utf-8",
-        )
-        path.chmod(0o755)
-        return path
-
     def hierarchy(self, filename: str = "sub/child.kicad_sch") -> Path:
         """Create explicit owned and foreign instance paths for a child file."""
         self.sch.write_bytes(
@@ -113,7 +93,10 @@ class ProjectSaveAsTests(unittest.TestCase):
             f'(project "Old" (path "/{_ROOT}"'.encode(),
             f'(project "New" (path "/{_ROOT}"'.encode(),
         )
-        project.save_as(self.destination, "New", kicad_cli=self.verifier())
+        with patch(
+            "subprocess.run", side_effect=AssertionError("save-as ran a command")
+        ):
+            project.save_as(self.destination, "New")
         self.assertEqual(
             {p: (p.read_bytes(), p.stat().st_ino) for p in original}, original
         )
@@ -128,14 +111,10 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.assertEqual(schematic.to_bytes(), expected_sch)
         self.assertEqual(project.schematic_file.read_bytes(), expected_sch)
         self.assertFalse(project.is_modified)
-        archives = tuple((self.destination / "New-backups").glob("New-*.zip"))
-        self.assertEqual(len(archives), 1)
-        with zipfile.ZipFile(archives[0]) as archive:
-            self.assertEqual(
-                set(archive.namelist()), {"New.kicad_pro", "New.kicad_sch"}
-            )
-            self.assertEqual(archive.read("New.kicad_pro"), expected_pro)
-            self.assertEqual(archive.read("New.kicad_sch"), expected_sch)
+        self.assertEqual(
+            {p.name for p in self.destination.iterdir()},
+            {"New.kicad_pro", "New.kicad_sch"},
+        )
         project.close()
 
     def test_local_context_closure_preserves_raw_rows_libraries_rules_and_worksheets(
@@ -210,7 +189,7 @@ class ProjectSaveAsTests(unittest.TestCase):
             if path.is_file()
         }
         project = Project.open(self.pro)
-        project.save_as(self.destination, "New", kicad_cli=self.verifier())
+        project.save_as(self.destination, "New")
         self.assertEqual(
             {p: (p.read_bytes(), p.stat().st_ino) for p in original}, original
         )
@@ -262,7 +241,7 @@ class ProjectSaveAsTests(unittest.TestCase):
             path.chmod(0o444)
         self.source.chmod(0o555)
         self.addCleanup(self.source.chmod, 0o755)
-        project.save_as(self.destination, "New", kicad_cli=self.verifier())
+        project.save_as(self.destination, "New")
         self.assertEqual(self.pro.read_bytes(), _JSON)
         self.assertEqual(self.sch.read_bytes(), _SOURCE)
         self.assertEqual(stat.S_IMODE(self.source.stat().st_mode), 0o555)
@@ -280,7 +259,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         child = project.schematic().file(child_path)
         placed = child.symbol("R2")
         root_raw, child_raw = root.to_bytes(), child.to_bytes()
-        project.save_as(self.destination, "New", kicad_cli=self.verifier())
+        project.save_as(self.destination, "New")
         self.assertIs(
             project.schematic().file(self.destination / "sub/child.kicad_sch"), child
         )
@@ -315,7 +294,7 @@ class ProjectSaveAsTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.pro.write_bytes(raw)
                 target = self.root / f"json-{index}"
-                Project.open(self.pro).save_as(target, "New", kicad_cli=self.verifier())
+                Project.open(self.pro).save_as(target, "New")
                 self.assertEqual((target / "New.kicad_pro").read_bytes(), expected)
                 self.assertEqual(self.pro.read_bytes(), raw)
 
@@ -336,7 +315,7 @@ class ProjectSaveAsTests(unittest.TestCase):
                 self.pro.write_bytes(raw)
                 project = Project.open(self.pro)
                 with self.assertRaises((ValueError, OSError)):
-                    project.save_as(self.destination, "New", kicad_cli=self.verifier())
+                    project.save_as(self.destination, "New")
                 self.assertFalse(self.destination.exists())
                 self.assertEqual(project.directory, self.source)
                 self.assertEqual(self.pro.read_bytes(), raw)
@@ -349,7 +328,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.hierarchy("New.kicad_sch")
         project = Project.open(self.pro)
         with self.assertRaises((ValueError, OSError)):
-            project.save_as(self.destination, "New", kicad_cli=self.verifier())
+            project.save_as(self.destination, "New")
         self.assertFalse(self.destination.exists())
         self.assertEqual(project.directory, self.source)
 
@@ -369,7 +348,7 @@ class ProjectSaveAsTests(unittest.TestCase):
             "New.kicad_pro",
         ):
             with self.subTest(name=name), self.assertRaises((ValueError, OSError)):
-                project.save_as(self.destination, name, kicad_cli=self.verifier())
+                project.save_as(self.destination, name)
             self.assertFalse(self.destination.exists())
         self.destination.mkdir()
         sentinel = self.destination / "keep"
@@ -386,15 +365,16 @@ class ProjectSaveAsTests(unittest.TestCase):
             project.save_as(self.root / "closed-target", "New")
         self.assertFalse((self.root / "closed-target").exists())
 
-    def test_native_source_peer_lock_blocks_clone_before_destination_even_if_readonly_copy(
-        self,
-    ) -> None:
+    def test_native_peer_lock_is_a_query_not_a_save_as_guard(self) -> None:
         project = Project.open(self.pro)
         project.lock_file.write_bytes(b"native peer")
-        with self.assertRaises(ProjectWriteBlockedError):
-            project.save_as(self.destination, "New", kicad_cli=self.verifier())
-        self.assertFalse(self.destination.exists())
+        self.assertTrue(project.is_locked)
+        project.save_as(self.destination, "New")
+        self.assertTrue((self.destination / "New.kicad_sch").is_file())
         self.assertEqual(self.pro.read_bytes(), _JSON)
+        self.assertEqual(
+            (self.source / "~Old.kicad_pro.lck").read_bytes(), b"native peer"
+        )
 
     def test_unknown_mixed_owned_and_foreign_group_does_not_partially_rename(
         self,
@@ -405,9 +385,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         )
         self.sch.write_bytes(raw)
         with self.assertRaises(InvalidProjectError):
-            Project.open(self.pro).save_as(
-                self.destination, "New", kicad_cli=self.verifier()
-            )
+            Project.open(self.pro).save_as(self.destination, "New")
         self.assertEqual(self.sch.read_bytes(), raw)
         self.assertFalse(self.destination.exists())
 
@@ -430,7 +408,7 @@ class ProjectSaveAsTests(unittest.TestCase):
             patch("kicad_primitives._symbol_persist.os.link", side_effect=fail_profile),
             self.assertRaises(OSError),
         ):
-            project.save_as(self.destination, "New", kicad_cli=self.verifier())
+            project.save_as(self.destination, "New")
         self.assertEqual(project.directory, self.source)
         self.assertIs(project.schematic().files[0], schematic)
         self.assertEqual(placed.path, self.sch)
@@ -443,7 +421,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         project.discard()
         self.assertEqual(self.sch.read_bytes(), _SOURCE)
 
-    def test_destination_link_replacement_during_zip_publication_cannot_rebind_root(
+    def test_destination_output_replaced_during_publication_cannot_rebind_root(
         self,
     ) -> None:
         project = Project.open(self.pro)
@@ -455,7 +433,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         def replace_destination_after_zip(source: Path, target: Path) -> None:
             nonlocal changed
             real_link(source, target)
-            if target.suffix == ".zip" and not changed:
+            if target.name == "New.kicad_pro" and not changed:
                 changed = True
                 output = self.destination / "New.kicad_sch"
                 moved = self.destination / ".foreign-moved.kicad_sch"
@@ -469,66 +447,10 @@ class ProjectSaveAsTests(unittest.TestCase):
             ),
             self.assertRaises((ValueError, OSError)),
         ):
-            project.save_as(self.destination, "New", kicad_cli=self.verifier())
+            project.save_as(self.destination, "New")
         self.assertTrue(changed)
         self.assertEqual(project.directory, self.source)
         self.assertIs(project.schematic().files[0], schematic)
         self.assertTrue(project.is_modified)
         self.assertEqual(self.sch.read_bytes(), _SOURCE)
         self.assertTrue((self.destination / ".foreign-moved.kicad_sch").is_file())
-
-    def test_late_edit_during_final_destination_validation_keeps_original_binding_and_pending_state(
-        self,
-    ) -> None:
-        fixture = (
-            Path(__file__).resolve().parents[1] / "fixtures/projects/rename-native"
-        )
-        source = self.root / "native-source"
-        source.mkdir()
-        for path in fixture.glob("*.kicad_*"):
-            shutil.copyfile(path, source / path.name)
-        original = {
-            path: (path.read_bytes(), path.stat().st_ino) for path in source.iterdir()
-        }
-        pro = source / "issue23403.kicad_pro"
-        project = Project.open(pro)
-        schematic = project.schematic().files[0]
-        placed = schematic.symbol("C0")
-        destination = self.root / "native-clone"
-        output = destination / "Renamed.kicad_sch"
-        real_read = Path.read_bytes
-        changed = False
-
-        def late_edit_on_final_output_read(path: Path) -> bytes:
-            nonlocal changed
-            raw = real_read(path)
-            if (
-                path == output
-                and not changed
-                and tuple((destination / "Renamed-backups").glob("*.zip"))
-            ):
-                changed = True
-                placed.set_attribute("Value", "LATE-PENDING-EDIT")
-            return raw
-
-        with (
-            patch("kicad_primitives._project_relocate._prove", return_value=None),
-            patch("pathlib.Path.read_bytes", new=late_edit_on_final_output_read),
-            self.assertRaises(ProjectLifecycleError),
-        ):
-            project.save_as(destination, "Renamed")
-        self.assertTrue(changed)
-        self.assertEqual(project.directory, source)
-        self.assertEqual(project.project_file, pro)
-        self.assertIs(project.schematic().files[0], schematic)
-        self.assertEqual(placed.path, source / "issue23403.kicad_sch")
-        self.assertEqual(placed.value, "LATE-PENDING-EDIT")
-        self.assertTrue(project.is_modified)
-        project.discard()
-        self.assertEqual(
-            {path: (path.read_bytes(), path.stat().st_ino) for path in original},
-            original,
-        )
-        self.assertTrue(output.is_file())
-        self.assertNotIn(b"LATE-PENDING-EDIT", output.read_bytes())
-        self.assertEqual(len(tuple((destination / "Renamed-backups").glob("*.zip"))), 1)

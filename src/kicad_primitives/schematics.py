@@ -690,8 +690,6 @@ class SheetFile:
         object.__setattr__(self, "_document", updated._document)
         if changed:
             object.__setattr__(self, "_modified", True)
-        if changed and self._project is not None:
-            self._project._generation += 1
 
     def symbol(self, reference: str) -> PlacedSymbol:
         """Return the unique placed symbol with this reference."""
