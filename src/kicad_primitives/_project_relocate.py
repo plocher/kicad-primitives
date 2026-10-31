@@ -457,7 +457,6 @@ def save_as(
                 () if project._schematic_file is None else (project._schematic_file,),
                 documents,
             )
-        project._history_pending = False
     except Exception as exc:
         exc.add_note(
             f"Incomplete save-as destination retained at {destination}; no recursive cleanup was attempted"
