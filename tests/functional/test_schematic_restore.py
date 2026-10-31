@@ -1,4 +1,4 @@
-"""Selected concrete cache restore through artifact objects, never a batch API."""
+"""EmbeddedSymbol.update_from_library through artifact objects, never a batch API."""
 
 import unittest
 from pathlib import Path
@@ -90,7 +90,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
             [s.lib_id for s in self.schematic.embedded_symbols],
             ["Test:Part", "Test:Other"],
         )
-        embedded.restore_from(self.parent, "Parent")
+        embedded.update_from_library(self.parent, "Parent")
         self.assertEqual(
             self.schematic.to_bytes(), SOURCE.replace(CACHE, EXPECTED, 1).encode()
         )
@@ -103,9 +103,9 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.assertEqual(
             self.schematic.to_bytes(), SOURCE.replace(CACHE, EXPECTED, 1).encode()
         )
-        embedded.restore_from(self.reopen_parent(), "Parent")
+        embedded.update_from_library(self.reopen_parent(), "Parent")
         first = self.schematic.to_bytes()
-        embedded.restore_from(self.reopen_parent(), "Parent")
+        embedded.update_from_library(self.reopen_parent(), "Parent")
         self.assertEqual(self.schematic.to_bytes(), first)
 
     def test_handles_remain_live_across_attributes_other_cache_and_revert(self) -> None:
@@ -113,7 +113,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         other = self.schematic.embedded_symbol("Test:Other")
         placed = self.schematic.symbol("R1")
         placed.set_attribute("MPN", "é" * 50)
-        embedded.restore_from(self.parent, "Parent")
+        embedded.update_from_library(self.parent, "Parent")
         placed.set_attribute("Value", "new placed value")
         second_parent = PARENT.replace("Parent", "Second").replace(
             "pin passive", "pin output", 1
@@ -122,7 +122,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {second_parent})", encoding="utf-8"
         )
-        other.restore_from(self.reopen_parent(), "Second")
+        other.update_from_library(self.reopen_parent(), "Second")
         self.assertIs(self.schematic.embedded_symbol("Test:Part"), embedded)
         self.assertIs(self.schematic.embedded_symbol("Test:Other"), other)
         self.assertIs(self.schematic.symbol("R1"), placed)
@@ -134,7 +134,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {old_parent})", encoding="utf-8"
         )
-        embedded.restore_from(self.reopen_parent(), "Parent")
+        embedded.update_from_library(self.reopen_parent(), "Parent")
         self.assertIn(CACHE.encode(), self.schematic.to_bytes())
         self.assertTrue(
             self.project.is_modified
@@ -150,7 +150,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.parent_path.write_bytes(
             f"(kicad_symbol_lib (version 20251024) {parent})".encode()
         )
-        schematic.embedded_symbol("Test:Part").restore_from(
+        schematic.embedded_symbol("Test:Part").update_from_library(
             self.reopen_parent(), "Parent"
         )
         expected = EXPECTED.replace(
@@ -168,7 +168,6 @@ class EmbeddedRestoreTests(unittest.TestCase):
             PARENT.replace('(number "1")', '(number "9")'),
             PARENT.replace("(at 0 5.08 270)", "(at 1 5.08 270)"),
             PARENT.replace('(name "A")', '(hide yes) (name "A")'),
-            PARENT.replace("pin passive", "pin power_in", 1),
             PARENT.replace('(opaque "unchanged")', '(opaque "different")'),
             PARENT.replace('(symbol "Parent"', '(symbol "Parent" (extends "Base")', 1),
         ):
@@ -177,7 +176,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
                     f"(kicad_symbol_lib (version 20251024) {parent})", encoding="utf-8"
                 )
                 with self.assertRaises(UnsupportedSchematicOperationError):
-                    self.schematic.embedded_symbol("Test:Part").restore_from(
+                    self.schematic.embedded_symbol("Test:Part").update_from_library(
                         self.reopen_parent(), "Parent"
                     )
                 self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
@@ -202,7 +201,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
                 self.path.write_bytes(source.encode())
                 schematic = Project.open(self.directory).schematic().files[0]
                 with self.assertRaises(error):
-                    schematic.embedded_symbol("Test:Part").restore_from(
+                    schematic.embedded_symbol("Test:Part").update_from_library(
                         self.parent, "Parent"
                     )
                 self.assertEqual(schematic.to_bytes(), source.encode())
@@ -217,7 +216,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
                 else:
                     parent.discard()
                 with self.assertRaises(RuntimeError):
-                    self.schematic.embedded_symbol("Test:Part").restore_from(
+                    self.schematic.embedded_symbol("Test:Part").update_from_library(
                         parent, "Parent"
                     )
                 self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
@@ -225,7 +224,9 @@ class EmbeddedRestoreTests(unittest.TestCase):
                 self.assertFalse(self.project.is_modified)
 
     def test_captured_restore_intent_survives_parent_terminal_exit(self) -> None:
-        self.schematic.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
+        self.schematic.embedded_symbol("Test:Part").update_from_library(
+            self.parent, "Parent"
+        )
         expected = self.schematic.to_bytes()
         self.parent.discard()
         self.project.save()
@@ -237,104 +238,42 @@ class EmbeddedRestoreTests(unittest.TestCase):
     ) -> None:
         self.parent.symbol("Parent").body(1, 1).add_pin("3", "C", "passive", x=5, y=0)
         with self.assertRaises(UnsupportedSchematicOperationError):
-            self.schematic.embedded_symbol("Test:Part").restore_from(
+            self.schematic.embedded_symbol("Test:Part").update_from_library(
                 self.parent, "Parent"
             )
         self.reopen_parent()
         self.parent.symbol("Parent").body(1, 1).pin("2").delete()
         with self.assertRaises(UnsupportedSchematicOperationError):
-            self.schematic.embedded_symbol("Test:Part").restore_from(
+            self.schematic.embedded_symbol("Test:Part").update_from_library(
                 self.parent, "Parent"
             )
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20250114) {PARENT})", encoding="utf-8"
         )
         with self.assertRaises(UnsupportedSchematicOperationError):
-            self.schematic.embedded_symbol("Test:Part").restore_from(
+            self.schematic.embedded_symbol("Test:Part").update_from_library(
                 self.reopen_parent(), "Parent"
             )
         self.path.write_bytes(SOURCE.replace("20260306", "20250114").encode())
         old = Project.open(self.directory).schematic().files[0]
         with self.assertRaises(UnsupportedSchematicOperationError):
-            old.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
+            old.embedded_symbol("Test:Part").update_from_library(self.parent, "Parent")
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
 
-    def test_cross_cache_placement_identity_ambiguity_is_nonmutating(self) -> None:
-        for old, ambiguous in (
-            ('"Reference" "C1"', '"Reference" "R1"'),
-            ('(uuid "unrelated")', '(uuid "first")'),
-        ):
-            with self.subTest(identity=ambiguous):
-                source = SOURCE.replace(old, ambiguous, 1).encode()
-                self.path.write_bytes(source)
-                project = Project.open(self.directory)
-                schematic = project.schematic().files[0]
-                with self.assertRaises(UnsupportedSchematicOperationError):
-                    schematic.embedded_symbol("Test:Part").restore_from(
-                        self.parent, "Parent"
-                    )
-                self.assertEqual(schematic.to_bytes(), source)
-                self.assertEqual(self.path.read_bytes(), source)
-                self.assertFalse(project.is_modified)
+    def test_missing_embedded_or_library_names_raise_key_error(self) -> None:
         with self.assertRaises(KeyError):
             self.schematic.embedded_symbol("Missing:Part")
         with self.assertRaises(KeyError):
-            self.schematic.embedded_symbol("Test:Part").restore_from(
+            self.schematic.embedded_symbol("Test:Part").update_from_library(
                 self.parent, "Missing"
             )
-
-    def verifier(self, mode: str = "correct") -> Path:
-        cli = self.directory / "fake-cli"
-        cli.write_text(
-            f"""#!/usr/bin/env python3
-import pathlib,sys
-source = pathlib.Path(sys.argv[-1]).read_text()
-pending = '(property "Value" "new default")' in source
-mode = {mode!r}
-types = ["passive", "passive"] if pending and mode != "missing-effect" else ["output", "input"]
-other = ["output", "input"]
-if pending and mode == "unrelated-type":
-    other[0] = "passive"
-libtypes = types if mode != "missing-libpart-effect" else ["output", "input"]
-components = ''.join('(comp (ref '+ref+') (libsource (lib Test) (part '+part+')))' for ref,part in [('R1','Part'),('R2','Part'),('C1','Other')])
-libparts = ''.join('(libpart (lib Test) (part '+part+') (pins '+''.join('(pin (num '+str(index+1)+') (name '+name+') (type '+typ+'))' for index,(name,typ) in enumerate(zip(['A','B'],ptypes)))+'))' for part,ptypes in [('Part',libtypes),('Other',other)])
-nets = []
-for index,name in enumerate(['signal-A','signal-B']):
-    if pending and mode == "unrelated-net":
-        name += "-drift"
-    nodes = []
-    for ref,ptypes in [('R1',types),('R2',types),('C1',other)]:
-        if pending and mode == "missing-member" and ref == 'R2':
-            continue
-        nodes.append('(node (ref '+ref+') (pin '+str(index+1)+') (pinfunction '+['A','B'][index]+') (pintype '+ptypes[index]+'))')
-    nets.append('(net (name "'+name+'") '+''.join(nodes)+')')
-output = '(export (version E) (components '+components+') (libparts '+libparts+') (nets '+''.join(nets)+'))'
-pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
-""",
-            encoding="utf-8",
-        )
-        cli.chmod(0o755)
-        return cli
-
-    def test_unqualified_type_correction_fails_before_pending_source_changes(
-        self,
-    ) -> None:
-        source = SOURCE.replace("Test:Part", "Part").encode()
-        self.path.write_bytes(source)
-        project = Project.open(self.directory)
-        schematic = project.schematic().files[0]
-        with self.assertRaises(UnsupportedSchematicOperationError):
-            schematic.embedded_symbol("Part").restore_from(self.parent, "Parent")
-        self.assertEqual(schematic.to_bytes(), source)
-        self.assertEqual(self.path.read_bytes(), source)
-        self.assertFalse(project.is_modified)
 
     def test_duplicate_parent_identity_does_not_select_first_source(self) -> None:
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {PARENT} {PARENT})", encoding="utf-8"
         )
         with self.assertRaises(AmbiguousSymbolError):
-            self.schematic.embedded_symbol("Test:Part").restore_from(
+            self.schematic.embedded_symbol("Test:Part").update_from_library(
                 self.reopen_parent(), "Parent"
             )
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
@@ -351,7 +290,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         project = Project.open(native / "cpNode-IOX.kicad_pro")
         schematic = project.schematic().files[0]
         parent = SymbolLibrary.open(native / "parent.kicad_sym")
-        schematic.embedded_symbol("SPCoast:R").restore_from(parent, "R")
+        schematic.embedded_symbol("SPCoast:R").update_from_library(parent, "R")
         self.assertEqual(
             schematic.to_bytes(),
             (fixtures / "attribute-edit/cpNode-IOX.kicad_sch").read_bytes(),
@@ -359,23 +298,26 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         self.assertIn(b'(symbol "R_1_0"', schematic.to_bytes())
         self.assertNotIn(b'(symbol "SPCoast:R_1_0"', schematic.to_bytes())
 
-    def test_type_change_rejects_excluded_or_alternate_placements_before_mutation(
-        self,
-    ) -> None:
-        for addition in (
-            "(unit 2)",
-            "(dnp yes)",
-            "(convert 2)",
-            '(pin "1" (alternate "X"))',
+    def test_type_corrections_apply_to_any_placement_without_a_check(self) -> None:
+        """Pin-type corrections are plain in-memory edits; no prediction, no proof."""
+        for source in (
+            SOURCE.replace("Test:Part", "Part"),
+            SOURCE.replace('(unit 1) (uuid "first")', '(dnp yes) (uuid "first")', 1),
+            SOURCE.replace('(unit 1) (uuid "first")', '(convert 2) (uuid "first")', 1),
         ):
-            with self.subTest(addition=addition):
-                source = SOURCE.replace(
-                    '(unit 1) (uuid "first")', f'{addition} (uuid "first")', 1
-                )
+            with self.subTest(source=source):
                 self.path.write_bytes(source.encode())
-                schematic = Project.open(self.directory).schematic().files[0]
-                with self.assertRaises(UnsupportedSchematicOperationError):
-                    schematic.embedded_symbol("Test:Part").restore_from(
-                        self.parent, "Parent"
-                    )
-                self.assertEqual(schematic.to_bytes(), source.encode())
+                project = Project.open(self.directory)
+                schematic = project.schematic().files[0]
+                lib_id = "Part" if '"Part"' in source else "Test:Part"
+                schematic.embedded_symbol(lib_id).update_from_library(
+                    self.parent, "Parent"
+                )
+                self.assertIn(b"pin passive", schematic.to_bytes())
+                self.assertTrue(project.is_modified)
+                self.assertEqual(self.path.read_bytes(), source.encode())
+                project.discard()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -35,7 +35,7 @@ def main() -> None:
         } == expected_before
         handle = schematic.embedded_symbol("SPCoast:R")
         placed = schematic.symbol("R3")
-        handle.restore_from(parent, "R")
+        handle.update_from_library(parent, "R")
         expected_source = (
             fixtures / "attribute-edit/cpNode-IOX.kicad_sch"
         ).read_bytes()
