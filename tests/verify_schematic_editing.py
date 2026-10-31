@@ -20,7 +20,7 @@ def main() -> None:
         for path in fixture.glob("*.kicad_*"):
             shutil.copyfile(path, root / path.name)
         project = Project.open(root)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         original = schematic.to_bytes()
         before = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         symbol = schematic.symbol("R3")

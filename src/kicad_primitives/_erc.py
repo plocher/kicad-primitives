@@ -28,7 +28,7 @@ from ._pending_snapshot import capture_pending, staged_hierarchy
 
 if TYPE_CHECKING:
     from .projects import Project
-    from .schematics import Schematic
+    from .schematics import SheetFile
 
 
 def _object(value: object) -> dict[str, object]:
@@ -112,7 +112,7 @@ def _uuid_key(value: str) -> str:
 
 
 def _sheet_origins(
-    root: Path, documents: tuple[Schematic, ...], content: dict[Path, bytes]
+    root: Path, documents: tuple[SheetFile, ...], content: dict[Path, bytes]
 ) -> dict[str, Path | None]:
     by_path = {document.path: document for document in documents}
     origins: dict[str, Path | None] = {}
@@ -127,7 +127,7 @@ def _sheet_origins(
     def visit(path: Path, chain: str) -> None:
         key = _uuid_key(chain)
         origins[key] = path if key not in origins else None
-        for sheet in by_path[path].sheets:
+        for sheet in by_path[path].sheet_symbols:
             if sheet.uuid:
                 visit(
                     (path.parent / sheet.filename).resolve(), chain + "/" + sheet.uuid

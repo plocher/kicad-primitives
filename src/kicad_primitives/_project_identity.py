@@ -9,7 +9,7 @@ from uuid import UUID
 from lossless_sexpr import AtomNode, ListNode, TextEdit, apply_edits, parse, quote
 
 from .projects import InvalidProjectError
-from .schematics import Schematic
+from .schematics import SheetFile
 
 
 def _atom(node: ListNode, index: int) -> AtomNode:
@@ -42,7 +42,7 @@ def _uuid_path(value: str) -> tuple[str, ...]:
 
 
 def ownership(
-    documents: tuple[Schematic, ...], source_root: Path
+    documents: tuple[SheetFile, ...], source_root: Path
 ) -> tuple[str, dict[Path, set[tuple[str, ...]]]]:
     """Derive every owned sheet-instance path from the selected native hierarchy."""
     by_path = {document.path: document for document in documents}
@@ -57,7 +57,7 @@ def ownership(
         if path in active:
             raise InvalidProjectError("Cyclic identity hierarchy")
         paths[path].add(chain)
-        for sheet in by_path[path].sheets:
+        for sheet in by_path[path].sheet_symbols:
             child = (path.parent / sheet.filename).resolve()
             if child not in by_path:
                 raise InvalidProjectError("Identity hierarchy is incomplete")
@@ -120,7 +120,7 @@ def schematic(
 def pcb(
     raw: bytes,
     *,
-    documents: tuple[Schematic, ...],
+    documents: tuple[SheetFile, ...],
     owned_paths: Mapping[Path, set[tuple[str, ...]]],
     source_directory: Path,
     destination_directory: Path,

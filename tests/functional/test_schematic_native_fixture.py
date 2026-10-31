@@ -18,7 +18,7 @@ class NativeSchematicTests(unittest.TestCase):
             for path in FIXTURE.glob("*.kicad_*"):
                 shutil.copyfile(path, root / path.name)
             project = Project.open(root)
-            schematic = project.schematic()
+            schematic = project.schematic().files[0]
             original = schematic.path.read_bytes()
             self.assertEqual(schematic.version, 20260306)
             self.assertEqual(schematic.to_bytes(), original)

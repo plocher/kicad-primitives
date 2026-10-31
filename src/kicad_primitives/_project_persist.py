@@ -23,7 +23,7 @@ from .schematics import SchematicConflictError, UnsupportedSchematicOperationErr
 
 if TYPE_CHECKING:
     from .projects import Project
-    from .schematics import Schematic
+    from .schematics import SheetFile
 
 
 def _context(project: Project) -> None:
@@ -79,7 +79,7 @@ def _context(project: Project) -> None:
             raise UnsupportedSchematicOperationError("Unsupported future PCB format")
 
 
-def _accept_saved(document: Schematic, output: bytes) -> None:
+def _accept_saved(document: SheetFile, output: bytes) -> None:
     """Advance the written baseline without replacing newer pending source/intents."""
     from ._schematic_restore import _cache_nodes, _inventory
 
@@ -100,14 +100,14 @@ def _accept_saved(document: Schematic, output: bytes) -> None:
 
 def save_project(
     project: Project,
-    selected: tuple[Schematic, ...] | None,
+    selected: tuple[SheetFile, ...] | None,
     *,
     kicad_cli: str | os.PathLike[str] | None,
 ) -> None:
     """Persist frozen selected outputs and a complete actual post-save snapshot."""
     project._check_open()
     generation = project._generation
-    cached = tuple(project._schematics.values())
+    cached = project._sheet_files()
     initial_targets = cached if selected is None else selected
     _schematic_persist._preflight(
         project, cached, tuple(d for d in initial_targets if d.is_modified)
@@ -164,7 +164,7 @@ def save_project(
                 output,
                 conflict_error=SchematicConflictError,
                 unsupported_error=UnsupportedSchematicOperationError,
-                label="Schematic",
+                label="Sheet file",
             )
             _accept_saved(document, output)
             written[document.path] = installed

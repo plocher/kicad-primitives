@@ -32,7 +32,7 @@ def main() -> None:
         config.mkdir()
         with patch.dict(os.environ, {"KICAD_CONFIG_HOME": str(config)}):
             project = Project.open(root / "cpNode-IOX.kicad_pro")
-            schematic = project.schematic()
+            schematic = project.schematic().files[0]
             baseline = project.erc(kicad_cli=args.kicad_cli)
             assert isinstance(baseline, ErcReport)
             # Native Table links and leaves both resolve against process CWD.

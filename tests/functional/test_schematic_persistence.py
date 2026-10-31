@@ -47,7 +47,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
         )
         self.cli.chmod(0o755)
         self.project = Project.open(self.directory)
-        self.schematic = self.project.schematic()
+        self.schematic = self.project.schematic().files[0]
 
     def test_explicit_save_preserves_mode_and_updates_baselines(self) -> None:
         self.path.chmod(0o640)
@@ -115,7 +115,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
 
     def test_document_save_stages_only_its_changes_project_save_gates_all(self) -> None:
         project, child_path = self.hierarchy("sub/child.kicad_sch")
-        root, child = project.schematics()
+        root, child = project.schematic().files
         root_before, child_before = root.to_bytes(), child.to_bytes()
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("MPN", "disconnect")
@@ -131,7 +131,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
 
     def test_aggregate_failure_preflight_does_not_partially_save(self) -> None:
         project, child_path = self.hierarchy()
-        root, child = project.schematics()
+        root, child = project.schematic().files
         original = self.path.read_bytes()
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("Value", "33K")
@@ -148,7 +148,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
 
     def test_stale_unchanged_child_and_missing_hierarchy_fail_before_cli(self) -> None:
         project, child_path = self.hierarchy()
-        root, _child = project.schematics()
+        root, _child = project.schematic().files
         root.symbol("R1").set_attribute("Value", "22K")
         child_path.write_bytes(child_path.read_bytes() + b"\n")
         with self.assertRaises(SchematicConflictError):
@@ -162,7 +162,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
         self.path.rename(target)
         self.path.symlink_to(target)
         project = Project.open(self.directory)
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         with self.assertRaises(UnsupportedSchematicOperationError):
             project.save(kicad_cli=self.directory / "missing")
         self.assertTrue(self.path.is_symlink())
@@ -218,7 +218,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
                 )
                 self.path.write_bytes(SOURCE)
                 self.project = Project.open(self.directory)
-                self.schematic = self.project.schematic()
+                self.schematic = self.project.schematic().files[0]
                 self.schematic.symbol("R1").set_attribute("Value", "22K")
                 inode = self.path.stat().st_ino
                 with self.assertRaises(SchematicVerificationError):
@@ -229,7 +229,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
 
     def test_readonly_child_directory_preflights_before_any_replacement(self) -> None:
         project, child_path = self.hierarchy("sub/child.kicad_sch")
-        root, child = project.schematics()
+        root, child = project.schematic().files
         originals = [
             (sheet.path.read_bytes(), sheet.path.stat().st_ino)
             for sheet in (root, child)

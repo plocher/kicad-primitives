@@ -20,7 +20,7 @@ from kicad_primitives.projects import (
     ProjectSnapshot,
 )
 from kicad_primitives.schematics import (
-    SchematicConflictError,
+    InvalidSchematicError,
     UnsupportedSchematicOperationError,
 )
 from tests.functional.test_schematic_editing import SOURCE
@@ -78,7 +78,7 @@ class ProjectNetlistTests(unittest.TestCase):
         self.project = Project.open(self.directory)
 
     def test_netlist_reflects_pending_hierarchy_without_saving(self) -> None:
-        root, child = self.project.schematics()
+        root, child = self.project.schematic().files
         originals = (self.path.read_bytes(), self.child.read_bytes())
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("Value", "33K")
@@ -94,7 +94,7 @@ class ProjectNetlistTests(unittest.TestCase):
         self.assertTrue(root.is_modified and child.is_modified)
 
     def test_provenance_records_project_and_checked_content(self) -> None:
-        root, child = self.project.schematics()
+        root, child = self.project.schematic().files
         root.symbol("R1").set_attribute("Value", "22K")
         netlist = self.project.netlist(kicad_cli=self.cli)
         provenance = netlist.provenance
@@ -119,7 +119,7 @@ class ProjectNetlistTests(unittest.TestCase):
 
     def test_backend_receives_kicadsexpr_and_captured_project_settings(self) -> None:
         captured = self.pro.read_text(encoding="utf-8")
-        self.project.schematic()
+        self.project.schematic().files[0]
         self.pro.write_text('{"text_variables": {"V": "later"}}', encoding="utf-8")
         record = Path(self.temp.name) / "record.json"
         with patch.dict(os.environ, {"KP_RECORD": str(record)}):
@@ -141,13 +141,13 @@ class ProjectNetlistTests(unittest.TestCase):
         self.path.chmod(0o444)
         self.addCleanup(self.path.chmod, 0o644)
         project = Project.open(self.directory)
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         self.assertEqual(
             project.netlist(kicad_cli=self.cli).component("R1").value, "22K"
         )
 
     def test_acquisition_failures_raise_and_keep_pending_state(self) -> None:
-        self.project.schematic().symbol("R1").set_attribute("Value", "22K")
+        self.project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         with self.assertRaises(KicadCliNotFoundError):
             self.project.netlist(kicad_cli=Path(self.temp.name) / "missing")
         self.cli.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
@@ -171,7 +171,7 @@ class ProjectNetlistTests(unittest.TestCase):
         with self.assertRaises(UnsupportedSchematicOperationError):
             mismatched.netlist(kicad_cli=self.cli)
         self.child.unlink()
-        with self.assertRaises(SchematicConflictError):
+        with self.assertRaises(InvalidSchematicError):
             self.project.netlist(kicad_cli=self.cli)
         self.project.discard()
         with self.assertRaises(ProjectLifecycleError):

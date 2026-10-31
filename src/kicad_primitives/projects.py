@@ -1,8 +1,8 @@
 """Open a KiCad project and expose settings, hierarchy, variables, and schematics.
 
-Sheetfile path walks stay private. Schematic *content* is read through
-:meth:`Project.schematic` / :meth:`Project.schematics` (ADR 0002 ownership).
-PCB document models remain later work.
+Schematic *content* is read through :meth:`Project.schematic`, which returns
+the whole :class:`~kicad_primitives.schematics.Schematic` (ADR 0002 ownership,
+ADR 0011). PCB document models remain later work.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from ._erc_types import ErcReport
     from ._svg_types import SchematicSvgExport
     from .netlist import Netlist
-    from .schematics import Schematic
+    from .schematics import Schematic, SheetFile
 
 __all__ = [
     "InvalidProjectError",
@@ -68,7 +68,7 @@ class Project:
         self._schematic_file = schematic_file
         self._pcb_file = pcb_file
         self._text_variables = text_variables
-        self._schematics: dict[Path, Schematic] = {}
+        self._schematic: Schematic | None = None
         self._project_baseline = project_baseline
         self._pcb_baseline = None if pcb_file is None else pcb_file.read_bytes()
         if isinstance(backup_size_limit_bytes, bool) or not isinstance(
@@ -134,9 +134,15 @@ class Project:
 
     @property
     def is_modified(self) -> bool:
-        """Whether any owned schematic has pending changes."""
+        """Whether any owned document has pending changes."""
         self._check_open()
-        return any(schematic.is_modified for schematic in self._schematics.values())
+        return self._schematic is not None and self._schematic.is_modified
+
+    def _sheet_files(self) -> tuple[SheetFile, ...]:
+        """Loaded sheet files, without loading the schematic."""
+        if self._schematic is None:
+            return ()
+        return tuple(self._schematic._files.values())
 
     @classmethod
     def open(
@@ -333,7 +339,7 @@ class Project:
         sources.extend(
             path for path in (self._schematic_file, self._pcb_file) if path is not None
         )
-        sources.extend(document.path for document in self._schematics.values())
+        sources.extend(document.path for document in self._sheet_files())
         return tuple(dict.fromkeys(_native_lock_path(path) for path in sources))
 
     def _present_locks(self) -> tuple[Path, ...]:
@@ -400,44 +406,22 @@ class Project:
             "only for non-writing previews."
         )
 
-    def schematic(self, path: str | PathLike[str] | None = None) -> Schematic:
-        """Open one schematic in this project (root by default).
+    def schematic(self) -> Schematic:
+        """Return the project's whole schematic: every sheet tree, loaded once.
 
-        When *path* is given it must resolve to a file returned by
-        :meth:`schematic_files`. Outsiders and missing roots fail explicitly.
+        The first call loads every reachable sheet file. Later calls return the
+        same object. A missing root or child sheet file fails explicitly.
         """
         self._check_open()
-
-        if path is None:
+        if self._schematic is None:
             if self._schematic_file is None:
                 raise InvalidProjectError(
                     f"No root schematic file found for project {self._project_file}"
                 )
-            target = self._schematic_file
-        else:
-            target = Path(path).expanduser().resolve()
-            allowed = {p.resolve() for p in self.schematic_files()}
-            if target not in allowed:
-                raise InvalidProjectError(
-                    f"Schematic is not part of project hierarchy: {target}"
-                )
-        return self._load_schematic(target)
+            from .schematics import Schematic
 
-    def _load_schematic(self, target: Path) -> Schematic:
-        self._check_open()
-        from .schematics import open_schematic
-
-        key = target.resolve()
-        if key not in self._schematics:
-            schematic = open_schematic(target)
-            object.__setattr__(schematic, "_project", self)
-            self._schematics[key] = schematic
-        return self._schematics[key]
-
-    def schematics(self) -> tuple[Schematic, ...]:
-        """Open every schematic in the hierarchical file list, in walk order."""
-        self._check_open()
-        return tuple(self.schematic(path) for path in self.schematic_files())
+            self._schematic = Schematic(self, (self._schematic_file,))
+        return self._schematic
 
     def schematic_files(self) -> tuple[Path, ...]:
         """Root schematic plus reachable child sheets in discovery order.

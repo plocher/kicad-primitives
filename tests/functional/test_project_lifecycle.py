@@ -14,6 +14,7 @@ from kicad_primitives.projects import (
     ProjectWriteBlockedError,
 )
 from kicad_primitives.schematics import (
+    InvalidSchematicError,
     SchematicConflictError,
     UnsupportedSchematicOperationError,
 )
@@ -67,7 +68,7 @@ class ProjectLifecycleTests(unittest.TestCase):
             p.name: (p.read_bytes(), p.stat().st_ino) for p in (self.pro, self.sch)
         }
         clean = Project.open(self.pro)
-        clean.schematic().symbol("R1").attribute("Value")
+        clean.schematic().files[0].symbol("R1").attribute("Value")
         clean.close(kicad_cli=self.root / "must-not-run")
         self.assertTrue(clean.is_closed)
         self.assertFalse(self.archives())
@@ -77,7 +78,7 @@ class ProjectLifecycleTests(unittest.TestCase):
                 (raw, inode),
             )
         project = Project.open(self.pro)
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         project.close(kicad_cli=self.verifier())
         self.assertTrue(project.is_closed)
         self.assertEqual(self.sch.read_bytes(), SOURCE.replace(b'"10K"', b'"22K"'))
@@ -90,13 +91,13 @@ class ProjectLifecycleTests(unittest.TestCase):
             patch.dict(os.environ, {"KICAD_CLI": str(self.verifier())}),
             Project.open(self.pro) as project,
         ):
-            project.schematic().symbol("R1").set_attribute("Value", "22K")
+            project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         self.assertTrue(project.is_closed)
         saved = SOURCE.replace(b'"10K"', b'"22K"')
         self.assertEqual(self.sch.read_bytes(), saved)
         self.assertEqual(len(self.archives()), 1)
         with self.assertRaises(KeyError), Project.open(self.pro) as project:
-            project.schematic().symbol("R1").set_attribute("Value", "33K")
+            project.schematic().files[0].symbol("R1").set_attribute("Value", "33K")
             raise KeyError("client failure")
         self.assertTrue(project.is_closed)
         self.assertEqual(self.sch.read_bytes(), saved)
@@ -116,7 +117,7 @@ class ProjectLifecycleTests(unittest.TestCase):
                 self.assertEqual(archive.read(name), raw)
                 self.assertEqual((self.root / name).stat().st_ino, inode)
         self.assertFalse(project.is_modified)
-        project.schematic().symbol("R1").set_attribute("Value", "10K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "10K")
         project.close(kicad_cli=self.root / "must-not-run")
         self.assertTrue(project.is_closed)
         self.assertEqual(len(self.archives()), 1)
@@ -125,7 +126,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         placed = schematic.symbol("R1")
         attribute = placed.attribute("Value")
         placed.set_attribute("Value", "pending")
@@ -136,7 +137,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual({p: (p.read_bytes(), p.stat().st_ino) for p in before}, before)
         self.assertFalse((self.root / "board-backups").exists())
         for action in (
-            lambda: project.schematic(),
+            lambda: project.schematic().files[0],
             lambda: project.save(),
             lambda: schematic.save(),
             lambda: schematic.to_bytes(),
@@ -263,7 +264,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         schematic.symbol("R1").set_attribute("Value", "22K")
         with (
             patch(
@@ -282,7 +283,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         schematic.symbol("R1").set_attribute("Value", "22K")
         with (
             patch(
@@ -304,7 +305,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project, child_path = self.hierarchy()
-        root, child = project.schematics()
+        root, child = project.schematic().files
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("Value", "33K")
         child_original = child_path.read_bytes()
@@ -335,7 +336,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project, child_path = self.hierarchy()
-        root, child = project.schematics()
+        root, child = project.schematic().files
         child_original = child.to_bytes()
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("Value", "33K")
@@ -354,7 +355,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         schematic.symbol("R1").set_attribute("Value", "22K")
         schematic.symbol("R1").set_attribute("Value", "10K")
         self.assertFalse(project.is_modified)
@@ -397,7 +398,9 @@ class ProjectLifecycleTests(unittest.TestCase):
                         path.chmod(0o000)
                 try:
                     project = Project.open(self.pro)
-                    project.schematic().symbol("R1").set_attribute("Value", "22K")
+                    project.schematic().files[0].symbol("R1").set_attribute(
+                        "Value", "22K"
+                    )
                     with self.assertRaises((OSError, ValueError)):
                         project.save(kicad_cli=self.verifier())
                     self.assertEqual(self.sch.read_bytes(), SOURCE)
@@ -407,7 +410,7 @@ class ProjectLifecycleTests(unittest.TestCase):
 
     def test_required_hidden_child_is_not_silently_omitted_from_archive(self) -> None:
         project, _ = self.hierarchy(".hidden/child.kicad_sch")
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         before = self.sch.read_bytes()
         with self.assertRaises(ProjectBackupError):
             project.save(kicad_cli=self.verifier())
@@ -417,7 +420,7 @@ class ProjectLifecycleTests(unittest.TestCase):
     def test_full_unloaded_hierarchy_is_strict_even_on_clean_save(self) -> None:
         project, child_path = self.hierarchy()
         child_path.unlink()
-        with self.assertRaises(SchematicConflictError):
+        with self.assertRaises(InvalidSchematicError):
             project.save(kicad_cli=self.root / "no-cli")
         self.assertFalse(self.archives())
         self.sch.write_bytes(
@@ -445,7 +448,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        placed = project.schematic().symbol("R1")
+        placed = project.schematic().files[0].symbol("R1")
         placed.set_attribute("Value", "22K")
         cli = self.verifier()
         real_run = subprocess.run
@@ -489,7 +492,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         placed = schematic.symbol("R1")
         placed.set_attribute("Value", "22K")
         frozen = schematic.to_bytes()
@@ -526,7 +529,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         asset = self.root / "asset.json"
         asset.write_bytes(b"original member")
         project = Project.open(self.pro)
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         real_close = zipfile.ZipFile.close
         changed = False
 
@@ -553,7 +556,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         project = Project.open(self.pro, backup_size_limit_bytes=1)
         project.save()
         previous = self.archives()[0]
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         real_unlink = Path.unlink
 
         def fail_previous(path: Path, *, missing_ok: bool = False) -> None:
@@ -658,7 +661,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         parent_path.write_bytes(b'(kicad_symbol_lib (version 20251024) (symbol "R"))')
         parent = SymbolLibrary.open(parent_path)
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         embedded = schematic.embedded_symbol("Device:R")
         placed = schematic.symbol("R1")
         project.discard()
@@ -721,7 +724,7 @@ class ProjectLifecycleTests(unittest.TestCase):
                 lock.write_bytes(b"native peer lock")
                 try:
                     project = Project.open(self.pro)
-                    schematic = project.schematic()
+                    schematic = project.schematic().files[0]
                     schematic.symbol("R1").set_attribute("Value", "22K")
                     # The child remains unloaded until the complete save walk.
                     for save in (project.save, schematic.save):
@@ -746,7 +749,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project, child_path = self.hierarchy()
-        root, child = project.schematics()
+        root, child = project.schematic().files
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("Value", "33K")
         original_child = child_path.read_bytes()
@@ -779,7 +782,7 @@ class ProjectLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         schematic.symbol("R1").set_attribute("Value", "22K")
         lock = project.lock_file
         real_replace = os.replace

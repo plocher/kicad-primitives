@@ -52,7 +52,7 @@ def _expected_files(pending: PendingHierarchy) -> dict[str, tuple[str, Path]]:
                 f"SVG page name: {name}"
             )
         expected[name] = (sheet_path, path)
-        for sheet in by_path[path].sheets:
+        for sheet in by_path[path].sheet_symbols:
             child = (path.parent / sheet.filename).resolve()
             if child in by_path:
                 visit(child, (*names, sheet.name))

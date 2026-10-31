@@ -23,6 +23,7 @@ from kicad_primitives.schematics import (
     InvalidSchematicError,
     PlacedSymbol,
     Schematic,
+    SheetFile,
     TitleBlock,
 )
 
@@ -56,8 +57,10 @@ class OpenViaProjectTests(SchematicCase):
   )
 )""",
         )
-        schematic = project.schematic()
-        self.assertIsInstance(schematic, Schematic)
+        self.assertIsInstance(project.schematic(), Schematic)
+        schematic = project.schematic().files[0]
+        self.assertIsInstance(schematic, SheetFile)
+        self.assertEqual(project.schematic().root_files, (schematic,))
         self.assertEqual(schematic.path, (self.root / "board.kicad_sch").resolve())
         self.assertEqual(schematic.version, 20250114)
         self.assertEqual(schematic.title_block.title, "Board")
@@ -69,7 +72,7 @@ class OpenViaProjectTests(SchematicCase):
         self.write("board.kicad_pro", json.dumps({"meta": {"version": 1}}))
         project = Project.open(self.root)
         with self.assertRaises(InvalidProjectError):
-            project.schematic()
+            project.schematic().files[0]
 
     def test_open_child_sheet_path_must_belong_to_hierarchy(self) -> None:
         self.write("main.kicad_pro", json.dumps({"meta": {"version": 1}}))
@@ -96,10 +99,10 @@ class OpenViaProjectTests(SchematicCase):
 )""",
         )
         project = Project.open(self.root)
-        opened = project.schematic(child)
+        opened = project.schematic().file(child)
         self.assertEqual([s.reference for s in opened.symbols], ["C1"])
-        with self.assertRaises(InvalidProjectError):
-            project.schematic(outsider)
+        with self.assertRaises(KeyError):
+            project.schematic().file(outsider)
 
     def test_schematics_lists_hierarchy_in_order(self) -> None:
         self.write("main.kicad_pro", json.dumps({"meta": {"version": 1}}))
@@ -120,7 +123,7 @@ class OpenViaProjectTests(SchematicCase):
 )""",
         )
         project = Project.open(self.root)
-        sheets = project.schematics()
+        sheets = project.schematic().files
         self.assertEqual(
             [s.path.name for s in sheets],
             ["main.kicad_sch", "power.kicad_sch"],
@@ -147,7 +150,7 @@ class PlacedSymbolTests(SchematicCase):
   )
 )""",
         )
-        symbol = project.schematic().symbol("J22")
+        symbol = project.schematic().files[0].symbol("J22")
         self.assertIsInstance(symbol, PlacedSymbol)
         self.assertEqual(symbol.reference, "J22")
         self.assertEqual(symbol.lib_id, "Connector:Plug")
@@ -187,7 +190,7 @@ class PlacedSymbolTests(SchematicCase):
   )
 )""",
         )
-        symbols = project.schematic().symbols
+        symbols = project.schematic().files[0].symbols
         self.assertEqual([s.reference for s in symbols], ["R1"])
         self.assertEqual(symbols[0].lib_id, "Device:R")
 
@@ -201,7 +204,7 @@ class PlacedSymbolTests(SchematicCase):
     (property "Reference" "R2") (property "Value" "1k"))
 )""",
         )
-        refs = {s.reference for s in project.schematic().symbols}
+        refs = {s.reference for s in project.schematic().files[0].symbols}
         self.assertEqual(refs, {"#PWR01", "R2"})
 
     def test_ambiguous_and_missing_reference_lookup(self) -> None:
@@ -214,7 +217,7 @@ class PlacedSymbolTests(SchematicCase):
     (property "Reference" "R1") (property "Value" "2"))
 )""",
         )
-        sch = project.schematic()
+        sch = project.schematic().files[0]
         self.assertEqual(len(sch.symbols), 2)
         with self.assertRaises(AmbiguousPlacedSymbolError):
             sch.symbol("R1")
@@ -224,11 +227,11 @@ class PlacedSymbolTests(SchematicCase):
     def test_invalid_schematic_fails_explicitly(self) -> None:
         project = self.project_with("board", "(not_a_schematic)")
         with self.assertRaises(InvalidSchematicError):
-            project.schematic()
+            project.schematic().files[0]
         bad = self.root / "board.kicad_sch"
         bad.write_bytes(b"\xff")
         with self.assertRaises(InvalidSchematicError):
-            project.schematic()
+            project.schematic().files[0]
 
 
 class TitleBlockTests(SchematicCase):
@@ -247,7 +250,7 @@ class TitleBlockTests(SchematicCase):
   )
 )""",
         )
-        block = project.schematic().title_block
+        block = project.schematic().files[0].title_block
         self.assertIsInstance(block, TitleBlock)
         self.assertEqual(block.title, "MySch")
         self.assertEqual(block.revision, "A")
@@ -260,7 +263,7 @@ class TitleBlockTests(SchematicCase):
             "meta",
             "(kicad_sch (version 20250114))",
         )
-        block = project.schematic().title_block
+        block = project.schematic().files[0].title_block
         self.assertEqual(block.title, "")
         self.assertEqual(dict(block.comments), {})
 

@@ -5,6 +5,7 @@ Parsing uses the private lossless S-expression foundation (ADR 0003).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
@@ -67,7 +68,8 @@ __all__ = [
     "SchematicSvgExport",
     "SchematicSvgFile",
     "SchematicVerificationError",
-    "SheetInstance",
+    "SheetFile",
+    "SheetSymbol",
     "TitleBlock",
     "UnsupportedSchematicOperationError",
     "Wire",
@@ -143,7 +145,7 @@ class PlacedSymbol:
     in_pos_files: bool
     exclude_from_sim: bool
     path: Path
-    _owner: Schematic | None = field(
+    _owner: SheetFile | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _index: int = field(default=-1, init=False, repr=False, compare=False)
@@ -155,7 +157,7 @@ class PlacedSymbol:
         byte-identical. Ambiguous or unsupported edits fail without changing source.
         """
         if self._owner is None:
-            raise UnsupportedSchematicOperationError("Symbol has no owning schematic")
+            raise UnsupportedSchematicOperationError("Symbol has no owning sheet file")
         self._owner._set_attribute(self, name, value)
 
     def delete_attribute(self, name: str) -> None:
@@ -168,7 +170,7 @@ class PlacedSymbol:
         ``UnsupportedSchematicOperationError``. Failures leave source unchanged.
         """
         if self._owner is None:
-            raise UnsupportedSchematicOperationError("Symbol has no owning schematic")
+            raise UnsupportedSchematicOperationError("Symbol has no owning sheet file")
         self._owner._delete_attribute(self, name)
 
     def attribute(self, name: str) -> PlacedAttribute:
@@ -192,7 +194,7 @@ class EmbeddedSymbol:
     """One source-backed definition in a schematic's embedded symbol cache."""
 
     lib_id: str
-    _owner: Schematic = field(repr=False, compare=False)
+    _owner: SheetFile = field(repr=False, compare=False)
 
     def restore_from(self, parent_library: SymbolLibrary, parent_name: str) -> None:
         """Restore this concrete definition from captured parent source in memory.
@@ -269,8 +271,8 @@ class NoConnect:
 
 
 @dataclass(frozen=True)
-class SheetInstance:
-    """A hierarchical sheet block (edge to a child schematic file)."""
+class SheetSymbol:
+    """The box on a parent sheet file that points at a target sheet file (KiCad ``SCH_SHEET``)."""
 
     name: str
     filename: str
@@ -282,8 +284,12 @@ class SheetInstance:
 
 
 @dataclass(frozen=True, eq=False)
-class Schematic:
-    """One schematic file: symbols, title block, and electrical geometry."""
+class SheetFile:
+    """One ``.kicad_sch`` file: symbols, title block, and electrical geometry.
+
+    KiCad ``SCH_SCREEN``. One object per file, even when several sheet symbols
+    use it. A sheet file knows nothing about the hierarchy.
+    """
 
     path: Path
     version: int
@@ -295,7 +301,7 @@ class Schematic:
     global_labels: tuple[GlobalLabel, ...] = ()
     hierarchical_labels: tuple[HierarchicalLabel, ...] = ()
     no_connects: tuple[NoConnect, ...] = ()
-    sheets: tuple[SheetInstance, ...] = ()
+    sheet_symbols: tuple[SheetSymbol, ...] = ()
     _document: Document | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -410,7 +416,7 @@ class Schematic:
             start = end = anchor.span.end
             replacement = _attribute_fragment(before, node, anchor, name, value)
         edited = before[:start] + replacement + before[end:]
-        updated = _schematic_from_document(self.path, parse(edited))
+        updated = _sheet_file_from_document(self.path, parse(edited))
         if updated.symbols[symbol._index].attribute(name).value != value:
             raise InvalidSchematicError(
                 "Edit did not establish the requested attribute"
@@ -465,7 +471,7 @@ class Schematic:
         before = self._document.source
         start = _leading_separator_start(before, matches[0].span.start)
         edited = before[:start] + before[matches[0].span.end :]
-        updated = _schematic_from_document(self.path, parse(edited))
+        updated = _sheet_file_from_document(self.path, parse(edited))
         remaining = updated.symbols[symbol._index]
         if (
             any(p.name == name for p in remaining.attributes)
@@ -474,7 +480,7 @@ class Schematic:
             raise InvalidSchematicError("Edit did not remove the requested attribute")
         self._accept_document(updated)
 
-    def _accept_document(self, updated: Schematic) -> None:
+    def _accept_document(self, updated: SheetFile) -> None:
         self._check_open()
         changed = self.to_bytes() != updated.to_bytes()
         for old, new in zip(self.symbols, updated.symbols, strict=True):
@@ -498,7 +504,91 @@ class Schematic:
         return matches[0]
 
 
-def open_schematic(path: str | PathLike[str]) -> Schematic:
+class Schematic:
+    """The project's set of sheet trees, as one document (KiCad ``SCHEMATIC``).
+
+    Opening loads every sheet file reachable from the top-level sheets. A file
+    that several sheet symbols use loads once, as one :class:`SheetFile`.
+    There is no hidden root: each top-level sheet is the root of one tree.
+    Entry is through :meth:`kicad_primitives.projects.Project.schematic`.
+    """
+
+    def __init__(self, project: Project, roots: tuple[Path, ...]) -> None:
+        self._project = project
+        self._roots = roots
+        self._files: dict[Path, SheetFile] = {}
+        self._load()
+
+    def _check_open(self) -> None:
+        self._project._check_open()
+
+    def _load(self) -> None:
+        """Walk every tree; reuse loaded sheet files that are still reachable."""
+        previous = self._files
+        loaded: dict[Path, SheetFile] = {}
+        active: set[Path] = set()
+
+        def visit(path: Path) -> None:
+            if path in active:
+                raise UnsupportedSchematicOperationError(
+                    f"Cyclic schematic hierarchy: {path}"
+                )
+            if path in loaded:
+                return
+            if not path.is_file():
+                raise InvalidSchematicError(f"Missing sheet file: {path}")
+            sheet_file = previous.get(path)
+            if sheet_file is None:
+                sheet_file = open_schematic(path)
+                object.__setattr__(sheet_file, "_project", self._project)
+            loaded[path] = sheet_file
+            active.add(path)
+            for sheet in sheet_file.sheet_symbols:
+                if "${" in sheet.filename:
+                    raise UnsupportedSchematicOperationError(
+                        f"Unsupported Sheetfile with a variable: {sheet.filename}"
+                    )
+                visit(Path(os.path.normpath(path.parent / sheet.filename)))
+            active.remove(path)
+
+        for root in self._roots:
+            visit(Path(os.path.abspath(root)))
+        self._files = loaded
+
+    @property
+    def files(self) -> tuple[SheetFile, ...]:
+        """Every sheet file once, in walk order: each tree depth-first, roots first."""
+        self._check_open()
+        return tuple(self._files.values())
+
+    @property
+    def root_files(self) -> tuple[SheetFile, ...]:
+        """The sheet files of the top-level sheets, in project order."""
+        self._check_open()
+        return tuple(self._files[Path(os.path.abspath(root))] for root in self._roots)
+
+    def file(self, path: str | PathLike[str]) -> SheetFile:
+        """Return the sheet file at *path*, or raise ``KeyError`` for an outsider."""
+        self._check_open()
+        target = Path(path).expanduser().resolve()
+        for sheet_file in self._files.values():
+            if sheet_file.path.resolve() == target:
+                return sheet_file
+        raise KeyError(f"Sheet file is not part of this schematic: {target}")
+
+    @property
+    def is_modified(self) -> bool:
+        """Whether any sheet file has unsaved changes."""
+        self._check_open()
+        return any(sheet_file.is_modified for sheet_file in self._files.values())
+
+    def _rebind(self, roots: tuple[Path, ...], files: tuple[SheetFile, ...]) -> None:
+        """Adopt relocated paths after a successful project save-as."""
+        self._roots = roots
+        self._files = {sheet_file.path: sheet_file for sheet_file in files}
+
+
+def open_schematic(path: str | PathLike[str]) -> SheetFile:
     """Parse one explicit ``.kicad_sch`` path.
 
     Prefer :meth:`kicad_primitives.projects.Project.schematic` so callers stay
@@ -517,10 +607,10 @@ def open_schematic(path: str | PathLike[str]) -> Schematic:
         document = parse(raw.decode("utf-8"))
     except (OSError, UnicodeError, ParseError, RecursionError) as exc:
         raise InvalidSchematicError(f"Invalid schematic syntax: {exc}") from exc
-    return _schematic_from_document(location, document)
+    return _sheet_file_from_document(location, document)
 
 
-def _schematic_from_document(path: Path, document: Document) -> Schematic:
+def _sheet_file_from_document(path: Path, document: Document) -> SheetFile:
     roots = document.roots()
     if (
         len(roots) != 1
@@ -536,7 +626,7 @@ def _schematic_from_document(path: Path, document: Document) -> Schematic:
         for node in root.child_lists("symbol")
         if (symbol := _placed_symbol(node, path)) is not None
     )
-    schematic = Schematic(
+    schematic = SheetFile(
         path=path,
         version=version,
         title_block=title_block,
@@ -549,7 +639,7 @@ def _schematic_from_document(path: Path, document: Document) -> Schematic:
             _hierarchical_label(n) for n in root.child_lists("hierarchical_label")
         ),
         no_connects=tuple(_no_connect(n) for n in root.child_lists("no_connect")),
-        sheets=tuple(_sheet(n) for n in root.child_lists("sheet")),
+        sheet_symbols=tuple(_sheet(n) for n in root.child_lists("sheet")),
     )
     object.__setattr__(schematic, "_document", document)
     object.__setattr__(schematic, "_baseline", document.source.encode("utf-8"))
@@ -763,7 +853,7 @@ def _sheet_filename(node: ListNode) -> str:
     return _atom(matches[0], 2).value
 
 
-def _sheet(node: ListNode) -> SheetInstance:
+def _sheet(node: ListNode) -> SheetSymbol:
     x, y, _rot = _at(node)
     size_nodes = node.child_lists("size")
     if len(size_nodes) != 1:
@@ -781,7 +871,7 @@ def _sheet(node: ListNode) -> SheetInstance:
                 raise InvalidSchematicError(f"sheet: ambiguous {key}")
             seen.add(key)
             name = value
-    return SheetInstance(
+    return SheetSymbol(
         name=name,
         filename=filename,
         x=x,
