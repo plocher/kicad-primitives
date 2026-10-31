@@ -1,111 +1,78 @@
-"""Project write lock/guard hooks (#27).
+"""Native KiCad peer locks are queries, not write guards (ADR 0009, ADR 0011 D9).
 
 Native KiCad 10.0.1 include/lockfile.h:54-55 and common/wildcards_and_files_ext.cpp:126-127
 use "~" plus the full original filename and ".lck", not donor basename guesses.
-No lock acquisition/deletion or implicit pcbnew host detection is provided.
+No lock acquisition or deletion is provided, and no package write consults a lock.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import ModuleType
-from unittest.mock import patch
 
-from kicad_primitives.projects import (
-    Project,
-    ProjectWriteBlockedError,
+from kicad_primitives.projects import Project
+
+SHEET = (
+    '(kicad_sch (version 20260306) (uuid "00000000-0000-4000-8000-000000000001")'
+    ' (sheet (at 0 0) (size 1 1) (uuid "00000000-0000-4000-8000-000000000002")'
+    ' (property "Sheetfile" "child.kicad_sch")))'
 )
 
 
-class LockCase(unittest.TestCase):
+class LockQueryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = TemporaryDirectory(prefix="kp_lock_")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         (self.root / "board.kicad_pro").write_text(
             json.dumps({"meta": {"version": 1}}), encoding="utf-8"
         )
-        (self.root / "board.kicad_sch").write_text(
+        (self.root / "board.kicad_sch").write_text(SHEET, encoding="utf-8")
+        (self.root / "child.kicad_sch").write_text(
             "(kicad_sch (version 20260306))", encoding="utf-8"
         )
 
-    def open_project(self) -> Project:
-        return Project.open(self.root)
-
-
-class LockDetectionTests(LockCase):
     def test_lock_path_and_unlocked_by_default(self) -> None:
-        project = self.open_project()
-        self.assertEqual(
-            project.lock_file, (self.root / "~board.kicad_pro.lck").resolve()
-        )
+        project = Project.open(self.root)
+        self.assertEqual(project.lock_file, self.root / "~board.kicad_pro.lck")
         self.assertFalse(project.is_locked)
-        project.ensure_writes_allowed()  # no raise
 
-    def test_lock_file_presence(self) -> None:
-        (self.root / "~board.kicad_pro.lck").write_text("kicad", encoding="utf-8")
-        project = self.open_project()
+    def test_project_root_pcb_and_loaded_child_locks_are_reported(self) -> None:
+        (self.root / "board.kicad_pcb").write_text("(kicad_pcb (version 20260206))")
+        for name in ("board.kicad_pro", "board.kicad_sch", "board.kicad_pcb"):
+            with self.subTest(name=name):
+                lock = self.root / f"~{name}.lck"
+                lock.write_text("kicad", encoding="utf-8")
+                try:
+                    self.assertTrue(Project.open(self.root).is_locked)
+                finally:
+                    lock.unlink()
+        child_lock = self.root / "~child.kicad_sch.lck"
+        child_lock.write_text("kicad", encoding="utf-8")
+        project = Project.open(self.root)
+        self.assertFalse(project.is_locked)  # The child is not loaded yet.
+        project.schematic()
         self.assertTrue(project.is_locked)
 
-    def test_locked_blocks_writes(self) -> None:
-        (self.root / "~board.kicad_pro.lck").write_text("kicad", encoding="utf-8")
-        project = self.open_project()
-        with self.assertRaises(ProjectWriteBlockedError) as cm:
-            project.ensure_writes_allowed()
-        self.assertIsInstance(cm.exception, PermissionError)
-        self.assertIn("~board.kicad_pro.lck", str(cm.exception))
-        self.assertIn("KiCad", str(cm.exception))
-
-    def test_dry_run_allows_preview_when_locked(self) -> None:
-        (self.root / "~board.kicad_pro.lck").write_text("kicad", encoding="utf-8")
-        project = self.open_project()
-        project.ensure_writes_allowed(dry_run=True)  # no raise
-
-    def test_explicit_host_assertion_bypasses_only_the_guard_query(self) -> None:
-        (self.root / "~board.kicad_pro.lck").write_text("kicad", encoding="utf-8")
-        project = self.open_project()
-        self.assertTrue(project.is_locked)
-        project.ensure_writes_allowed(inside_kicad=True)
-
-    def test_write_is_permitted_matrix(self) -> None:
-        project = self.open_project()
-        self.assertTrue(project.write_is_permitted())
-        (self.root / "~board.kicad_pro.lck").write_text("kicad", encoding="utf-8")
-        self.assertFalse(project.write_is_permitted())
-        self.assertTrue(project.write_is_permitted(inside_kicad=True))
-
-    def test_donor_basename_lock_is_not_a_compatibility_alias(self) -> None:
+    def test_dangling_link_lock_counts_and_donor_basename_does_not(self) -> None:
         (self.root / "board.lck").write_bytes(b"not a native KiCad lock")
-        project = self.open_project()
-        self.assertFalse(project.is_locked)
-        self.assertTrue(project.write_is_permitted())
-
-    def test_any_native_lock_presence_including_dangling_link_is_reported(
-        self,
-    ) -> None:
+        self.assertFalse(Project.open(self.root).is_locked)
         lock = self.root / "~board.kicad_pro.lck"
         lock.symlink_to(self.root / "missing")
-        project = self.open_project()
-        self.assertTrue(project.is_locked)
-        project.save()
-        self.assertTrue(lock.is_symlink())
-        self.assertFalse((self.root / "board-backups").exists())
+        self.assertTrue(Project.open(self.root).is_locked)
 
-    def test_importable_pcbnew_does_not_authorize_filesystem_persistence(self) -> None:
+    def test_writes_do_not_consult_locks_and_never_touch_them(self) -> None:
         lock = self.root / "~board.kicad_pro.lck"
         lock.write_bytes(b"peer owns unsaved buffers")
-        project = self.open_project()
-        original = project.project_file.read_bytes()
-        with patch.dict(sys.modules, {"pcbnew": ModuleType("pcbnew")}):
-            self.assertFalse(project.write_is_permitted())
-            project.ensure_writes_allowed(inside_kicad=True)
-        self.assertEqual(project.project_file.read_bytes(), original)
+        project = Project.open(self.root)
+        self.assertTrue(project.is_locked)
+        project.schematic().files[1].validate()
+        project.save()
+        project.backup(project.backup_directory)
+        project.save_as(self.root.parent / "copy", "copy")
         self.assertEqual(lock.read_bytes(), b"peer owns unsaved buffers")
-        self.assertFalse((self.root / "board-backups").exists())
 
 
 if __name__ == "__main__":

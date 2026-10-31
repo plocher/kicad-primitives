@@ -32,7 +32,6 @@ __all__ = [
     "ProjectLifecycleError",
     "ProjectSnapshot",
     "ProjectUnsavedError",
-    "ProjectWriteBlockedError",
     "SnapshotDocument",
 ]
 
@@ -43,16 +42,12 @@ class InvalidProjectError(ValueError):
     """The path is not a usable KiCad project or its settings cannot be read."""
 
 
-class ProjectWriteBlockedError(PermissionError):
-    """A KiCad lock file blocks package writes outside an in-KiCad session."""
-
-
 class ProjectLifecycleError(RuntimeError):
-    """The Project is closed, or its pending state changed during a save."""
+    """The Project is closed, or it refused to close."""
 
 
 class ProjectBackupError(OSError):
-    """Project history failed; some source files may already have been saved."""
+    """A project backup could not be written safely; no partial archive remains."""
 
 
 class ProjectUnsavedError(ProjectLifecycleError):
@@ -417,10 +412,9 @@ class Project:
         return _native_lock_path(self._project_file)
 
     def _lock_candidates(self) -> tuple[Path, ...]:
-        sources = [self._project_file]
-        sources.extend(
-            path for path in (self._schematic_file, self._pcb_file) if path is not None
-        )
+        sources = [self._project_file, *self._root_files]
+        if self._pcb_file is not None:
+            sources.append(self._pcb_file)
         sources.extend(document.path for document in self._sheet_files())
         return tuple(dict.fromkeys(_native_lock_path(path) for path in sources))
 
@@ -436,57 +430,14 @@ class Project:
 
     @property
     def is_locked(self) -> bool:
-        """True when any known native Project/schematic/PCB peer lock is present.
+        """True when any known native project, sheet, or PCB peer lock is present.
 
-        Presence means KiCad may hold unsaved state; it does not by itself
-        forbid reads. Writers should call :meth:`ensure_writes_allowed`.
+        Presence means KiCad may hold unsaved state for these files. This is a
+        query, not a guard: no package write consults it (ADR 0009, ADR 0011
+        D9). A client that wants a lock policy checks it before writing.
         """
         self._check_open()
         return bool(self._present_locks())
-
-    def write_is_permitted(self, *, inside_kicad: bool | None = None) -> bool:
-        """Return whether filesystem writes should proceed under lock policy.
-
-        Omitted *inside_kicad* is conservative filesystem mode, regardless of
-        importable KiCad modules. Explicit True is a caller assertion for this
-        helper only, not an unchecked-save permission token.
-        """
-        self._check_open()
-        if _resolve_inside_kicad(inside_kicad):
-            return True
-        return not self.is_locked
-
-    def ensure_writes_allowed(
-        self,
-        *,
-        dry_run: bool = False,
-        inside_kicad: bool | None = None,
-    ) -> None:
-        """Raise if a KiCad lock should block real filesystem writes.
-
-        Policy:
-        - Explicit inside_kicad=True: caller asserts ownership for this helper.
-        - No lock file: allowed.
-        - Locked + ``dry_run=True``: allowed (preview only; no package stderr).
-        - Locked + ``dry_run=False``: raises :class:`ProjectWriteBlockedError`.
-        """
-        self._check_open()
-        if self.write_is_permitted(inside_kicad=inside_kicad):
-            return
-        if dry_run:
-            return
-        lock_name = (
-            ", ".join(str(path) for path in self._present_locks())
-            or "native lock state changed"
-        )
-        raise ProjectWriteBlockedError(
-            f"KiCad lock file detected ({lock_name}). "
-            "The project appears to be open in KiCad. "
-            "Unsaved KiCad edits may be invisible to this process, and package "
-            "writes may be overwritten when KiCad saves. "
-            "Close KiCad before writing, or call ensure_writes_allowed(dry_run=True) "
-            "only for non-writing previews."
-        )
 
     def schematic(self) -> Schematic:
         """Return the project's whole schematic: every sheet tree, loaded once.
@@ -518,12 +469,6 @@ class Project:
         for root in self._root_files:
             _walk_schematic(root, files, processed)
         return tuple(files)
-
-
-def _resolve_inside_kicad(inside_kicad: bool | None) -> bool:
-    if inside_kicad is not None and not isinstance(inside_kicad, bool):
-        raise TypeError("inside_kicad must be a boolean or None")
-    return inside_kicad is True
 
 
 def _native_lock_path(source: Path) -> Path:
