@@ -107,14 +107,16 @@ class NetlistEqualityTests(unittest.TestCase):
                 " (components (comp (ref R2) (value 2K) (libsource (lib Device) (part R))"
                 ' (fields (field (name "MPN") "X")))'
                 " (comp (ref R1) (value 22K) (libsource (lib Device) (part R))))"
-                ' (nets (net (code 9) (name "B") (node (ref R1) (pin 2) (pintype passive)))'
+                ' (nets (net (code 9) (name "B") (node (ref R1) (pin 2)))'
                 ' (net (code 7) (name "A") (node (ref R2) (pin 1)) (node (ref R1) (pin 1)))))',
             )
             self.assertEqual(first, second)
             self.assertEqual(hash(first), hash(second))
             self.assertNotEqual(first, object())
 
-    def test_connection_net_name_and_component_identity_count(self) -> None:
+    def test_connection_net_name_pin_type_and_component_identity_count(
+        self,
+    ) -> None:
         base = (
             "(export (version E) (components (comp (ref R1) (libsource (lib Device) (part R))))"
             ' (nets (net (code 1) (name "A") (node (ref R1) (pin 1)))))'
@@ -128,6 +130,7 @@ class NetlistEqualityTests(unittest.TestCase):
                     base.replace('(name "A")', '(name "B")'),
                     base.replace("(part R)", "(part C)"),
                     base.replace("(ref R1) (libsource", "(ref R9) (libsource"),
+                    base.replace("(pin 1))", "(pin 1) (pintype passive))"),
                 )
             ):
                 with self.subTest(changed=changed):
