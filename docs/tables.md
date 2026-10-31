@@ -19,7 +19,7 @@ remains pre-alpha (`0.0.0` informational).
 
 ## Surface (ADR 0006 A)
 
-- **Supported:** config-home discovery; read and resolve global and project symbol and footprint tables; `${VAR}` expansion; nested `Table` rows; project shadowing; `find_libraries` under explicit roots; `portable_uri` spelling; `add_entry`, `rename`, `set_uri`, and `delete` on physical tables; `save()`, `save_as()`, `discard()`, and `close()`.
+- **Supported:** config-home discovery; read and resolve global and project symbol and footprint tables; `${VAR}` expansion; nested `Table` rows; project shadowing; `find_libraries` under explicit roots; `portable_uri` spelling; `add_entry`, `rename`, `set_uri`, and `delete` on physical tables; `validate()`, `save()` with `overwrite`, `save_as()`, `discard()`, and `close()`.
 - **Defined, explicit failure:** ambiguous direct nicknames on an editing target; duplicate add or rename targets; external changes since open or save, including the save that a dirty close runs.
 - **Stored, not interpreted:** remote and plugin library types keep their rows, but resolution treats `uri` as a filesystem path.
 - **Deferred past 1.0:** `design_block_lib_table` as a product API; remote and plugin resolution; multi-file table transactions.
@@ -155,7 +155,9 @@ Each nested artifact saves or discards independently. Saving a root does not sav
 The context retains opened table snapshots. Open a new context to read external changes.
 
 ### Persistence and terminal exit
-Each physical table has `path`, `to_bytes()`, `is_modified`, `save()`, `save_as(path)`, `discard()`, and `close()`.
+Each physical table has `path`, `to_bytes()`, `is_modified`, `validate()`, `save()`, `save_as(path)`, `discard()`, and `close()`.
+`is_modified` is a flag that edits set (ADR 0009). An edit back to the original content leaves it set.
+The table keeps a fingerprint (size and content hash) of what it read, not a copy of the bytes.
 `table_path(type, scope)` reports the discovered primary location. `table.path` reports that artifact's current destination.
 `tables.is_modified` aggregates pending state from open physical artifacts, not files that the context has never opened.
 
@@ -167,16 +169,19 @@ Close and discard invalidate the artifact's editable entries. A later `close()` 
 A `with` block closes on normal exit and discards on an exception.
 Mutations, discard, and finalizers never write.
 
-`save()` checks the disk baseline, including for no-op saves.
-Changed saves retain the existing single-file optimistic conflict, link, and permission safeguards.
+An existing clean table's `save()` writes nothing and checks nothing.
+A changed `save()` runs `validate()`, then compares the disk file with the fingerprint.
+A conflict raises `LibraryTableConflictError` and writes nothing, unless `save(overwrite=True)`.
+Changed saves keep the single-file link and permission safeguards.
 Table saves do not create an invented backup.
 `save_as(path)` writes one new file, then rebinds this artifact only after success.
 It refuses existing destinations, symlinks, missing parent directories, and symlink or unwritable destination parents.
 Use an existing canonical destination directory. The operation does not create parents.
 It leaves the original bytes and permissions unchanged and preserves the source permission mode on the new file.
 Read-only sources and readable linked sources can be copied because save-as does not overwrite them.
-Save-as still rejects an external source-byte change or deletion since the captured baseline.
-Failures retain the prior path, pending source, and baseline for inspection or retry.
+Save-as still rejects an external change or deletion of the source since it was read.
+Failures retain the prior path, pending source, and fingerprint for inspection or retry.
+Table `revert()` is pending an owner decision (ADR 0011 D6 assigns library revert to #78).
 Global and project tables can have the same basename. There is no combined context save-as layout.
 
 ## Limits

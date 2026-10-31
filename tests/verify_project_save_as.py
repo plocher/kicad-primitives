@@ -4,7 +4,6 @@ import argparse
 import json
 import shutil
 import subprocess
-import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -83,7 +82,7 @@ def main() -> None:
         cache_id = child.symbol("C1").lib_id
         embedded = child.embedded_symbol(cache_id)
         destination = root / "clone"
-        project.save_as(destination, "Renamed", kicad_cli=cli)
+        project.save_as(destination, "Renamed")
         expected_root = originals[sch][0].replace(
             b'(project "issue23403"', b'(project "Renamed"'
         )
@@ -176,18 +175,13 @@ def main() -> None:
             timeout=120,
         )
         assert board_path.read_bytes() == expected_pcb
-        archives = tuple((destination / "Renamed-backups").glob("*.zip"))
-        assert len(archives) == 1
-        with zipfile.ZipFile(archives[0]) as archive:
-            assert archive.read("Renamed.kicad_sch") == expected_root
-            assert archive.read("shared1.kicad_sch") == expected_child
-            assert archive.read("Renamed.kicad_pcb") == expected_pcb
-            assert archive.read("Renamed.kicad_pro") == expected_pro
+        assert after == before  # ADR 0011 D9 electrical equality
+        assert not (destination / "Renamed-backups").exists()
         assert {p: (p.read_bytes(), p.stat().st_ino) for p in originals} == originals
         assert not project.is_modified
         project.close()
         print(
-            "Native Project save-as passed: exact root/child/JSON/PCB identity deltas, foreign groups, stable handles, named endpoints/full pins, original bytes/inodes, destination ZIP."
+            "Native Project save-as passed: exact root/child/JSON/PCB identity deltas, foreign groups, stable handles, named endpoints/full pins, equal netlists, original bytes/inodes, no ZIP."
         )
 
 
