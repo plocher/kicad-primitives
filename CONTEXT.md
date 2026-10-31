@@ -23,6 +23,31 @@ Artifact exit that persists pending changes.
 A clean artifact closes without writing. A dirty artifact saves first.
 If that save fails, the artifact stays open with its pending changes.
 Close after exit is idempotent. A `with` block discards instead of closing when an exception exits it.
+A scope applies its `on_close` choice (`save`, `discard`, or `raise`) to its unsaved artifacts instead (ADR 0011).
+
+**Revert**:
+Drop the unsaved edits of an artifact or item and reload it from disk. The object stays open and keeps its identity.
+Revert reads the disk, so it can fail. Discard cannot fail, so error paths use discard.
+
+**Scope**:
+A layer-1 owner of artifacts that drives their lifecycle. Today: `Project`. Later: `KiCad` (#78).
+
+**Layer 0 / Layer 1 / Layer 2**:
+Files (one file, data limited to that file) / the joined-up view (scopes and cross-file documents) / policy (plain functions built from layers 0 and 1).
+
+**Schematic**:
+The project's set of sheet trees, opened, saved, and reverted as one document. KiCad `SCHEMATIC`.
+KiCad 10 lists peer top-level sheets in `schematic.top_level_sheets`. There is no single root.
+
+**Sheet file**:
+One `.kicad_sch` file. Content edits to it reach every instance of it. KiCad `SCH_SCREEN`.
+_Avoid_: Sheet or schematic, for one file.
+
+**Sheet symbol**:
+The box on a parent sheet file that points at a target sheet file. Its pins are the electrical interface of the instance. KiCad `SCH_SHEET`.
+
+**Sheet instance**:
+One placement of a sheet file in the hierarchy, identified by its UUID path. It holds per-placement data, such as references, units, flags, and page numbers. KiCad `SCH_SHEET_PATH`.
 
 **Flag**:
 A typed behavior switch on a symbol or footprint, such as DNP or exclusion from BOM, board, or simulation.
