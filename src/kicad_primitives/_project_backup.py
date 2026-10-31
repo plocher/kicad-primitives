@@ -302,7 +302,7 @@ def publish(project: Project, snapshot: _Snapshot) -> Path:
     )
     if own_index is None:
         raise ProjectBackupError("Published archive disappeared before retention")
-    limit = project.backup_size_limit_bytes
+    limit = 0  # No pruning: ADR 0011 D7 moves the size limit to project.backup().
     total = sum(info.st_size for _, info in archives)
     for old, before in archives[:own_index]:
         if limit == 0 or total <= limit:

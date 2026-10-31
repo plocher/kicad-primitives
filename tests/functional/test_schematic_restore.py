@@ -435,11 +435,13 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
 
         fixtures = Path(__file__).resolve().parents[1] / "fixtures/schematics"
         self.parent.discard()
+        native = self.directory / "native"
+        native.mkdir()
         for path in (fixtures / "embedded-restore").glob("*.kicad_*"):
-            shutil.copyfile(path, self.directory / path.name)
-        project = Project.open(self.directory / "cpNode-IOX.kicad_pro")
+            shutil.copyfile(path, native / path.name)
+        project = Project.open(native / "cpNode-IOX.kicad_pro")
         schematic = project.schematic().files[0]
-        parent = SymbolLibrary.open(self.directory / "parent.kicad_sym")
+        parent = SymbolLibrary.open(native / "parent.kicad_sym")
         schematic.embedded_symbol("SPCoast:R").restore_from(parent, "R")
         self.assertEqual(
             schematic.to_bytes(),

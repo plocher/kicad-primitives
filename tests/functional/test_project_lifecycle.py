@@ -159,7 +159,6 @@ class ProjectLifecycleTests(unittest.TestCase):
             pcb.name: raw_pcb,
         }
         for extension in (
-            "kicad_pro",
             "kicad_prl",
             "kicad_sch",
             "kicad_sym",
@@ -194,40 +193,6 @@ class ProjectLifecycleTests(unittest.TestCase):
             self.assertEqual({n: archive.read(n) for n in archive.namelist()}, expected)
         self.assertEqual({p: (p.read_bytes(), p.stat().st_ino) for p in before}, before)
         self.assertFalse((self.root / ".history/HEAD").exists())
-
-    def test_same_second_archives_are_unique_and_zero_budget_means_unlimited(
-        self,
-    ) -> None:
-        project = Project.open(self.pro, backup_size_limit_bytes=0)
-        with patch("kicad_primitives._project_backup.datetime") as clock:
-            clock.now.return_value.strftime.return_value = "2026-10-27_010203"
-            for _ in range(3):
-                project.save()
-        self.assertEqual(
-            {p.name for p in self.archives()},
-            {
-                "board-2026-10-27_010203.zip",
-                "board-2026-10-27_010203-001.zip",
-                "board-2026-10-27_010203-002.zip",
-            },
-        )
-        for path in self.archives():
-            with zipfile.ZipFile(path) as archive:
-                self.assertEqual(archive.read(self.pro.name), self.pro.read_bytes())
-        limited = Project.open(self.pro, backup_size_limit_bytes=1)
-        with patch("kicad_primitives._project_backup.datetime") as clock:
-            clock.now.return_value.strftime.return_value = "2026-10-27_010203"
-            limited.save()
-        self.assertEqual(len(self.archives()), 1)
-        self.assertEqual(self.archives()[0].name, "board-2026-10-27_010203-003.zip")
-        self.assertGreater(self.archives()[0].stat().st_size, 1)
-        limited.close()
-
-    def test_invalid_explicit_budget_fails_without_writing(self) -> None:
-        for value in (-1, True, "100"):
-            with self.subTest(value=value), self.assertRaises((ValueError, TypeError)):
-                Project.open(self.pro, backup_size_limit_bytes=value)  # type: ignore[arg-type]
-        self.assertFalse((self.root / "board-backups").exists())
 
     def test_opaque_pcb_freshness_missing_and_changed_companion_membership(
         self,
@@ -429,21 +394,6 @@ class ProjectLifecycleTests(unittest.TestCase):
         with self.assertRaises(UnsupportedSchematicOperationError):
             Project.open(self.pro).save()
 
-    def test_retention_removes_oldest_same_second_archive_not_newer_suffix(
-        self,
-    ) -> None:
-        with patch("kicad_primitives._project_backup.datetime") as clock:
-            clock.now.return_value.strftime.return_value = "2026-10-27_010203"
-            Project.open(self.pro, backup_size_limit_bytes=0).save()
-            size = self.archives()[0].stat().st_size
-            project = Project.open(self.pro, backup_size_limit_bytes=size * 2)
-            project.save()
-            project.save()
-        self.assertEqual(
-            {p.name for p in self.archives()},
-            {"board-2026-10-27_010203-001.zip", "board-2026-10-27_010203-002.zip"},
-        )
-
     def test_later_pending_edit_during_verification_cannot_be_written_or_settled(
         self,
     ) -> None:
@@ -550,34 +500,6 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertTrue(project.is_modified)
         self.assertFalse(self.archives())
 
-    def test_retention_failure_leaves_complete_new_archive_and_close_retries_history(
-        self,
-    ) -> None:
-        project = Project.open(self.pro, backup_size_limit_bytes=1)
-        project.save()
-        previous = self.archives()[0]
-        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
-        real_unlink = Path.unlink
-
-        def fail_previous(path: Path, *, missing_ok: bool = False) -> None:
-            if path == previous:
-                raise PermissionError("old snapshot protected")
-            real_unlink(path, missing_ok=missing_ok)
-
-        with (
-            patch("pathlib.Path.unlink", new=fail_previous),
-            self.assertRaises(ProjectBackupError),
-        ):
-            project.save(kicad_cli=self.verifier())
-        self.assertEqual(len(self.archives()), 2)
-        self.assertFalse(project.is_modified)
-        for path in self.archives():
-            with zipfile.ZipFile(path) as archive:
-                self.assertIsNone(archive.testzip())
-        project.close(kicad_cli=self.root / "not-needed")
-        self.assertTrue(project.is_closed)
-        self.assertEqual(len(self.archives()), 1)
-
     def test_identical_content_under_new_filename_is_a_distinct_complete_snapshot(
         self,
     ) -> None:
@@ -620,32 +542,6 @@ class ProjectLifecycleTests(unittest.TestCase):
             project.save()
         self.assertEqual(len(self.archives()), 1)
 
-    def test_board_only_file_set_and_unsafe_native_board_formats(self) -> None:
-        self.sch.unlink()
-        pcb = self.root / "board.kicad_pcb"
-        valid = b'(kicad_pcb (version 20260206) (generator "pcbnew"))'
-        pcb.write_bytes(valid)
-        project = Project.open(self.pro)
-        project.save(kicad_cli=self.root / "not-needed")
-        with zipfile.ZipFile(self.archives()[0]) as archive:
-            self.assertEqual(set(archive.namelist()), {self.pro.name, pcb.name})
-            self.assertEqual(archive.read(pcb.name), valid)
-        project.close()
-        for raw in (
-            b"(kicad_pcb (version 20990101))",
-            b"(kicad_pcb (version bad))",
-            b"(wrong (version 20260206))",
-            b"(",
-        ):
-            with self.subTest(raw=raw):
-                pcb.write_bytes(raw)
-                context = Project.open(self.pro)
-                with self.assertRaises(ValueError):
-                    context.save()
-                self.assertEqual(pcb.read_bytes(), raw)
-                context.close()
-                self.assertEqual(pcb.read_bytes(), raw)
-
     def test_terminal_project_rejects_retained_embedded_and_placed_queries(
         self,
     ) -> None:
@@ -676,45 +572,12 @@ class ProjectLifecycleTests(unittest.TestCase):
                 action()
         self.assertFalse(self.archives())
 
-    def test_retention_preserves_a_known_newer_snapshot_from_another_root(self) -> None:
-        older = Project.open(self.pro, backup_size_limit_bytes=1)
-        newer = Project.open(self.pro, backup_size_limit_bytes=0)
-        base_name = "board-2026-10-27_010203.zip"
-        real_read = Path.read_bytes
-        interleaved = False
-
-        def publish_newer_after_first_archive(path: Path) -> bytes:
-            nonlocal interleaved
-            raw = real_read(path)
-            if path.name == base_name and not interleaved:
-                interleaved = True
-                newer.save()
-            return raw
-
-        with (
-            patch("kicad_primitives._project_backup.datetime") as clock,
-            patch("pathlib.Path.read_bytes", new=publish_newer_after_first_archive),
-        ):
-            clock.now.return_value.strftime.return_value = "2026-10-27_010203"
-            older.save()
-        self.assertTrue(interleaved)
-        self.assertEqual(
-            {path.name for path in self.archives()},
-            {base_name, "board-2026-10-27_010203-001.zip"},
-        )
-        for path in self.archives():
-            with zipfile.ZipFile(path) as archive:
-                self.assertEqual(archive.read(self.sch.name), SOURCE)
-        older.close()
-        newer.close()
-
     def test_native_pro_schematic_pcb_and_unloaded_child_locks_block_actual_owned_paths(
         self,
     ) -> None:
         _, child = self.hierarchy()
-        root = self.root / "different-root.kicad_sch"
-        self.sch.rename(root)
-        pcb = self.root / "different-board.kicad_pcb"
+        root = self.sch
+        pcb = self.root / "board.kicad_pcb"
         pcb.write_bytes(b'(kicad_pcb (version 20260206) (generator "pcbnew"))')
         paths = (self.pro, root, pcb, child)
         original = {path: (path.read_bytes(), path.stat().st_ino) for path in paths}

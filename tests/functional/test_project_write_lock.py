@@ -29,6 +29,9 @@ class LockCase(unittest.TestCase):
         (self.root / "board.kicad_pro").write_text(
             json.dumps({"meta": {"version": 1}}), encoding="utf-8"
         )
+        (self.root / "board.kicad_sch").write_text(
+            "(kicad_sch (version 20260306))", encoding="utf-8"
+        )
 
     def open_project(self) -> Project:
         return Project.open(self.root)

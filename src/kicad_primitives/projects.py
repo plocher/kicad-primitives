@@ -8,6 +8,7 @@ ADR 0011). PCB document models remain later work.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import replace
 from os import PathLike
@@ -57,27 +58,20 @@ class Project:
         self,
         directory: Path,
         project_file: Path,
-        schematic_file: Path | None,
+        root_files: tuple[Path, ...],
         pcb_file: Path | None,
         text_variables: Mapping[str, str],
         project_baseline: bytes,
-        backup_size_limit_bytes: int = 100 * 1024 * 1024,
     ) -> None:
         self._directory = directory
         self._project_file = project_file
-        self._schematic_file = schematic_file
+        self._root_files = root_files
+        self._schematic_file: Path | None = root_files[0] if root_files else None
         self._pcb_file = pcb_file
         self._text_variables = text_variables
         self._schematic: Schematic | None = None
         self._project_baseline = project_baseline
         self._pcb_baseline = None if pcb_file is None else pcb_file.read_bytes()
-        if isinstance(backup_size_limit_bytes, bool) or not isinstance(
-            backup_size_limit_bytes, int
-        ):
-            raise TypeError("backup_size_limit_bytes must be an integer")
-        if backup_size_limit_bytes < 0:
-            raise ValueError("backup_size_limit_bytes cannot be negative")
-        self._backup_size_limit_bytes = backup_size_limit_bytes
         self._closed = False
         # True after source writes whose ZIP history has not yet published.
         self._history_pending = False
@@ -91,11 +85,6 @@ class Project:
     def is_closed(self) -> bool:
         """Whether the artifact exited through close or terminal discard."""
         return self._closed
-
-    @property
-    def backup_size_limit_bytes(self) -> int:
-        """Explicit ZIP history budget; zero means unlimited."""
-        return self._backup_size_limit_bytes
 
     def discard(self) -> None:
         """Terminally abandon the Project without writing or resetting baselines."""
@@ -145,53 +134,35 @@ class Project:
         return tuple(self._schematic._files.values())
 
     @classmethod
-    def open(
-        cls,
-        path: str | PathLike[str],
-        *,
-        backup_size_limit_bytes: int = 100 * 1024 * 1024,
-    ) -> Project:
-        """Open a project directory or an explicit ``.kicad_pro`` file.
+    def open(cls, path: str | PathLike[str] = ".") -> Project:
+        """Open the project that a directory or any file in it refers to.
 
-        Discovery requires exactly the selected ``*.kicad_pro``. Schematic and PCB
-        companions are optional. ``text_variables`` are read now; missing maps are
-        empty, not errors. Malformed project JSON fails before a context is returned.
-        Capture optional raw PCB bytes without exposing a board editor.
-        *backup_size_limit_bytes* defaults to 100 MiB. Zero keeps unlimited ZIP
-        history. Reject booleans, non-integers, and negative budgets before writes.
+        *path* is a directory, or the path of any file in a directory. That
+        directory must hold exactly one ``*.kicad_pro``: none means "not a
+        KiCad project", several means "ambiguous". The project name is the
+        stem of that file. Root sheet files come from the project's
+        ``schematic.top_level_sheets`` when present, else ``<name>.kicad_sch``.
+        A missing project file or root sheet file raises
+        :class:`InvalidProjectError`. The PCB ``<name>.kicad_pcb`` is optional.
+        ``text_variables`` are read now; missing maps are empty, not errors.
         """
         location = Path(path).expanduser().absolute()
-        if location.is_file():
-            if location.suffix.lower() != ".kicad_pro":
-                raise InvalidProjectError(
-                    f"Expected a project directory or .kicad_pro file, got: {location}"
-                )
-            directory = location.parent
-            project_file = location
-        elif location.is_dir():
+        if location.is_dir():
             directory = location
-            project_file = _find_project_file(directory)
+        elif location.exists():
+            directory = location.parent
         else:
             raise InvalidProjectError(f"Path does not exist: {location}")
-
         directory = directory.resolve()
-        project_file = directory / project_file.name
-        base_name = project_file.stem
-        schematic_file = _find_companion(
-            directory, base_name, directory.name, ".kicad_sch"
-        )
-        pcb_file = _find_companion(directory, base_name, directory.name, ".kicad_pcb")
+        project_file = _find_project_file(directory)
+        name = project_file.stem
         baseline = project_file.read_bytes()
-        variables = _read_text_variables(project_file, baseline)
-        return cls(
-            directory,
-            project_file,
-            schematic_file,
-            pcb_file,
-            variables,
-            baseline,
-            backup_size_limit_bytes,
-        )
+        payload = _read_project_json(project_file, baseline)
+        variables = _coerce_text_variables(payload.get("text_variables"))
+        root_files = _root_files(directory, name, payload)
+        pcb = directory / f"{name}.kicad_pcb"
+        pcb_file = pcb if pcb.is_file() else None
+        return cls(directory, project_file, root_files, pcb_file, variables, baseline)
 
     def save(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
         """Save the supported Project file set and publish an exact ZIP snapshot.
@@ -311,8 +282,13 @@ class Project:
 
     @property
     def schematic_file(self) -> Path | None:
-        """Root schematic companion when present, else ``None``."""
+        """The first root sheet file, or ``None`` after a save-as without one."""
         return self._schematic_file
+
+    @property
+    def root_sheet_files(self) -> tuple[Path, ...]:
+        """Root sheet files of the top-level sheets, in project order."""
+        return self._root_files
 
     @property
     def pcb_file(self) -> Path | None:
@@ -420,22 +396,21 @@ class Project:
                 )
             from .schematics import Schematic
 
-            self._schematic = Schematic(self, (self._schematic_file,))
+            self._schematic = Schematic(self, self._root_files)
         return self._schematic
 
     def schematic_files(self) -> tuple[Path, ...]:
-        """Root schematic plus reachable child sheets in discovery order.
+        """Root sheet files plus reachable child sheets in discovery order.
 
         Each ``Sheetfile`` property is resolved relative to the parent sheet's
         directory. Missing children are skipped. Cycles are ignored after the
-        first visit. Without a root schematic the result is empty.
+        first visit. This reads paths only; :meth:`schematic` loads content.
         """
         self._check_open()
-        if self._schematic_file is None:
-            return ()
         files: list[Path] = []
         processed: set[Path] = set()
-        _walk_schematic(self._schematic_file, files, processed)
+        for root in self._root_files:
+            _walk_schematic(root, files, processed)
         return tuple(files)
 
 
@@ -450,61 +425,70 @@ def _native_lock_path(source: Path) -> Path:
 
 
 def _find_project_file(directory: Path) -> Path:
-    candidates = sorted(directory.glob("*.kicad_pro"))
+    """Apply the jBOM rule: the directory holds exactly one ``*.kicad_pro``."""
+    candidates = sorted(
+        path for path in directory.glob("*.kicad_pro") if path.is_file()
+    )
     if not candidates:
         raise InvalidProjectError(
-            f"No project files found (expected exactly one *.kicad_pro in {directory})"
+            f"Not a KiCad project: no *.kicad_pro file in {directory}"
         )
-    if len(candidates) == 1:
-        return candidates[0]
-    matching = [path for path in candidates if path.stem == directory.name]
-    if len(matching) == 1:
-        return matching[0]
+    if len(candidates) > 1:
+        names = ", ".join(path.name for path in candidates)
+        raise InvalidProjectError(
+            f"Ambiguous KiCad project: several *.kicad_pro files in {directory}: {names}"
+        )
     return candidates[0]
 
 
-def _find_companion(
-    directory: Path,
-    project_stem: str,
-    directory_name: str,
-    suffix: str,
-) -> Path | None:
-    files = list(directory.glob(f"*{suffix}"))
-    if not files:
-        return None
-
-    normal = [path for path in files if not path.name.startswith("_autosave-")]
-    autosave = [path for path in files if path.name.startswith("_autosave-")]
-
-    for pool in (normal, autosave):
-        if not pool:
-            continue
-        for preferred in (project_stem, directory_name):
-            matches = [path for path in pool if path.stem == preferred]
-            if matches:
-                return min(matches).absolute()
-        if pool is autosave:
-            autosave_preferred = f"_autosave-{project_stem}"
-            matches = [path for path in pool if path.stem == autosave_preferred]
-            if matches:
-                return min(matches).resolve()
-            autosave_dir = f"_autosave-{directory_name}"
-            matches = [path for path in pool if path.stem == autosave_dir]
-            if matches:
-                return min(matches).resolve()
-        return min(pool).absolute()
-    return None
+def _companion(directory: Path, name: str, suffix: str) -> Path | None:
+    """Return KiCad's ``<name><suffix>`` companion when it is a file."""
+    path = directory / f"{name}{suffix}"
+    return path if path.is_file() else None
 
 
-def _read_text_variables(project_file: Path, raw: bytes) -> Mapping[str, str]:
+def _read_project_json(project_file: Path, raw: bytes) -> dict[str, object]:
     try:
         payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeError) as exc:
         raise InvalidProjectError(
             f"Failed to parse project file as JSON: {project_file}: {exc}"
         ) from exc
-    raw_variables = payload.get("text_variables") if isinstance(payload, dict) else None
-    return _coerce_text_variables(raw_variables)
+    if not isinstance(payload, dict):
+        raise InvalidProjectError(f"Project file is not a JSON object: {project_file}")
+    return payload
+
+
+def _root_files(
+    directory: Path, name: str, payload: Mapping[str, object]
+) -> tuple[Path, ...]:
+    """Root sheet files from ``top_level_sheets``, else ``<name>.kicad_sch``."""
+    schematic = payload.get("schematic")
+    rows = schematic.get("top_level_sheets") if isinstance(schematic, dict) else None
+    if rows is None or rows == []:
+        filenames = [f"{name}.kicad_sch"]
+    elif isinstance(rows, list) and all(
+        isinstance(row, dict)
+        and isinstance(row.get("filename"), str)
+        and row["filename"]
+        for row in rows
+    ):
+        filenames = [row["filename"] for row in rows]
+    else:
+        raise InvalidProjectError("Invalid schematic.top_level_sheets in project file")
+    roots: list[Path] = []
+    for filename in filenames:
+        path = Path(os.path.normpath(directory / filename))
+        if not path.is_file():
+            raise InvalidProjectError(f"Missing root sheet file: {path}")
+        if path not in roots:
+            roots.append(path)
+    return tuple(roots)
+
+
+def _read_text_variables(project_file: Path, raw: bytes) -> Mapping[str, str]:
+    payload = _read_project_json(project_file, raw)
+    return _coerce_text_variables(payload.get("text_variables"))
 
 
 def _coerce_text_variables(raw: object) -> Mapping[str, str]:

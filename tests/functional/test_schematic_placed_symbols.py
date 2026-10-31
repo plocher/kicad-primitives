@@ -70,9 +70,8 @@ class OpenViaProjectTests(SchematicCase):
 
     def test_missing_root_schematic_raises(self) -> None:
         self.write("board.kicad_pro", json.dumps({"meta": {"version": 1}}))
-        project = Project.open(self.root)
         with self.assertRaises(InvalidProjectError):
-            project.schematic().files[0]
+            Project.open(self.root)
 
     def test_open_child_sheet_path_must_belong_to_hierarchy(self) -> None:
         self.write("main.kicad_pro", json.dumps({"meta": {"version": 1}}))

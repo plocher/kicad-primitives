@@ -26,7 +26,7 @@ from .projects import (
     Project,
     ProjectLifecycleError,
     ProjectWriteBlockedError,
-    _find_companion,
+    _companion,
     _native_lock_path,
     _read_text_variables,
 )
@@ -56,19 +56,12 @@ def _current(
     project.ensure_writes_allowed()
     _project_files.check(project.directory, inputs)
     _project_assets.check(directories)
-    for suffix, expected in (
-        (".kicad_sch", project.schematic_file),
-        (".kicad_pcb", project.pcb_file),
+    if _companion(project.directory, project.base_name, ".kicad_pcb") != (
+        project.pcb_file
     ):
-        if (
-            _find_companion(
-                project.directory, project.base_name, project.directory.name, suffix
-            )
-            != expected
-        ):
-            raise SchematicConflictError(
-                "Source companion membership changed during save-as"
-            )
+        raise SchematicConflictError(
+            "Source companion membership changed during save-as"
+        )
     _check_state(project, generation)
 
 
@@ -426,10 +419,7 @@ def save_as(
                 unsupported_error=InvalidProjectError,
             )
         _destination_outputs(outputs, installed)
-        context = Project.open(
-            destination / f"{name}.kicad_pro",
-            backup_size_limit_bytes=project.backup_size_limit_bytes,
-        )
+        context = Project.open(destination / f"{name}.kicad_pro")
         _schematic_persist._hierarchy(context)
         _current(project, generation, inputs, directories)
         context.ensure_writes_allowed()
@@ -456,6 +446,9 @@ def save_as(
         project._text_variables = new_variables
         project._schematic_file = (
             destination / f"{name}.kicad_sch" if documents else None
+        )
+        project._root_files = (
+            () if project._schematic_file is None else (project._schematic_file,)
         )
         project._pcb_file = None if old_pcb is None else targets[old_pcb]
         project._pcb_baseline = None if old_pcb is None else outputs[targets[old_pcb]]
