@@ -52,26 +52,21 @@ Canonical decision: [ADR 0008](docs/adr/0008-artifact-objects-and-explicit-persi
 This package is a library of KiCad capabilities, not a client application or workflow engine.
 Clients open an artifact, select its objects, inspect or change them, inspect pending changes, and choose save, save as, or discard.
 Expose focused operations on the relevant objects, such as `PlacedSymbol.set_attribute`, rather than project-level target-selection workflows.
-Mutations change in-memory content. Do not save on mutation, discard, or finalization. `close()` saves pending changes (ADR 0008 amendment).
+Mutations change in-memory content. Do not save on mutation, discard, or finalization. A layer-0 artifact's `close()` saves pending changes (ADR 0008 amendment); a scope's `close()` applies its `on_close` choice (ADR 0011).
 Clients own selection, iteration, approvals, batch reports, and application dry-run behavior.
 The library owns KiCad invariants, source preservation, change tracking, and applicable persistence safeguards.
 Project ownership supplies schematic and PCB context. It does not force every edit onto `Project`.
 `set_attribute` means create if absent, update if different, and exact no-op if equal. Reject ambiguity.
 Reference annotation and flags have their own semantics.
-`SymbolLibrary`, physical `LibraryTable`, and `Project` artifacts implement the lifecycle defined in ADR 0008 and its 2026-10-29 amendment.
+`SymbolLibrary`, physical `LibraryTable`, `SheetFile`, and `Footprint` artifacts implement the lifecycle defined in ADR 0008 and its 2026-10-29 amendment.
 Open then close never writes and never fails. A clean `close()` is a no-op exit.
 A dirty `close()` runs the normal `save()`. If that save fails, close raises and the artifact stays open with its pending changes.
 `discard()` is terminal exit without writing. It invalidates owned editable handles, not a reset for continued editing.
 A `with` block closes on normal exit and discards on an exception. Close after exit is idempotent.
 Single-file save-as refuses existing or unsafe destinations and rebinds only after success.
-Changed independent symbol-library overwrites require native `Foo.bak` backup behavior. Table saves do not invent a backup.
-`Project` now implements strict same-location file-set saves, post-save native-style ZIP snapshots, and terminal close/discard semantics.
-The owner selected timestamped ZIP as the pre-1.0 minimum in #55. Same-second saves never overwrite prior archives.
-Default filesystem saves honor native `~<full-original-filename>.lck` peer locks for actual known project/schematic/PCB/child paths.
-Importable `pcbnew` is not proof of in-KiCad buffer ownership and must not bypass those guards.
-Do not acquire or delete native peer locks, or add a force/allow-locked-save flag.
-Project save-as supports a fresh directory/stem for the bounded ordinary internal-project profile in `docs/projects.md`.
-It preserves originals and rebinds existing owned handles only after verified output and ZIP success; unsupported contexts fail explicitly.
+Changed independent symbol-library overwrites require native `Foo.bak` backup behavior, with the bytes on disk at save time. Table saves do not invent a backup.
+`Project` save, close, backup, and save-as follow ADR 0011 (below). Save writes files only; it runs no KiCad, makes no ZIP, and checks no lock.
+Do not acquire or delete native peer locks. `is_locked` and `lock_file` are queries; no write consults them.
 Git-backed `.history` interoperability remains deferred research #58, owner grilling #59, and design #60.
 Do not add a Git dependency, autosave scheduler, branching/merge/rollback policy, or a universal session/transaction framework.
 Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.
@@ -81,13 +76,27 @@ Existing gaps are debt to fix, not precedent. No compatibility aliases for misle
 Canonical decision: [ADR 0009](docs/adr/0009-primitives-not-an-executive.md).
 A public operation does one job to one artifact, runs KiCad only when that is its stated purpose, calls no other public capability as a hidden step, and makes no workflow decision for the client.
 File-integrity promises stay inside primitives: no silent overwrite (conflicts raise; `save(overwrite=True)` is the explicit way through), no partial file, no stray KiCad files, native backups from disk.
-Policy (connectivity verification, backup, ERC, discovery roots, URI style, peer-lock guards) lives in `kicad_primitives.recipes`: short tested functions built only from public primitives. Primitives never call recipes.
+Policy (connectivity verification, backup, ERC, discovery roots, URI style, peer-lock guards) lives above primitives, in client code or in plain recipe functions built only from public primitives. Primitives never call recipes. ADR 0011 D10: no recipes module ships until a recipe is needed.
 Every artifact has one lifecycle: open, read, modify, validate, write, close. `validate()` is public and runs no KiCad. `is_modified` is a setter-maintained flag.
 Connectivity verification is a client sequence: `before = project.netlist()`, edit, `after = project.netlist()`, `before == after`. The package does not predict or excuse expected electrical changes.
 Peer locks are a query (`is_locked`, `lock_file`), not a write guard.
 Footprint libraries are two levels: a directory with cached `summaries` and explicit `refresh()`, plus per-file `Footprint` artifacts; `on_close` is chosen at open (`save` default). Delete, rename, create, and copy are immediate directory operations.
 `update_from_library(library, name)` replaces a project's embedded copy with the library definition, in memory; the family covers symbols, footprints (#34), and worksheets (future).
-Composite operations that predate ADR 0009 (`Project.save()`, `save_as()`, `close()` history retry, `restore_from()`, `ensure_writes_allowed()`) are split in a follow-up ticket, each bundle becoming a named recipe.
+The composite operations that predated ADR 0009 were split by ADR 0011 (#75, PR #81). The removed checks were removed, not moved into recipes.
+
+### Schematic document model, save, and revert (locked)
+
+Canonical decision: [ADR 0011](docs/adr/0011-schematic-document-model-save-and-revert.md), with owner amendments to D6 and D9.
+Layers: layer 0 is one file with the full lifecycle; layer 1 is scopes (`Project`, later `KiCad`) and cross-file documents (`Schematic`); layer 2 is policy. Layer 1 does not hide layer-0 operations.
+Nouns: `SheetFile` is one `.kicad_sch` (KiCad `SCH_SCREEN`); `SheetSymbol` is the box (`SCH_SHEET`); a sheet instance is one placement (`SCH_SHEET_PATH`, #79); `Schematic` is the project's set of sheet trees (`SCHEMATIC`). Do not add a bare `Sheet` class.
+A project reference is a directory or any file in it, with exactly one `*.kicad_pro`. Root sheet files come from `top_level_sheets`, else `<name>.kicad_sch`, and must exist. Entry is through `Project`.
+`Schematic.save()` writes only changed sheet files, children first, under the D4 failure policy (a deliberate deviation from KiCad's rewrite-all). `project.save()` saves every changed owned document and nothing else.
+`Project.open(on_close="save" | "discard" | "raise")` maps KiCad's close-project dialog. Error paths use `discard()`.
+Every artifact gets `revert()` beside `discard()`. In scope now: `SheetFile` and `Schematic`. Library and item revert belong to #78.
+No in-memory original. A fingerprint check runs `stat()` first: a different size is a change; the same size and stamp (device, inode, mtime) are no change; only otherwise is the file read and hashed.
+`project.backup(destination, size_limit_bytes=None)` archives disk state with explicit arguments and no built-in policy. `project.save_as()` writes, copies, rewrites identity, and rebinds; it runs no proof and writes no ZIP.
+`Netlist` equality compares component identity and typed pin-to-net connections; pin electrical types count because they affect ERC.
+Closing or discarding one project-owned artifact alone, the `KiCad` scope, and library ownership are #78 work.
 
 ### Functional ownership
 
@@ -103,7 +112,7 @@ Parsing, text editing, and runtime safeguards are internal details.
 ADR 0003 selects one source-preserving S-expression representation for semantic reads and localized edits.
 Preserve opaque content outside the operation's required understanding. Use current spans and reparse changed source before subsequent edits.
 No-op saves preserve bytes. Edited output must contain the required delta and preserve untouched content.
-Connectivity-preserving operations also verify unchanged connectivity. Electrical edits verify their intended changes instead.
+Connectivity checks are client sequences (`project.netlist()` before and after), not hidden steps inside save.
 Placed-symbol insertion follows W4-ORDER-01: UUID order within the symbol section, not coordinates or references.
 Do not normalize unrelated content through a whole-file rewrite or automatic KiCad resave.
 Consumer-specific compatibility adapters belong in consumers, not this package.
@@ -111,7 +120,7 @@ ADR 0004 selects the first functional slice: explicit-path symbol-library inspec
 Keep declared and inherited values distinct, preserve unit/body-style identity and repeated properties, and follow its acceptance gates.
 The first slice is implemented in `kicad_primitives.symbols`; usage and limits are in `docs/symbol-libraries.md`. It is foundation evidence, not the 1.0 completeness bar.
 Project context opening, parent-relative schematic hierarchy, and `text_variables` are implemented in `kicad_primitives.projects`; usage is in `docs/projects.md`.
-Project-owned live schematic objects support placed-symbol attribute edits, source previews, change observation, and explicit same-location saves with staged-hierarchy electrical verification. Geometry and title-block read remain available via `Project.schematic` / `schematics` (`kicad_primitives.schematics`); limits are in `docs/schematics.md`. Schematic write format is `20260306`, distinct from symbol-library format `20251024`.
+`Project.schematic()` returns the whole `Schematic`. Its sheet files support placed-symbol attribute edits, embedded-symbol `update_from_library`, source previews, change observation, save, and revert, plus geometry and title-block read (`kicad_primitives.schematics`); limits are in `docs/schematics.md`. Schematic write format is `20260306`, distinct from symbol-library format `20251024`.
 The owner-locked 1.0 capability and releasability bar is [ADR 0006](docs/adr/0006-1.0-capability-and-releasability-bar.md): macro service surfaces (A), proven cores (B), donor-used floor (C); functional tests as required evidence; cutover is not a gate.
 KiCad integration is provisional internal machinery, not a committed public CLI module. Report/export operations belong on services; backend choice (`kicad-cli` or otherwise) is implementation detail (ADR 0006). Private `kicad-cli` path discovery is [ADR 0007](docs/adr/0007-internal-kicad-cli-discovery.md): lazy resolve via explicit path, `KICAD_CLI`, platform defaults, then `PATH`. KiCad IPC/plugin Python is out of default scope.
 PCB editing belongs to intended scope and follows schematic and library editing patterns.
@@ -195,7 +204,7 @@ This does not authorize parallel decision-making or reopen the one-at-a-time hum
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0007. Mainline after the decision map is bounded implementation under those ADRs (Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0009 and ADR 0011. Mainline after the decision map is bounded implementation under those ADRs (Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
 3. Remaining map grilling is just-in-time (`#8` job/session, `#6` post-1.0 cutover rules) when a workflow needs it—not by lowest issue number.
 
 ## Working agreements
