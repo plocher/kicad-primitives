@@ -261,23 +261,20 @@ class Footprint:
         self.validate()
         output = self.to_bytes()
         if overwrite and not self._path.exists():
-            _symbol_persist.save_new_source(
+            written = _symbol_persist.save_new_source(
                 self._path,
                 output,
                 mode=self._mode,
             )
         else:
-            baseline: _symbol_persist.Baseline = self._fingerprint
-            if overwrite:
-                baseline = self._path.read_bytes()
-            _symbol_persist.save_source(
+            written = _symbol_persist.save_source(
                 self._path,
-                baseline,
+                None if overwrite else self._fingerprint,
                 output,
                 conflict_error=FootprintConflictError,
                 label="Footprint",
             )
-        self._fingerprint = Fingerprint.of(output)
+        self._fingerprint = Fingerprint.of(output, written)
         self._modified = False
 
     def save_as(self, path: str | PathLike[str], *, overwrite: bool = False) -> None:
@@ -315,15 +312,15 @@ class Footprint:
             )
         output = source.document.render().encode("utf-8")
         if overwrite and destination.exists():
-            _symbol_persist.save_source(
+            written = _symbol_persist.save_source(
                 destination,
-                destination.read_bytes(),
+                None,
                 output,
                 conflict_error=FootprintConflictError,
                 label="Footprint",
             )
         else:
-            _symbol_persist.save_new_source(
+            written = _symbol_persist.save_new_source(
                 destination,
                 output,
                 mode=self._mode,
@@ -331,7 +328,7 @@ class Footprint:
         old = self._path
         self._source = source
         self._path = destination
-        self._fingerprint = Fingerprint.of(output)
+        self._fingerprint = Fingerprint.of(output, written)
         self._modified = False
         if self._library is not None:
             self._library._released_path(self, old)

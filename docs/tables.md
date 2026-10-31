@@ -157,7 +157,7 @@ The context retains opened table snapshots. Open a new context to read external 
 ### Persistence and terminal exit
 Each physical table has `path`, `to_bytes()`, `is_modified`, `validate()`, `save()`, `save_as(path)`, `discard()`, and `close()`.
 `is_modified` is a flag that edits set (ADR 0009). An edit back to the original content leaves it set.
-The table keeps a fingerprint (size and content hash) of what it read, not a copy of the bytes.
+The table keeps a fingerprint (size, stat stamp, and content hash) of what it read, not a copy of the bytes. Checks stat first and hash only when the size matches but the stamp does not.
 `table_path(type, scope)` reports the discovered primary location. `table.path` reports that artifact's current destination.
 `tables.is_modified` aggregates pending state from open physical artifacts, not files that the context has never opened.
 
@@ -181,7 +181,7 @@ It leaves the original bytes and permissions unchanged and preserves the source 
 Read-only sources and readable linked sources can be copied because save-as does not overwrite them.
 Save-as still rejects an external change or deletion of the source since it was read.
 Failures retain the prior path, pending source, and fingerprint for inspection or retry.
-Table `revert()` is pending an owner decision (ADR 0011 D6 assigns library revert to #78).
+Table `revert()` belongs to [#78](https://github.com/plocher/kicad-primitives/issues/78) (ADR 0011 D6).
 Global and project tables can have the same basename. There is no combined context save-as layout.
 
 ## Limits

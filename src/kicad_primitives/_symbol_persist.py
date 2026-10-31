@@ -12,23 +12,57 @@ from ._symbol_types import FileConflictError, UnsupportedOperationError
 
 @dataclass(frozen=True)
 class Fingerprint:
-    """What an artifact remembers about the file it read: size and content hash.
+    """What an artifact remembers about the file it read: size, stamp, and hash.
 
     ADR 0009 write promise: no silent overwrite, without keeping the original
     bytes in memory. The fingerprint stands in for the baseline bytes.
+
+    ``stamp`` is the file's (device, inode, modification time) when known.
+    A check is a cheap ``stat()`` first: a different size means changed; the
+    same size and stamp mean unchanged; otherwise the content hash decides.
     """
 
     size: int
     digest: str
+    stamp: tuple[int, int, int] | None = None
 
     @classmethod
-    def of(cls, raw: bytes) -> "Fingerprint":
-        """Fingerprint the given bytes."""
-        return cls(len(raw), sha256(raw).hexdigest())
+    def of(cls, raw: bytes, info: os.stat_result | None = None) -> "Fingerprint":
+        """Fingerprint *raw*; *info* is a stat taken before the read, or after our write."""
+        stamp = (
+            None
+            if info is None or info.st_size != len(raw)
+            else (info.st_dev, info.st_ino, info.st_mtime_ns)
+        )
+        return cls(len(raw), sha256(raw).hexdigest(), stamp)
+
+    @classmethod
+    def read(cls, path: Path) -> "tuple[Fingerprint, bytes]":
+        """Read *path* and fingerprint it, with the stat taken before the read."""
+        info = path.stat()
+        raw = path.read_bytes()
+        return cls.of(raw, info), raw
+
+    def quick(self, info: os.stat_result) -> bool | None:
+        """Decide from a stat alone: False if changed, True if unchanged, else None."""
+        if info.st_size != self.size:
+            return False
+        if self.stamp is not None and self.stamp == (
+            info.st_dev,
+            info.st_ino,
+            info.st_mtime_ns,
+        ):
+            return True
+        return None
 
     def matches(self, raw: bytes) -> bool:
         """Whether *raw* is the content this fingerprint was taken from."""
         return len(raw) == self.size and sha256(raw).hexdigest() == self.digest
+
+    def matches_path(self, path: Path) -> bool:
+        """Whether the file at *path* is unchanged; hash only when stat cannot tell."""
+        decision = self.quick(path.stat())
+        return self.matches(path.read_bytes()) if decision is None else decision
 
 
 Baseline = bytes | Fingerprint
@@ -38,6 +72,15 @@ def _matches(baseline: Baseline, raw: bytes) -> bool:
     if isinstance(baseline, Fingerprint):
         return baseline.matches(raw)
     return raw == baseline
+
+
+def _matches_disk(baseline: Baseline, path: Path, info: os.stat_result) -> bool:
+    """Compare the file at *path* (stat *info*) with *baseline*, reading only if needed."""
+    if isinstance(baseline, Fingerprint):
+        decision = baseline.quick(info)
+        if decision is not None:
+            return decision
+    return _matches(baseline, path.read_bytes())
 
 
 def _check_new_destination(
@@ -140,18 +183,21 @@ def _recover_backup(
         ) from exc
 
 
-def save_library_source(path: Path, baseline: Baseline | None, output: bytes) -> None:
+def save_library_source(
+    path: Path, baseline: Baseline | None, output: bytes
+) -> os.stat_result:
     """Back up a changed library to native Foo.bak before replacing Foo.kicad_sym.
 
     The backup holds the bytes on disk now, not a stored copy (ADR 0009).
     *baseline* ``None`` is the explicit overwrite: no conflict check.
+    Return the stat of the library file as written.
     """
     info = _check_baseline(path, baseline)
     raw = path.read_bytes()
     if baseline is not None and not _matches(baseline, raw):
         raise FileConflictError(f"Library changed on disk: {path}")
     if output == raw:
-        return
+        return info
     if not stat.S_IMODE(info.st_mode) & 0o222:
         raise PermissionError(f"Library has no write permission bits: {path}")
     # Resolve directory aliases, not the final backup filename: do not follow links.
@@ -224,7 +270,7 @@ def save_library_source(path: Path, baseline: Baseline | None, output: bytes) ->
                     ) from exc
             raise
         try:
-            save_source(path, raw, output)
+            written = save_source(path, raw, output)
         except BaseException:
             try:
                 _recover_backup(backup, installed, raw, recovery)
@@ -235,6 +281,7 @@ def save_library_source(path: Path, baseline: Baseline | None, output: bytes) ->
     finally:
         if recovery is not None and not retain_recovery:
             recovery.unlink(missing_ok=True)
+    return written
 
 
 def _check_read_baseline(
@@ -247,7 +294,7 @@ def _check_read_baseline(
     """Check source freshness for copying, without requiring overwrite permissions."""
     try:
         info = path.stat()
-        if not _matches(baseline, path.read_bytes()):
+        if not _matches_disk(baseline, path, info):
             raise conflict_error(f"{label} changed on disk: {path}")
     except FileNotFoundError as exc:
         raise conflict_error(f"{label} no longer exists: {path}") from exc
@@ -269,7 +316,7 @@ def _check_baseline(
             raise unsupported_error(
                 "Save requires a regular, non-symlink, singly linked file"
             )
-        if baseline is not None and not _matches(baseline, path.read_bytes()):
+        if baseline is not None and not _matches_disk(baseline, path, info):
             raise conflict_error(f"{label} changed on disk: {path}")
     except FileNotFoundError as exc:
         raise conflict_error(f"{label} no longer exists: {path}") from exc
