@@ -122,14 +122,15 @@ class LibraryTable:
         self._path = path
         self._library_type = library_type
         self._scope = scope
-        self._baseline = path.read_bytes() if path.exists() else None
-        raw = self._baseline
+        raw = path.read_bytes() if path.exists() else None
+        # None: the file did not exist when opened; save creates it.
+        self._fingerprint = None if raw is None else _symbol_persist.Fingerprint.of(raw)
+        self._modified = False
         self._source = (
             raw.decode("utf-8")
             if raw is not None
             else f"({_TABLE_ROOT_NAMES[library_type]}\n  (version 7)\n)\n"
         )
-        self._initial = self._source.encode("utf-8")
         self._records = _records_from_source(
             self._source, table_path=path, library_type=library_type
         )
@@ -157,6 +158,7 @@ class LibraryTable:
         self._source = source
         self._records = records
         self._entries = tuple(handles)
+        self._modified = True
 
     @property
     def library_type(self) -> LibraryType:
@@ -180,10 +182,24 @@ class LibraryTable:
 
     @property
     def is_modified(self) -> bool:
-        """Whether pending bytes differ from the last successful open/save baseline."""
+        """Whether an edit changed this table since it was opened or saved.
+
+        Edits set the flag (ADR 0009); an edit back to the original content
+        leaves it set. A successful save or save-as clears it.
+        """
         self._check_open()
-        baseline = self._initial if self._baseline is None else self._baseline
-        return self.to_bytes() != baseline
+        return self._modified
+
+    def validate(self) -> None:
+        """Check that the current content is a valid table; write nothing.
+
+        Raises:
+            InvalidLibraryTableError: the current source is not a valid table.
+        """
+        self._check_open()
+        _records_from_source(
+            self._source, table_path=self._path, library_type=self.library_type
+        )
 
     @property
     def entries(self) -> tuple[TableEntry, ...]:
@@ -239,24 +255,35 @@ class LibraryTable:
         self._check_open()
         return self._source.encode("utf-8")
 
-    def save(self) -> None:
-        """Persist this file only; failures retain pending changes for retry."""
+    def save(self, *, overwrite: bool = False) -> None:
+        """Write this file only; failures keep pending changes for retry.
+
+        A table that did not exist when opened is created. An existing clean
+        table writes nothing. A changed table runs :meth:`validate`, then
+        replaces the file atomically. If the disk file is not the file that
+        was read, raise :class:`LibraryTableConflictError` and write nothing,
+        unless *overwrite* is true (ADR 0009). No backup is made.
+        """
         self._check_open()
+        if self._fingerprint is not None and not self._modified:
+            return
+        self.validate()
         output = self.to_bytes()
-        if self._baseline is None:
+        if self._fingerprint is None:
             _symbol_persist.save_new_source(
                 self._path, output, unsupported_error=InvalidLibraryTableError
             )
         else:
             _symbol_persist.save_source(
                 self._path,
-                self._baseline,
+                None if overwrite else self._fingerprint,
                 output,
                 conflict_error=LibraryTableConflictError,
                 unsupported_error=InvalidLibraryTableError,
                 label="Library table",
             )
-        self._baseline = output
+        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._modified = False
 
     def save_as(self, path: str | PathLike[str]) -> None:
         """Save one new file and rebind only on success; never overwrite a destination."""
@@ -264,10 +291,10 @@ class LibraryTable:
         destination = Path(path).expanduser().absolute()
         self._context._check_rebind(self, destination)
         mode = 0o600
-        if self._baseline is not None:
+        if self._fingerprint is not None:
             info = _symbol_persist._check_read_baseline(
                 self._path,
-                self._baseline,
+                self._fingerprint,
                 conflict_error=LibraryTableConflictError,
                 label="Library table",
             )
@@ -280,7 +307,8 @@ class LibraryTable:
             unsupported_error=InvalidLibraryTableError,
         )
         self._context._rebind(self, destination)
-        self._baseline = output
+        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._modified = False
 
     def discard(self) -> None:
         """Abandon this artifact and invalidate its entries without writing."""

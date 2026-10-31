@@ -69,7 +69,8 @@ class SymbolLibrary:
     def __init__(self, path: Path, raw: bytes) -> None:
         self._path = path
         self._source = _symbol_parse.read_source(raw)
-        self._baseline = raw
+        self._fingerprint = _symbol_persist.Fingerprint.of(raw)
+        self._modified = False
         self._closed = False
         self._symbols = tuple(Symbol(self, data) for data in self._source.symbols)
 
@@ -101,6 +102,7 @@ class SymbolLibrary:
             handle._alive = False
         self._source = updated
         self._symbols = tuple(handles)
+        self._modified = True
 
     def _check_open(self) -> None:
         if self._closed:
@@ -118,9 +120,25 @@ class SymbolLibrary:
 
     @property
     def is_modified(self) -> bool:
-        """Whether current bytes differ from the last successful open/save baseline."""
+        """Whether an edit changed this library since it was opened or saved.
+
+        Edits set the flag (ADR 0009); an edit back to the original content
+        leaves it set. A successful save or save-as clears it.
+        """
         self._check_open()
-        return self.to_bytes() != self._baseline
+        return self._modified
+
+    def validate(self) -> None:
+        """Check that the current content can be written; write nothing, run no KiCad.
+
+        Raises:
+            UnsupportedOperationError: the format is read-only.
+            InvalidLibraryError: the current source is not a valid library.
+        """
+        self._check_open()
+        if self.version != _symbol_parse.WRITE_VERSION:
+            raise UnsupportedOperationError(f"Format {self.version} is read-only")
+        _symbol_parse.read_source(self.to_bytes())
 
     @classmethod
     def open(
@@ -292,22 +310,28 @@ class SymbolLibrary:
                 ) from exc
         return out
 
-    def save(self) -> None:
-        """Persist to the opened path after an optimistic conflict check.
+    def save(self, *, overwrite: bool = False) -> None:
+        """Write this library to its opened path when it has unsaved changes.
 
-        Changed output first captures native ``Foo.bak`` backup bytes, then
-        replaces the regular singly linked source atomically. Exact no-op saves
-        replace neither file. This is not a two-file transaction or coordination
-        with KiCad or another writer: a final check/replace race remains
-        possible. OS errors propagate; unsuccessful saves retain edits in memory
-        for inspection/retry.
+        A clean save writes nothing. A changed save runs :meth:`validate`,
+        copies the bytes on disk to native ``Foo.bak``, then replaces the
+        regular singly linked source atomically. Output equal to the disk
+        bytes replaces neither file. If the disk file is not the file that was
+        read, raise :class:`FileConflictError` and write nothing, unless
+        *overwrite* is true (ADR 0009). This is not a two-file transaction:
+        a final check/replace race remains possible. OS errors propagate;
+        failed saves keep the edits in memory.
         """
         self._check_open()
-        if self.version != _symbol_parse.WRITE_VERSION:
-            raise UnsupportedOperationError(f"Format {self.version} is read-only")
+        if not self._modified:
+            return
+        self.validate()
         output = self.to_bytes()
-        _symbol_persist.save_library_source(self._path, self._baseline, output)
-        self._baseline = output
+        _symbol_persist.save_library_source(
+            self._path, None if overwrite else self._fingerprint, output
+        )
+        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._modified = False
 
     def save_as(self, path: str | PathLike[str]) -> None:
         """Write one new file and rebind only after success, leaving source intact.
@@ -320,12 +344,13 @@ class SymbolLibrary:
         if self.version != _symbol_parse.WRITE_VERSION:
             raise UnsupportedOperationError(f"Format {self.version} is read-only")
         destination = Path(path).expanduser().absolute()
-        info = _symbol_persist._check_read_baseline(self._path, self._baseline)
+        info = _symbol_persist._check_read_baseline(self._path, self._fingerprint)
         output = self.to_bytes()
         _symbol_persist.save_new_source(destination, output, mode=info.st_mode & 0o7777)
         _registry.rebind(_KIND, self._path, destination, self)
         self._path = destination
-        self._baseline = output
+        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._modified = False
 
     def discard(self) -> None:
         """Exit without writing and invalidate editable handles; never reload or reset."""

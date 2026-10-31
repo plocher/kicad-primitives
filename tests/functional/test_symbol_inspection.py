@@ -86,7 +86,8 @@ class DonorInspectionTests(unittest.TestCase):
         with self.assertRaises(UnsupportedOperationError):
             library.symbol("IRJ").set_attribute("Reference", "X")
         with self.assertRaises(UnsupportedOperationError):
-            library.save()
+            library.validate()
+        library.save()  # A clean save writes nothing, whatever the format.
 
     def test_overview_fields_units_and_escaping(self) -> None:
         library = SymbolLibrary.open(FIXTURES / "overview.kicad_sym")
