@@ -821,6 +821,30 @@ class Schematic:
 
         _schematic_save.save(self, overwrite=overwrite)
 
+    def revert(self) -> None:
+        """Drop all unsaved changes and reload the whole hierarchy from disk.
+
+        The Schematic and its sheet files keep their identity, and
+        ``is_modified`` becomes false. Handles to things inside them become
+        stale; get fresh ones. Every sheet file is checked first: if any is
+        missing or is not the file that was read, raise
+        :class:`SchematicConflictError` naming them, and change nothing. The
+        trees are walked again, so sheet files that are no longer reachable
+        leave :attr:`files` and newly reachable ones join it.
+        """
+        self._check_open()
+        conflicts = [
+            sheet_file.path
+            for sheet_file in self._files.values()
+            if not _matches_disk(sheet_file)
+        ]
+        if conflicts:
+            names = ", ".join(str(path) for path in conflicts)
+            raise SchematicConflictError(f"Cannot revert; changed on disk: {names}")
+        for sheet_file in self._files.values():
+            sheet_file.revert()
+        self._load()
+
     def _write_order(self) -> tuple[SheetFile, ...]:
         """Every loaded sheet file once, each child before its parents."""
         order: dict[Path, SheetFile] = {}
@@ -843,6 +867,16 @@ class Schematic:
         """Adopt relocated paths after a successful project save-as."""
         self._roots = roots
         self._files = {sheet_file.path: sheet_file for sheet_file in files}
+
+
+def _matches_disk(sheet_file: SheetFile) -> bool:
+    """Whether the disk file is still the file that was read."""
+    try:
+        raw = sheet_file.path.read_bytes()
+    except FileNotFoundError:
+        return False
+    fingerprint = sheet_file._fingerprint
+    return fingerprint is None or fingerprint.matches(raw)
 
 
 def _read_sheet_file(location: Path) -> SheetFile:

@@ -28,6 +28,7 @@ from .schematics import (
     SchematicSaveError,
     SheetSaveResult,
     UnsupportedSchematicOperationError,
+    _matches_disk,
 )
 
 if TYPE_CHECKING:
@@ -72,11 +73,7 @@ def _target_problem(sheet: SheetFile) -> str | None:
 
 
 def _is_conflict(sheet: SheetFile) -> bool:
-    try:
-        raw = sheet.path.read_bytes()
-    except FileNotFoundError:
-        return True
-    return sheet._fingerprint is not None and not sheet._fingerprint.matches(raw)
+    return not _matches_disk(sheet)
 
 
 def _raise(
