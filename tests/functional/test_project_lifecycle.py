@@ -297,43 +297,6 @@ class ProjectLifecycleTests(unittest.TestCase):
         with zipfile.ZipFile(self.archives()[0]) as archive:
             self.assertEqual(archive.read("sub/child.kicad_sch"), child.to_bytes())
 
-    def test_document_save_archives_selected_output_not_pending_sibling(
-        self,
-    ) -> None:
-        project, child_path = self.hierarchy()
-        root, child = project.schematic().files
-        child_original = child.to_bytes()
-        root.symbol("R1").set_attribute("Value", "22K")
-        child.symbol("R2").set_attribute("Value", "33K")
-        child_path.chmod(0o444)
-        self.addCleanup(child_path.chmod, 0o644)
-        root.save(kicad_cli=self.verifier())
-        with zipfile.ZipFile(self.archives()[0]) as archive:
-            self.assertEqual(archive.read("board.kicad_sch"), root.to_bytes())
-            self.assertEqual(archive.read("sub/child.kicad_sch"), child_original)
-        self.assertTrue(child.is_modified)
-        self.assertTrue(project.is_modified)
-        project.discard()
-        self.assertEqual(child_path.read_bytes(), child_original)
-
-    def test_exact_revert_and_failed_clean_save_still_close_without_writing(
-        self,
-    ) -> None:
-        project = Project.open(self.pro)
-        schematic = project.schematic().files[0]
-        schematic.symbol("R1").set_attribute("Value", "22K")
-        schematic.symbol("R1").set_attribute("Value", "10K")
-        self.assertFalse(project.is_modified)
-        self.pro.write_bytes(self.pro.read_bytes() + b"\n")
-        foreign = self.pro.read_bytes()
-        with self.assertRaises(SchematicConflictError):
-            project.save()
-        project.close(kicad_cli=self.root / "must-not-run")
-        self.assertTrue(project.is_closed)
-        self.assertEqual(self.pro.read_bytes(), foreign)
-        self.assertEqual(self.sch.read_bytes(), SOURCE)
-        self.assertFalse(self.archives())
-
     def test_unreadable_linked_or_unsafe_archive_member_fails_before_original_replacement(
         self,
     ) -> None:
@@ -590,9 +553,8 @@ class ProjectLifecycleTests(unittest.TestCase):
                     schematic = project.schematic().files[0]
                     schematic.symbol("R1").set_attribute("Value", "22K")
                     # The child remains unloaded until the complete save walk.
-                    for save in (project.save, schematic.save):
-                        with self.assertRaises(ProjectWriteBlockedError):
-                            save(kicad_cli=self.root / "must-not-run")
+                    with self.assertRaises(ProjectWriteBlockedError):
+                        project.save(kicad_cli=self.root / "must-not-run")
                     self.assertTrue(project.is_locked)
                     self.assertEqual(
                         {

@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from math import isfinite
 from os import PathLike
 from pathlib import Path
-from types import MappingProxyType
-from typing import TYPE_CHECKING
+from types import MappingProxyType, TracebackType
+from typing import TYPE_CHECKING, Self
 
 from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quote
 
+from . import _symbol_persist
 from ._erc_types import (
     ErcAcquisitionError,
     ErcContextError,
@@ -29,11 +30,14 @@ from ._erc_types import (
 )
 from ._svg_types import SchematicSvgError, SchematicSvgExport, SchematicSvgFile
 from ._symbol_parse import _leading_separator_start
+from ._symbol_persist import Fingerprint
 from ._symbol_types import _MANDATORY, _attribute_key
 
 _FLAG_NAMES = frozenset(
     {"dnp", "in_bom", "on_board", "in_pos_files", "exclude_from_sim"}
 )
+# The KiCad 10 sheet-file format that the package edits and writes.
+_WRITE_VERSION = 20260306
 
 if TYPE_CHECKING:
     from ._schematic_restore import _RestoreIntent
@@ -64,6 +68,7 @@ __all__ = [
     "Schematic",
     "SchematicConflictError",
     "SchematicError",
+    "SchematicLifecycleError",
     "SchematicSvgError",
     "SchematicSvgExport",
     "SchematicSvgFile",
@@ -73,7 +78,6 @@ __all__ = [
     "TitleBlock",
     "UnsupportedSchematicOperationError",
     "Wire",
-    "open_schematic",
 ]
 
 
@@ -103,6 +107,10 @@ class SchematicConflictError(SchematicError):
 
 class SchematicVerificationError(SchematicError):
     """Pending content did not satisfy its required electrical proof."""
+
+
+class SchematicLifecycleError(RuntimeError):
+    """A sheet file is closed or discarded."""
 
 
 @dataclass(frozen=True)
@@ -195,6 +203,7 @@ class EmbeddedSymbol:
 
     lib_id: str
     _owner: SheetFile = field(repr=False, compare=False)
+    _alive: bool = field(default=True, init=False, repr=False, compare=False)
 
     def restore_from(self, parent_library: SymbolLibrary, parent_name: str) -> None:
         """Restore this concrete definition from captured parent source in memory.
@@ -204,6 +213,11 @@ class EmbeddedSymbol:
         inheritance or electrical changes fail before changing the schematic.
         """
         from ._schematic_restore import restore_definition
+
+        if not self._alive:
+            raise UnsupportedSchematicOperationError(
+                f"Embedded symbol handle is stale after revert: {self.lib_id}"
+            )
 
         restore_definition(self._owner, self.lib_id, parent_library, parent_name)
 
@@ -288,7 +302,10 @@ class SheetFile:
     """One ``.kicad_sch`` file: symbols, title block, and electrical geometry.
 
     KiCad ``SCH_SCREEN``. One object per file, even when several sheet symbols
-    use it. A sheet file knows nothing about the hierarchy.
+    use it. A layer-0 artifact with the full lifecycle: open, read, modify,
+    validate, save, revert, discard, and close. A sheet file knows nothing
+    about the hierarchy, so it cannot keep a parent sheet symbol's pins
+    matched with its hierarchical labels.
     """
 
     path: Path
@@ -315,10 +332,169 @@ class SheetFile:
     _restore_intents: dict[str, _RestoreIntent] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )
+    _fingerprint: Fingerprint | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _modified: bool = field(default=False, init=False, repr=False, compare=False)
+    _closed: bool = field(default=False, init=False, repr=False, compare=False)
+
+    @classmethod
+    def open(cls, path: str | PathLike[str]) -> SheetFile:
+        """Open one ``.kicad_sch`` file as a layer-0 artifact, outside a project.
+
+        Record a fingerprint (size and content hash) of the bytes read. A
+        missing, non-``.kicad_sch``, or unparsable file raises
+        :class:`InvalidSchematicError`. Project sheet files come from
+        :meth:`kicad_primitives.projects.Project.schematic` instead.
+        """
+        return _read_sheet_file(Path(path).expanduser().absolute())
 
     def _check_open(self) -> None:
+        if self._closed:
+            raise SchematicLifecycleError(f"Sheet file is closed: {self.path}")
         if self._project is not None:
             self._project._check_open()
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether this sheet file exited through close or discard."""
+        return self._closed or (self._project is not None and self._project.is_closed)
+
+    def validate(self) -> None:
+        """Check that the current content can be written; write nothing, run no KiCad.
+
+        Raises:
+            UnsupportedSchematicOperationError: the format is read-only.
+            InvalidSchematicError: the current source is not a valid sheet file.
+        """
+        self._check_open()
+        if self.version != _WRITE_VERSION:
+            raise UnsupportedSchematicOperationError(
+                f"Sheet file format {self.version} is read-only: {self.path}"
+            )
+        assert self._document is not None
+        try:
+            _sheet_file_from_document(self.path, parse(self._document.source))
+        except (ParseError, RecursionError) as exc:
+            raise InvalidSchematicError(f"Invalid sheet file source: {exc}") from exc
+
+    def save(self, *, overwrite: bool = False) -> None:
+        """Write this file to its opened location when it has unsaved changes.
+
+        A clean save writes nothing. A changed save runs :meth:`validate`,
+        then replaces the file atomically. It runs no KiCad, makes no backup,
+        and checks no lock. If the disk file is not the file that was read,
+        raise :class:`SchematicConflictError` and write nothing, unless
+        *overwrite* is true (ADR 0009). Failures keep the unsaved changes.
+        """
+        self._check_open()
+        if not self._modified:
+            return
+        self.validate()
+        output = self.to_bytes()
+        _symbol_persist.save_source(
+            self.path,
+            None if overwrite else self._fingerprint,
+            output,
+            conflict_error=SchematicConflictError,
+            unsupported_error=UnsupportedSchematicOperationError,
+            label="Sheet file",
+        )
+        self._mark_saved(output)
+
+    def _mark_saved(self, output: bytes) -> None:
+        """Record that *output* is now the disk content."""
+        object.__setattr__(self, "_baseline", output)
+        object.__setattr__(self, "_fingerprint", Fingerprint.of(output))
+        object.__setattr__(self, "_modified", self.to_bytes() != output)
+
+    def revert(self) -> None:
+        """Drop unsaved changes and reload this file from disk.
+
+        The object keeps its identity and ``is_modified`` becomes false.
+        Placed-symbol and embedded-symbol handles taken before the revert
+        become stale; get fresh ones. A missing file, or a disk file that is
+        not the file that was read, raises :class:`SchematicConflictError`
+        and changes nothing.
+        """
+        self._check_open()
+        try:
+            raw = self.path.read_bytes()
+        except FileNotFoundError as exc:
+            raise SchematicConflictError(
+                f"Sheet file no longer exists: {self.path}"
+            ) from exc
+        if self._fingerprint is not None and not self._fingerprint.matches(raw):
+            raise SchematicConflictError(f"Sheet file changed on disk: {self.path}")
+        self._adopt(_parse_sheet_file(self.path, raw), raw)
+
+    def _adopt(self, fresh: SheetFile, raw: bytes) -> None:
+        """Replace content with *fresh*, read from *raw*; invalidate old handles."""
+        for symbol in self.symbols:
+            object.__setattr__(symbol, "_owner", None)
+        for handle in self._embedded_handles.values():
+            object.__setattr__(handle, "_alive", False)
+        self._embedded_handles.clear()
+        self._restore_intents.clear()
+        for item in fields(self):
+            if item.init and item.name != "path":
+                object.__setattr__(self, item.name, getattr(fresh, item.name))
+        for symbol in self.symbols:
+            object.__setattr__(symbol, "_owner", self)
+        object.__setattr__(self, "_document", fresh._document)
+        object.__setattr__(self, "_baseline", raw)
+        object.__setattr__(self, "_fingerprint", Fingerprint.of(raw))
+        object.__setattr__(self, "_modified", False)
+
+    def discard(self) -> None:
+        """End this sheet file without a read or a write; it cannot fail.
+
+        A project-owned sheet file ends with its project; discarding it alone
+        is not supported yet (#78) and raises
+        :class:`UnsupportedSchematicOperationError`.
+        """
+        if self._closed:
+            return
+        if self._project is not None:
+            raise UnsupportedSchematicOperationError(
+                "A project-owned sheet file ends with its project (#78)"
+            )
+        object.__setattr__(self, "_closed", True)
+
+    def close(self) -> None:
+        """Save when there are unsaved changes, then end this sheet file.
+
+        If the save fails, the error propagates and the file stays open with
+        its changes. Close is idempotent. A project-owned sheet file closes
+        with its project; closing it alone raises
+        :class:`UnsupportedSchematicOperationError` (#78).
+        """
+        if self._closed:
+            return
+        if self._project is not None:
+            raise UnsupportedSchematicOperationError(
+                "A project-owned sheet file closes with its project (#78)"
+            )
+        if self._modified:
+            self.save()
+        object.__setattr__(self, "_closed", True)
+
+    def __enter__(self) -> Self:
+        """Use the open sheet file as a context manager."""
+        self._check_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close on normal exit; discard without writing when an exception exits."""
+        if exc_type is None:
+            self.close()
+        else:
+            self.discard()
 
     @property
     def embedded_symbols(self) -> tuple[EmbeddedSymbol, ...]:
@@ -342,9 +518,13 @@ class SheetFile:
 
     @property
     def is_modified(self) -> bool:
-        """Whether content differs from the last opened or saved bytes."""
+        """Whether an edit changed this file since it was opened, saved, or reverted.
+
+        Edits set the flag (ADR 0009). An edit back to the original content
+        leaves it set; save or revert clears it.
+        """
         self._check_open()
-        return self.to_bytes() != self._baseline
+        return self._modified
 
     def to_bytes(self) -> bytes:
         """Preview pending source without writing or running electrical checks."""
@@ -352,24 +532,6 @@ class SheetFile:
         if self._document is None:
             raise UnsupportedSchematicOperationError("Schematic has no source")
         return self._document.source.encode("utf-8")
-
-    def save(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
-        """Verify and save this document to its opened location explicitly.
-
-        Other owned documents remain pending. Verification uses the complete
-        project hierarchy with only this document's changes staged. Requires
-        KiCad for changed saves; never silently skips electrical verification.
-        The owning Project archives actual post-save bytes, not unsaved sibling
-        changes. This document-only operation does not establish a root decision.
-        """
-        self._check_open()
-        if self._project is None:
-            raise UnsupportedSchematicOperationError(
-                "Save requires owning project context"
-            )
-        from ._schematic_persist import save_schematics
-
-        save_schematics(self._project, (self,), kicad_cli=kicad_cli)
 
     def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
         """Reject document-only ERC because the backend cannot honor that scope."""
@@ -425,7 +587,7 @@ class SheetFile:
 
     def _editable_node(self, symbol: PlacedSymbol) -> tuple[ListNode, ListNode]:
         """Return the root and the writable source node for one placed symbol."""
-        if self.version != 20260306:
+        if self.version != _WRITE_VERSION:
             raise UnsupportedSchematicOperationError(
                 f"Format {self.version} is read-only"
             )
@@ -488,6 +650,8 @@ class SheetFile:
             object.__setattr__(old, "value", new.value)
             object.__setattr__(old, "footprint", new.footprint)
         object.__setattr__(self, "_document", updated._document)
+        if changed:
+            object.__setattr__(self, "_modified", True)
         if changed and self._project is not None:
             self._project._generation += 1
 
@@ -539,7 +703,7 @@ class Schematic:
                 raise InvalidSchematicError(f"Missing sheet file: {path}")
             sheet_file = previous.get(path)
             if sheet_file is None:
-                sheet_file = open_schematic(path)
+                sheet_file = _read_sheet_file(path)
                 object.__setattr__(sheet_file, "_project", self._project)
             loaded[path] = sheet_file
             active.add(path)
@@ -588,14 +752,8 @@ class Schematic:
         self._files = {sheet_file.path: sheet_file for sheet_file in files}
 
 
-def open_schematic(path: str | PathLike[str]) -> SheetFile:
-    """Parse one explicit ``.kicad_sch`` path.
-
-    Prefer :meth:`kicad_primitives.projects.Project.schematic` so callers stay
-    inside project context. This helper exists for tests and internal use when
-    the path is already validated as part of a project hierarchy.
-    """
-    location = Path(path).expanduser().absolute()
+def _read_sheet_file(location: Path) -> SheetFile:
+    """Read and parse one ``.kicad_sch`` file and fingerprint the bytes read."""
     if not location.is_file():
         raise InvalidSchematicError(f"Schematic file not found: {location}")
     if location.suffix.lower() != ".kicad_sch":
@@ -604,8 +762,17 @@ def open_schematic(path: str | PathLike[str]) -> SheetFile:
         )
     try:
         raw = location.read_bytes()
+    except OSError as exc:
+        raise InvalidSchematicError(f"Cannot read schematic: {exc}") from exc
+    sheet_file = _parse_sheet_file(location, raw)
+    object.__setattr__(sheet_file, "_fingerprint", Fingerprint.of(raw))
+    return sheet_file
+
+
+def _parse_sheet_file(location: Path, raw: bytes) -> SheetFile:
+    try:
         document = parse(raw.decode("utf-8"))
-    except (OSError, UnicodeError, ParseError, RecursionError) as exc:
+    except (UnicodeError, ParseError, RecursionError) as exc:
         raise InvalidSchematicError(f"Invalid schematic syntax: {exc}") from exc
     return _sheet_file_from_document(location, document)
 

@@ -434,7 +434,7 @@ def save_as(
             updated = projections[source]
             object.__setattr__(document, "path", targets[source])
             object.__setattr__(document, "_document", updated._document)
-            object.__setattr__(document, "_baseline", outputs[targets[source]])
+            document._mark_saved(outputs[targets[source]])
             object.__setattr__(document, "sheet_symbols", updated.sheet_symbols)
             for old, new in zip(document.symbols, updated.symbols, strict=True):
                 for field in ("path", "attributes", "value", "footprint"):

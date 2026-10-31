@@ -253,19 +253,20 @@ def _check_read_baseline(
 
 def _check_baseline(
     path: Path,
-    baseline: Baseline,
+    baseline: Baseline | None,
     *,
     conflict_error: type[Exception] = FileConflictError,
     unsupported_error: type[Exception] = UnsupportedOperationError,
     label: str = "Library",
 ) -> os.stat_result:
+    """Check file shape and, unless *baseline* is ``None``, unchanged content."""
     try:
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise unsupported_error(
                 "Save requires a regular, non-symlink, singly linked file"
             )
-        if not _matches(baseline, path.read_bytes()):
+        if baseline is not None and not _matches(baseline, path.read_bytes()):
             raise conflict_error(f"{label} changed on disk: {path}")
     except FileNotFoundError as exc:
         raise conflict_error(f"{label} no longer exists: {path}") from exc
@@ -274,7 +275,7 @@ def _check_baseline(
 
 def save_source(
     path: Path,
-    baseline: Baseline,
+    baseline: Baseline | None,
     output: bytes,
     *,
     conflict_error: type[Exception] = FileConflictError,
@@ -284,8 +285,10 @@ def save_source(
     """Replace one existing file atomically after an optimistic baseline check.
 
     *baseline* is the bytes the artifact read, or their :class:`Fingerprint`.
-    An output equal to the baseline replaces nothing. The temporary file is a
-    same-directory dotfile with a ``.tmp`` suffix, never a KiCad file name.
+    ``None`` is the explicit overwrite: no conflict check, but the same atomic
+    replace. An output equal to the baseline replaces nothing. The temporary
+    file is a same-directory dotfile with a ``.tmp`` suffix, never a KiCad
+    file name.
     """
     info = _check_baseline(
         path,
@@ -294,7 +297,7 @@ def save_source(
         unsupported_error=unsupported_error,
         label=label,
     )
-    if _matches(baseline, output):
+    if baseline is not None and _matches(baseline, output):
         return info
     if not stat.S_IMODE(info.st_mode) & 0o222:
         raise PermissionError(f"{label} has no write permission bits: {path}")

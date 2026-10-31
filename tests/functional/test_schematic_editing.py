@@ -67,14 +67,15 @@ class SchematicEditingTests(unittest.TestCase):
         self.assertEqual(symbol.attribute("MPN").value, "")
         self.assertEqual(self.path.read_bytes(), SOURCE)
 
-    def test_equal_value_is_exact_noop_and_reverting_clears_modified(self) -> None:
+    def test_equal_value_is_exact_noop_and_edit_back_keeps_the_flag(self) -> None:
         symbol = self.schematic.symbol("R1")
         symbol.set_attribute("Value", "10K")
         self.assertEqual(self.schematic.to_bytes(), SOURCE)
         self.assertFalse(self.schematic.is_modified)
         symbol.set_attribute("Value", "20K")
         symbol.set_attribute("Value", "10K")
-        self.assertFalse(self.project.is_modified)
+        self.assertEqual(self.schematic.to_bytes(), SOURCE)
+        self.assertTrue(self.project.is_modified)
 
     def test_ambiguous_attribute_is_rejected_even_when_equal(self) -> None:
         self.path.write_bytes(

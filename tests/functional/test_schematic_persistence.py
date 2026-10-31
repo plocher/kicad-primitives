@@ -53,7 +53,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
         self.path.chmod(0o640)
         symbol = self.schematic.symbol("R1")
         symbol.set_attribute("Value", "22K")
-        self.schematic.save(kicad_cli=self.cli)
+        self.schematic.save()
         self.assertEqual(self.path.read_bytes(), SOURCE.replace(b'"10K"', b'"22K"'))
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         self.assertFalse(self.project.is_modified)
@@ -88,7 +88,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
         foreign = SOURCE + b"\n"
         self.path.write_bytes(foreign)
         with self.assertRaises(SchematicConflictError):
-            self.schematic.save(kicad_cli=self.directory / "missing-cli")
+            self.schematic.save()
         self.path.write_bytes(SOURCE)
         link = self.directory / "hardlink.kicad_sch"
         os.link(self.path, link)
@@ -119,7 +119,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(
         root_before, child_before = root.to_bytes(), child.to_bytes()
         root.symbol("R1").set_attribute("Value", "22K")
         child.symbol("R2").set_attribute("MPN", "disconnect")
-        root.save(kicad_cli=self.cli)
+        root.save()
         self.assertEqual(
             self.path.read_bytes(), root_before.replace(b'"10K"', b'"22K"')
         )

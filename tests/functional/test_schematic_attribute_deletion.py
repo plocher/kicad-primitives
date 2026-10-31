@@ -89,7 +89,8 @@ class AttributeDeletionTests(unittest.TestCase):
         symbol.set_attribute("MPN", "X")
         symbol.delete_attribute("MPN")
         self.assertEqual(project.schematic().files[0].to_bytes(), SOURCE)
-        self.assertFalse(project.is_modified)
+        # ADR 0009: is_modified is a flag that edits set, not a byte comparison.
+        self.assertTrue(project.is_modified)
 
     def test_compact_and_crlf_layouts_drop_only_their_separator(self) -> None:
         compact = SOURCE.replace(MANUFACTURER, b' (property "MPN" "X")')
