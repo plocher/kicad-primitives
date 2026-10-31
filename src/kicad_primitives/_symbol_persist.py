@@ -140,10 +140,17 @@ def _recover_backup(
         ) from exc
 
 
-def save_library_source(path: Path, baseline: bytes, output: bytes) -> None:
-    """Back up a changed library to native Foo.bak before replacing Foo.kicad_sym."""
+def save_library_source(path: Path, baseline: Baseline | None, output: bytes) -> None:
+    """Back up a changed library to native Foo.bak before replacing Foo.kicad_sym.
+
+    The backup holds the bytes on disk now, not a stored copy (ADR 0009).
+    *baseline* ``None`` is the explicit overwrite: no conflict check.
+    """
     info = _check_baseline(path, baseline)
-    if output == baseline:
+    raw = path.read_bytes()
+    if baseline is not None and not _matches(baseline, raw):
+        raise FileConflictError(f"Library changed on disk: {path}")
+    if output == raw:
         return
     if not stat.S_IMODE(info.st_mode) & 0o222:
         raise PermissionError(f"Library has no write permission bits: {path}")
@@ -182,14 +189,10 @@ def save_library_source(path: Path, baseline: bytes, output: bytes) -> None:
     try:
         try:
             if prior is None:
-                expected = save_new_source(
-                    backup, baseline, mode=stat.S_IMODE(info.st_mode)
-                )
+                expected = save_new_source(backup, raw, mode=stat.S_IMODE(info.st_mode))
             else:
-                expected = save_source(backup, prior, baseline, label="Library backup")
-            installed = _check_baseline(
-                backup, baseline, label="Installed library backup"
-            )
+                expected = save_source(backup, prior, raw, label="Library backup")
+            installed = _check_baseline(backup, raw, label="Installed library backup")
             # Own rename/link operations can change ctime/nlink, not file data facts.
             if (
                 installed.st_dev,
@@ -221,10 +224,10 @@ def save_library_source(path: Path, baseline: bytes, output: bytes) -> None:
                     ) from exc
             raise
         try:
-            save_source(path, baseline, output)
+            save_source(path, raw, output)
         except BaseException:
             try:
-                _recover_backup(backup, installed, baseline, recovery)
+                _recover_backup(backup, installed, raw, recovery)
             except FileConflictError:
                 retain_recovery = recovery is not None
                 raise

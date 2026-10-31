@@ -24,7 +24,7 @@ class PersistenceTests(unittest.TestCase):
         self.path.write_bytes(ORIGINAL)
         self.library = SymbolLibrary.open(self.path)
 
-    def test_external_change_conflicts_for_changed_and_unchanged_save(self) -> None:
+    def test_external_change_conflicts_for_a_changed_save_only(self) -> None:
         self.library.discard()
         for edit in (False, True):
             with self.subTest(edit=edit):
@@ -34,10 +34,33 @@ class PersistenceTests(unittest.TestCase):
                     library.symbol("A").set_attribute("Note", "mine")
                 foreign = ORIGINAL.replace(b'"old"', b'"someone else"')
                 self.path.write_bytes(foreign)
-                with self.assertRaises(FileConflictError):
-                    library.save()
+                if edit:
+                    with self.assertRaises(FileConflictError):
+                        library.save()
+                else:
+                    library.save()  # A clean save writes nothing.
                 self.assertEqual(self.path.read_bytes(), foreign)
                 library.discard()
+
+    def test_flag_overwrite_validate_and_backup_from_disk(self) -> None:
+        """ADR 0011 D9: flag-based is_modified, fingerprint, overwrite, validate."""
+        symbol = self.library.symbol("A")
+        symbol.set_attribute("Note", "mine")
+        symbol.set_attribute("Note", "old")
+        self.assertEqual(self.library.to_bytes(), ORIGINAL)
+        self.assertTrue(self.library.is_modified)
+        self.library.validate()
+        symbol.set_attribute("Note", "mine")
+        foreign = ORIGINAL.replace(b'"old"', b'"someone else"')
+        self.path.write_bytes(foreign)
+        with self.assertRaises(FileConflictError):
+            self.library.save()
+        self.assertEqual(self.path.read_bytes(), foreign)
+        self.library.save(overwrite=True)
+        self.assertIn(b'"mine"', self.path.read_bytes())
+        # The native backup holds the bytes that were on disk, not a stored copy.
+        self.assertEqual(self.path.with_suffix(".bak").read_bytes(), foreign)
+        self.assertFalse(self.library.is_modified)
 
     def test_mode_is_preserved_and_baseline_updates_after_save(self) -> None:
         self.path.chmod(0o640)

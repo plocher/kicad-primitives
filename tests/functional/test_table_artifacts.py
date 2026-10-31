@@ -30,6 +30,27 @@ class TableArtifactTests(unittest.TestCase):
             config_home=self.home, base_directory=self.root
         )
 
+    def test_flag_overwrite_and_validate(self) -> None:
+        """ADR 0011 D9: flag-based is_modified, fingerprint, overwrite, validate."""
+        table = self.tables.table("symbol", "global")
+        table.entry("Old").set_uri("/new.kicad_sym")
+        table.entry("Old").set_uri("/old.kicad_sym")
+        self.assertEqual(table.to_bytes(), self.original)
+        self.assertTrue(table.is_modified)
+        table.validate()
+        table.entry("Old").set_uri("/new.kicad_sym")
+        foreign = self.original + b"\n"
+        self.path.write_bytes(foreign)
+        with self.assertRaises(LibraryTableConflictError):
+            table.save()
+        self.assertEqual(self.path.read_bytes(), foreign)
+        table.save(overwrite=True)
+        self.assertIn(b"/new.kicad_sym", self.path.read_bytes())
+        self.assertFalse(table.is_modified)
+        before = self.path.stat().st_mtime_ns
+        table.save()
+        self.assertEqual(self.path.stat().st_mtime_ns, before)
+
     def test_edits_stay_pending_and_preserve_raw_rows_and_entry_identity(self) -> None:
         table = self.tables.table("symbol", "global")
         keep = table.entry("Keep")
@@ -334,6 +355,7 @@ class TableArtifactTests(unittest.TestCase):
         self.assertFalse(self.path.with_suffix(".bak").exists())
         alias = self.root / "alias"
         os.link(self.path, alias)
+        table.entry("Old").set_uri("/again.kicad_sym")
         with self.assertRaises(ValueError):
             table.save()
         alias.unlink()
