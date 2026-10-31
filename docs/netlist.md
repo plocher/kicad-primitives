@@ -99,10 +99,10 @@ assert project.netlist() == before   # attribute edit: no electrical change
 ```
 
 `Netlist` equality compares component identity (reference, library, part) and
-every pin-to-net connection (net name, reference, pin). Export order, net
-codes, values, fields, sheet data, paths, and provenance do not count. Pin
-electrical types are not connections and do not count. `hash()` follows the
-same content. This is the client sequence that replaces the former save-time
+every pin-to-net connection (net name, reference, pin, and pin electrical
+type). A pin-type change affects ERC, so it counts. Export order, net codes,
+values, fields, sheet data, paths, and provenance do not count. `hash()`
+follows the same content. This is the client sequence that replaces the former save-time
 connectivity check: the package does not predict or excuse electrical changes.
 
 ## Connectivity compare helper

@@ -213,6 +213,7 @@ Project scope. `project.save()` writes every open, project-owned artifact that h
 
 - No in-memory original. An artifact keeps a fingerprint (modification time, size, and content hash) of what it read, refreshed after each save. While the fingerprint matches, the disk file is the original, and revert reads from it.
 - If the fingerprint does not match, revert raises a conflict. It does not mix two versions.
+- Amendment (owner, 2026-10-31, PR #81 review): a fingerprint check is a `stat()` first. A different size means changed, with no read. The same size and the same stamp (device, inode, modification time) mean unchanged, with no read. Only the same size with a different stamp reads the file and compares the content hash. The stamp is taken before a read, or from the written file after a save.
 - `is_modified` is a flag that setters keep (ADR 0009). The package does not compare against a stored copy.
 - Footprint create, copy, delete, and rename are immediate file-system operations (ADR 0009). Revert never undoes them. Symbol create, delete, and rename are pending edits in the library file, so `symbol.revert()` undoes them.
 - Undo is a finer-grained revert. It is not designed or requested now. The no-copy rule does not block it, because undo records edits, not a second copy.
@@ -245,6 +246,7 @@ Project scope. `project.save()` writes every open, project-owned artifact that h
 - `EmbeddedSymbol.restore_from()` becomes `update_from_library(library, name)`. The deferred restore intent and the predicted pin-type check are removed.
 - `ensure_writes_allowed()` and `write_is_permitted()` are removed. `is_locked` and `lock_file` stay as queries. No write consults them.
 - `Netlist.__eq__` compares electrical content: component identity and every pin-to-net connection. Export order and net codes do not count. `connectivity_sets()` stays as a helper that shows differences.
+  - Amendment (owner, 2026-10-31, PR #81 review): a connection includes the pin electrical type. A pin-type change affects ERC, so the netlists are no longer equal.
 - `SymbolLibrary` and `LibraryTable` get a public `validate()`, a flag-based `is_modified`, a fingerprint instead of a stored byte copy, and `save(overwrite=True)`.
 
 ### D10. Recipes

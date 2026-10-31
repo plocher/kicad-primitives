@@ -47,6 +47,7 @@ def main() -> None:
         project.save()
         after = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         expected_after = {key: "passive" for key in expected_before}
+        assert after != before  # Pin types count in Netlist equality (ADR 0011 D9).
         assert {
             (n.reference, n.pin): n.pintype for net in after.nets for n in net.nodes
         } == expected_after
