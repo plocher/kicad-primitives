@@ -1,56 +1,54 @@
-# Schematics: attributes, embedded restore, explicit saves, and geometry
+# Schematics: the document, sheet files, edits, save, and revert
 
 ## Vocabulary
 
+A **schematic** is the project's set of sheet trees (KiCad `SCHEMATIC`).
+A **sheet file** is one `.kicad_sch` file (KiCad `SCH_SCREEN`). Content edits to it reach every instance of it.
+A **sheet symbol** is the box on a parent sheet file that points at a target sheet file (KiCad `SCH_SHEET`).
+A **sheet instance** is one placement in the hierarchy, identified by its UUID path (KiCad `SCH_SHEET_PATH`). Instance models are [#79](https://github.com/plocher/kicad-primitives/issues/79) work.
 Symbol **attributes** are named values such as Reference, Value, Footprint, and MPN.
 Symbol **flags** control behavior, such as DNP and exclusion from BOM or simulation.
-**Reference annotation** assigns or updates reference designators and associated instance records.
-It does not mean general attribute editing.
-
-KiCad stores these attributes in `(property …)` nodes.
-The glossary in `CONTEXT.md` defines settings, text variables, and drawing-sheet terminology.
+**Reference annotation** assigns reference designators. It does not mean general attribute editing.
+`CONTEXT.md` holds the full glossary.
 
 ## Scope
 
-[ADR 0008](adr/0008-artifact-objects-and-explicit-persistence.md) selects artifact-owned editable objects and explicit persistence.
-Placed symbols support localized attribute edits in memory.
-The schematic owns their source and exposes pending changes, byte previews, and explicit same-location saves.
+[ADR 0011](adr/0011-schematic-document-model-save-and-revert.md) defines two layers here:
 
-`Project.schematic()` and `Project.schematics()` open schematic **content** inside
-project context (ADR 0002).
-They return owned `kicad_primitives.schematics.Schematic` documents: title block and
-**merged** placed symbols (attributes, identity, transform, unit, flags).
-Selected concrete embedded definitions support source-backed restore.
-Geometry editing and general cache synchronization remain unsupported.
-`Project.erc()` checks a pending full-project snapshot and returns typed per-sheet reports.
-`Project.export_svgs()` writes SVGs of the same pending snapshot to a new directory.
+- **Layer 0:** `SheetFile` is one file with the full lifecycle: open, read, modify, validate, save, revert, discard, and close. It knows nothing about the hierarchy, so it cannot keep a parent sheet symbol's pins matched with its hierarchical labels.
+- **Layer 1:** `Schematic` joins the sheet files of a project. Its `save()` applies the write set and failure policy below over the sheet-file saves. Its `revert()` reloads the whole hierarchy.
+
+Placed symbols support localized attribute edits in memory. Embedded definitions can be replaced from a library.
+No save runs KiCad, makes a backup, checks a lock, or verifies connectivity. A client that cares compares `project.netlist()` before and after an edit ([netlist.md](netlist.md)).
+`Project.erc()` and `Project.export_svgs()` work on the pending full-project snapshot without saving it.
 
 ## Surface (ADR 0006 A)
 
-- **Supported:** merged placed-symbol read; title block; geometry and electrical-structure read; `PlacedSymbol.set_attribute` and custom `delete_attribute`; selected concrete embedded restore; explicit save with electrical verification; project-scope ERC and SVG export.
-- **Defined, explicit failure:** a differing Reference (reference annotation); flag names; mandatory-attribute deletion; power-symbol Value changes; document-only `Schematic.erc()`; `extends` materialization on restore; restore electrical changes outside the proved pin-type depth; edits to formats other than `20260306`.
-- **Deferred past 1.0:** reference annotation and flag editing as operations; geometry editing; general embedded-cache synchronization; multi-instance sheet models; SVG plot options and drawing-sheet staging.
+- **Supported:** `Project.schematic()`; `Schematic.files`, `root_files`, `file(path)`, `save()`, `validate()`, `revert()`; `SheetFile.open()` and its lifecycle; merged placed-symbol read; title block; geometry and electrical-structure read; `PlacedSymbol.set_attribute` and custom `delete_attribute`; `EmbeddedSymbol.update_from_library`; project-scope ERC and SVG export.
+- **Defined, explicit failure:** a differing Reference (reference annotation); flag names; mandatory-attribute deletion; power-symbol Value changes; document-only `SheetFile.erc()`; edits to formats other than `20260306`; inherited or structurally different library definitions in `update_from_library`; `close()` or `discard()` on one project-owned sheet file ([#78](https://github.com/plocher/kicad-primitives/issues/78)).
+- **Deferred:** sheet instances, per-instance data, and sheet-symbol edits (#79); reference annotation and flag editing; geometry editing; SVG plot options.
 
-## Open via a project
+## Open
 
 ```python
 from kicad_primitives.projects import Project
+from kicad_primitives.schematics import SheetFile
 
 project = Project.open("/path/to/board")
-root = project.schematic()                 # root .kicad_sch
-for sheet in project.schematics():         # hierarchy walk order
-    print(sheet.path, sheet.version)
+schematic = project.schematic()          # every sheet tree, loaded once
+for sheet_file in schematic.files:       # each tree depth-first, roots first
+    print(sheet_file.path, sheet_file.version)
+root = schematic.root_files[0]
+child = schematic.file("/path/to/board/sub/child.kicad_sch")  # KeyError for outsiders
+
+one = SheetFile.open("/path/to/any.kicad_sch")  # layer 0, outside a project
 ```
 
-An explicit path must belong to `project.schematic_files()`.
-Outsiders raise `InvalidProjectError`.
-Missing root schematic raises `InvalidProjectError`.
-
-Prefer these accessors over `schematics.open_schematic` in application code.
-The free function exists for already-validated hierarchy paths and tests.
-It does not supply the project context required by `save()`.
-Repeated project accesses reuse the same owned documents and placed-symbol handles.
-Previously obtained handles observe pending attribute edits.
+`Project.schematic()` loads every sheet file reachable from the root sheet files.
+A file that several sheet symbols use loads once, as one `SheetFile`.
+Each `Sheetfile` resolves relative to its parent sheet's directory.
+A missing sheet file raises `InvalidSchematicError`. A cycle or a `${...}` Sheetfile raises `UnsupportedSchematicOperationError`.
+Repeated access returns the same objects. Retained handles observe pending edits.
 
 ## Placed symbols
 
@@ -74,7 +72,8 @@ Definitions under `(lib_symbols …)` are not placements.
 Power symbols and DNP parts are included; BOM filtering stays a consumer policy.
 
 `symbol(reference)` raises `KeyError` if missing and `AmbiguousPlacedSymbolError`
-if several instances share the reference on that sheet.
+if several instances share the reference on that sheet file.
+This per-file reference lookup is documented debt; #79 replaces it with instance lookups.
 
 ## Edit attributes in memory
 
@@ -107,7 +106,7 @@ A differing Reference requires reference annotation and fails explicitly.
 An equal Reference is a no-op.
 Flags are not attributes. The setter rejects flag names such as `dnp` and `in_bom`.
 Power-symbol Value changes are electrical edits and fail explicitly.
-Other attributes can affect electrical names through substitutions. Save verification rejects such changes.
+Other attributes can affect electrical names through substitutions. Save does not check this; compare netlists when it matters.
 
 ## Delete attributes in memory
 
@@ -129,10 +128,9 @@ Flag names such as `dnp` and `in_bom` are not attributes.
 Both raise `UnsupportedSchematicOperationError`.
 The same format and placed-symbol UUID rules as `set_attribute` apply.
 Retained handles observe the deletion. The operation never writes files or runs KiCad.
-Explicit save proves unchanged connectivity, as for other attribute edits.
 The client owns alias maps and conflict policy, for example when alias and canonical values differ.
 
-## Restore one embedded definition
+## Update one embedded definition from a library
 
 ```python
 from kicad_primitives.symbols import SymbolLibrary
@@ -141,124 +139,75 @@ for definition in root.embedded_symbols:
     print(definition.lib_id)
 
 embedded = root.embedded_symbol("Device:R")
-parent = SymbolLibrary.open("/path/to/Device.kicad_sym")
-embedded.restore_from(parent, "R")
+library = SymbolLibrary.open("/path/to/Device.kicad_sym")
+embedded.update_from_library(library, "R")
 preview = root.to_bytes()
-# Later, when the client chooses:
-root.save()
 ```
 
-Clients select the cache object and opened parent library.
-Existing [library tables and resolution](tables.md) can locate that library.
-The package does not select parents or run a cache-wide synchronization workflow.
-`embedded_symbols` follows source order and keeps stable `EmbeddedSymbol` handles.
-`embedded_symbol(lib_id)` raises `KeyError` for a missing identity.
-Missing or duplicate cache containers and duplicate cache identities fail explicitly.
+Clients select the embedded definition and the opened library. [Library tables](tables.md) can locate it.
+The package does not select libraries or synchronize the whole cache.
+`embedded_symbols` follows source order with stable handles. `embedded_symbol(lib_id)` raises `KeyError` for a missing identity.
+Missing or duplicate cache containers and duplicate identities fail explicitly.
 
-`restore_from(parent_library, parent_name)` captures the current concrete parent source.
-Later parent edits cannot change that pending restore.
-It replaces the whole selected definition, including supported graphics and default attributes.
-It adapts only the outer cache identity and the required nested body-name prefix.
-For cache `Lib:Part`, nested names use `Part_unit_style`, not `Lib:Part_unit_style`.
-Other parent source stays exact, including opaque payloads and quoted multiline strings.
-The implementation does not reindent or serialize the parent.
-Source outside the selected definition stays byte-identical.
-All placed symbols, attributes, flags, UUIDs, instances, and unrelated definitions remain unchanged.
-Reparsing keeps existing placed and embedded handles valid.
-Exact materialized equality and repeated identical restores are byte no-ops.
-Restore never runs KiCad or writes a file.
+`update_from_library(library, name)` replaces the whole embedded definition with the library definition, in memory.
+It adapts only the outer identity and the nested body-name prefix: for `Lib:Part`, bodies are `Part_unit_style`.
+Other library source stays exact, including opaque payloads and quoted multiline strings. Nothing is reindented.
+Placements, attributes, flags, UUIDs, instances, and unrelated definitions stay unchanged. Existing handles stay valid.
+An identical replacement is a byte no-op. The operation never runs KiCad or writes a file.
 
-### Supported electrical depth
+Pin electrical types can change: this is a plain in-memory edit, with no prediction and no proof.
+The library must use format `20251024` and the sheet file `20260306`.
+These changes are not supported yet and fail before any change: `extends` inheritance; added, removed, or renumbered pins; changed pin names, positions, lengths, visibility, or alternates; changed unknown definition content.
 
-Parents must be concrete and use symbol-library format `20251024`.
-`extends` materialization is unsupported. Typed inheritance inspection is not a source-complete parent serializer.
-The schematic must use format `20260306`.
-
-Restore inventories every source pin occurrence by unit, body style, and number.
-Pin names, numbers, connection points, length, shape, visibility, alternates, and opaque pin structure must remain unchanged.
-Power behavior, jumpers, and unknown electrical definition content must remain unchanged.
-Changed unknown content fails explicitly rather than being discarded or copied without a proof.
-Body graphics and default attributes can change without changing those pin facts.
-
-Visible ordinary non-power pin electrical types can change under the explicit-save proof below.
-This includes the proven output/input-to-passive repair.
-Changed power types, hidden or alternate pin types, pin additions, deletions, moves, and renumbering are unsupported.
-Pin-name edits are unsupported because generated net names can depend on pin names.
-Type corrections require unique pin numbers, simple unit/body mapping, and unique normal placement references.
-Affected references must be unique across all placements in the document, not only the selected cache.
-Type correction also requires a qualified `Lib:Part` cache identity before mutation.
-Multi-unit, alternate-body, DNP, excluded, or unobservable placement corrections fail explicitly.
-These are bounded implementation limits, not complete donor parity or general electrical editing.
-
-## Save explicitly
+## Save
 
 ```python
-root.save()       # save this schematic only
-project.save()    # save all changed owned schematics
-# Both also accept kicad_cli="/explicit/path/to/kicad-cli".
+sheet_file.save()        # layer 0: this file only
+schematic.save()         # layer 1: every changed sheet file
+project.save()           # every changed document the project owns
+schematic.save(overwrite=True)   # the explicit way through a conflict
 ```
 
-Only schematic format `20260306` supports edits. Older and future formats remain read-only.
-Do not confuse this with symbol-library format `20251024`.
-Changed saves require working KiCad netlist export. CLI discovery follows ADR 0007.
-There is no unchecked-save flag.
-Unchanged source saves preserve bytes and do not replace files or invoke KiCad.
-An explicit save still requests the owning Project's complete ZIP snapshot safety net.
+**Layer 0.** `SheetFile.save()` writes only that file when it has unsaved changes. A clean save writes nothing.
+It runs `validate()`, then replaces the file atomically and keeps its permission bits.
+If the disk file is not the file that was read (its fingerprint does not match), it raises `SchematicConflictError` and writes nothing, unless `overwrite=True`.
 
-Before writing, save checks the project guard, project settings baseline, and every reachable schematic baseline.
-It requires regular, non-symlink, singly linked files.
-Changed files must have write permission bits. Replacement preserves their permission bits.
-All changed destination directories must permit file creation and search before the first replacement.
-An external edit or deletion fails rather than overwriting or recreating a file.
+**Layer 1.** `Schematic.save()` writes only the sheet files that have unsaved changes and touches no others: no rewrite, no time change.
+This is a deliberate deviation from KiCad, which rewrites every sheet file. A byte-preserving writer gains nothing from it.
+Child sheet files are written before their parents. Written files become saved; all others keep their changes.
+The failure policy (ADR 0011 D4):
 
-Verification stages only the complete schematic hierarchy and the opened `.kicad_pro` bytes.
-It exports the root before and after pending changes, at the same staged location.
-Comparison retains net names, singleton and empty nets, duplicate occurrences, and all pin attachments.
-Pin attachments include reference, pin, pin function, and electrical type.
-Component reference, library identity, and sheet path must remain unchanged.
-Verification validates raw export structure and component identity before comparison.
-Missing required evidence sections, duplicate component references, and incomplete pin attachments fail explicitly.
-Value and custom attributes may change. Reparsing establishes their required source deltas.
-Net codes and export order do not define electrical identity.
-This is connectivity verification, not ERC or simulation.
+- Invalid content or a read-only format, found by `validate()` before any write: nothing is written.
+- A file that is not a regular, unlinked, writable file, or a directory that is not writable, found before any write: nothing is written.
+- A conflict, checked before any write and again before each replace: that file stays unsaved and is never retried or overwritten.
+- A permission change during a write: reported, not retried.
+- A short-lived system error (interrupted, busy, timed out): the save continues; at the end it retries that file once after a fixed short wait, after a new conflict check.
+- A lasting or unknown system error (disk full, read-only volume, I/O error): the save stops at once.
 
-For a restore, save also checks the complete exported `libparts` pin inventory.
-This includes pins that have no connected peer.
-It predicts the expected electrical signature from the baseline export and captured parent pin-type facts.
-The prediction changes only requested type effects on every matching placement in the selected document.
-Every net name, pin function, endpoint occurrence, component identity, and unrelated pin type must stay unchanged.
-The actual pending hierarchy export must equal that prediction.
-Missing requested effects and unrelated electrical drift both fail.
-Save does not export a replay of the replacement to manufacture its expected result.
-It does not ignore selected references or provide an allow-electrical-change bypass.
+When not every changed file is written, `SchematicSaveError` lists each changed file as `written`, `conflict`, `failed`, or `unsaved`, with the reason.
+A later save writes only what is still unsaved. `Schematic.validate()` runs the content checks without a write.
 
-Type proof requires directly observable source-to-export mapping and complete baseline evidence.
-Every corrected placement pin needs exactly one exported occurrence.
-Conflicting sheet-local definitions with the same library identity can make global `libparts` evidence ambiguous.
-Such cases fail explicitly rather than treating one global definition as proof for every sheet.
-Attribute-only saves retain their unchanged-electrical contract.
-Mixed attribute and restore edits use the same explicit persistence safeguards.
+Only format `20260306` supports edits. Do not confuse it with symbol-library format `20251024`.
+`is_modified` is a flag that edits set (ADR 0009). An edit back to the original content leaves it set.
+The package keeps no in-memory copy of what it read: a fingerprint (size and content hash) detects conflicts.
 
-`root.save()` stages only that document's pending changes.
-Other documents remain pending and contribute their saved baselines.
-`project.save()` stages all changed owned documents together.
-Both operations publish exact post-save Project ZIP history after their selected source files succeed.
-Unselected pending sibling source is not archived as if saved.
-The package checks all inputs again after verification and before persistence.
-Known preflight failures stop before any original file changes.
-Files then save separately. A later I/O failure can leave earlier files saved.
-This is not a crash-atomic multi-file transaction or coordination with another writer.
-An unsuccessful document retains pending changes for inspection and retry.
-The latest explicit restore selection survives an exact old-baseline revert during an older frozen save.
-If that save advances the baseline, retry proves the requested reverse correction against the bytes actually persisted.
-The final check/replace race remains possible.
+## Revert
 
-No mutation, finalizer, or discard action saves.
-Use `project.discard()` for terminal zero-write exit, not reload or rollback.
-`project.close()` writes nothing when clean and runs a full `project.save()` when dirty.
-Owned document/placed/embedded operations fail after Project exit.
-Bounded Project save-as retains these document/placed/embedded identities while rebinding their paths after complete success.
-ZIP history, budgets, and partial-I/O limits are defined in [projects.md](projects.md#zip-snapshots).
+```python
+sheet_file.revert()      # this file
+schematic.revert()       # the whole hierarchy
+```
+
+Revert drops unsaved changes and reloads from disk. The object keeps its identity and `is_modified` becomes false.
+Placed-symbol and embedded-symbol handles taken before the revert become stale: their edits raise. Get fresh ones.
+Revert reads the disk, so it can fail: a missing file or a fingerprint mismatch raises `SchematicConflictError` and changes nothing.
+`Schematic.revert()` checks every sheet file first, then reloads each one and walks the trees again.
+
+## Close and discard
+
+A standalone `SheetFile` has `close()` (save when changed, then end), `discard()` (end without writing), and `with` support.
+A project-owned sheet file ends with its project. Its own `close()` and `discard()` raise `UnsupportedSchematicOperationError` until #78 decides.
+Use `project.close()` or `project.discard()` ([projects.md](projects.md#close-discard-and-with)).
 
 ## Title block
 
@@ -285,14 +234,13 @@ for h in root.hierarchical_labels:
     print(h.text, h.shape)
 for nc in root.no_connects:
     print(nc.x, nc.y)
-for sheet in root.sheets:
-    print(sheet.name, sheet.filename, sheet.x, sheet.y, sheet.width, sheet.height)
+for sheet_symbol in root.sheet_symbols:
+    print(sheet_symbol.name, sheet_symbol.filename, sheet_symbol.x, sheet_symbol.y)
 ```
 
-Wires keep polyline points in file order. Sheet edges expose `Sheetname` /
-`Sheetfile` and the sheet rectangle. Child path resolution for opening content
-still goes through `Project.schematic_files()` / `Project.schematic(path)`
-(parent-relative), not a second walker.
+Wires keep polyline points in file order. Each `SheetSymbol` exposes `Sheetname`,
+`Sheetfile`, and the box rectangle. Open child content through `Schematic.files`
+or `Schematic.file(path)`, not a second walker.
 
 ## Electrical rule reports
 
@@ -309,11 +257,10 @@ for sheet in report.sheets:
 
 `Project.erc()` checks the full hierarchy, including every document's pending `to_bytes()` content.
 It uses the captured `.kicad_pro` settings, text variables, exclusions, and ignored checks.
-It does not save source, clear pending changes, or require the project write guard.
-Locked projects and read-only original files remain checkable.
+It does not save source or clear pending changes. Locked projects and read-only original files remain checkable.
 The backend writes only temporary snapshot/report files.
 
-`Schematic.erc()` explicitly raises `UnsupportedSchematicOperationError`.
+`SheetFile.erc()` explicitly raises `UnsupportedSchematicOperationError`.
 The current backend cannot honor document-only sheet scope.
 The package does not check an isolated child, silently filter a whole-project report, or claim document-only coverage.
 
@@ -371,7 +318,6 @@ A nonempty diagnostic stream, such as Fontconfig output, does not invalidate a s
 Missing, malformed, incomplete, duplicate-key, or invalid-coordinate JSON raises `ErcAcquisitionError`.
 It never becomes an empty report or a synthetic warning finding.
 The supported report schema is `https://schemas.kicad.org/erc.v1.json`.
-ERC findings are not a substitute for the operation-specific save verification above.
 
 ## SVG export
 
@@ -383,8 +329,8 @@ root_page = next(f for f in result.files if f.sheet_path == "/")
 ```
 
 `Project.export_svgs(output_dir)` renders the full hierarchy, including every document's pending `to_bytes()` content.
-It uses the same private staging as `Project.erc()`, `Project.netlist()`, and save verification.
-It does not save source, clear pending changes, or require the project write guard.
+It uses the same private staging as `Project.erc()` and `Project.netlist()`.
+It does not save source or clear pending changes.
 Locked projects and read-only original files remain exportable.
 
 `output_dir` must not exist, even as a symlink. Its parent directories must exist and must not be symlinks.
@@ -410,88 +356,47 @@ A nonzero exit, no SVG output, or an omitted proved sheet raises `SchematicSvgEr
 
 ## Limits
 
-- No reference annotation, flag editing, mandatory-attribute deletion, or geometry editing.
-- Only selected concrete embedded restore is implemented. General cache sync and inherited materialization remain later work.
-- Sheet instance path / multi-instance models are not first-class here.
-- Prefer `Project.schematic` over free `open_schematic` in application code.
-- Same-location saves require the root schematic and project to share a basename.
-- Save verification supports parent-relative sheets only within the project directory.
-- Absolute, variable-based, external, cyclic, missing, or symlink sheet paths fail explicitly.
-- Verification does not copy arbitrary project trees, external resources, or library tables.
+- No reference annotation, flag editing, mandatory-attribute deletion, geometry editing, or sheet-symbol editing.
+- No instance model yet: `SheetFile.symbol(reference)` is per file (#79).
+- `update_from_library` supports structurally equal concrete definitions only.
+- No save checks connectivity, locks, or backups; those are client sequences.
+- ERC, netlist, and SVG staging need the root sheet file and project to share a basename, and support parent-relative sheets inside the project directory only.
 - No automatic KiCad resave or whole-file normalization occurs.
-- ERC is full-project only and uses the bounded native local reference context described above.
-- SVG export is full-project only, has no plot options, and does not stage custom drawing sheets.
 
 ## Errors
 
-- `InvalidSchematicError`: bad path, syntax, or required structure.
-- `AmbiguousPlacedSymbolError`: non-unique reference (or attribute) lookup.
+- `InvalidSchematicError`: bad path, syntax, required structure, or a missing sheet file.
+- `AmbiguousPlacedSymbolError`: non-unique reference or attribute lookup.
 - `AmbiguousEmbeddedSymbolError`: duplicate cache containers, identities, or pin occurrences.
-- `UnsupportedSchematicOperationError`: unsupported format, identity, edit, or safe staging case.
-- `SchematicConflictError`: changed or missing source or project verification context.
-- `SchematicVerificationError`: pending content does not match its required or predicted electrical signature.
-- Parent-library lookup/lifecycle errors propagate for missing or ambiguous definitions and closed/discarded parent libraries.
-  A restore intent captured before parent exit remains valid and does not reread that parent at save.
-- `InvalidProjectError`: project-context open rules (no root sheet; path not in hierarchy).
-- `ProjectWriteBlockedError`: the project write guard blocks persistence.
-- `ProjectLifecycleError`: the owning Project exited, or newer pending state changed during a save.
-- `ProjectBackupError`: snapshot/save-history failure; some source files may already have been persisted.
-- `ErcAcquisitionError`: ERC execution or report intake failed, not a design finding.
-- `ErcContextError`: the original library context cannot be staged faithfully.
-- `SchematicSvgError`: SVG export execution or output intake failed.
-- `FileExistsError` / `FileNotFoundError` / `PermissionError`: SVG output directory exists, lacks a parent, or is not writable.
-- `KicadCliNotFoundError`, netlist export/parse errors, and ordinary filesystem errors propagate from explicit saves.
+- `UnsupportedSchematicOperationError`: unsupported format, identity, edit, hierarchy, or staging case; stale handles.
+- `SchematicConflictError`: the disk file is not the file that was read, or it is missing.
+- `SchematicSaveError`: `Schematic.save()` or `validate()` did not pass every changed sheet file; see `results`.
+- `SchematicLifecycleError`: a closed or discarded standalone sheet file.
+- `ProjectLifecycleError`: the owning project exited.
+- Library lookup and lifecycle errors propagate from `update_from_library`.
+- `ErcAcquisitionError`, `ErcContextError`, `SchematicSvgError`: ERC or SVG acquisition failed.
+- `KicadCliNotFoundError` and ordinary filesystem errors propagate.
 
 ## Tests
 
-Donor gates from jBOM schematic/title-block tests and Subdivision placement
-fields are ported in `tests/functional/test_schematic_placed_symbols.py`.
-Geometry gates live in `tests/functional/test_schematic_geometry.py`.
-Object editing and persistence gates live in `test_schematic_editing.py`, `test_schematic_attribute_deletion.py`, and `test_schematic_persistence.py`.
-The deletion tests port jBOM annotate alias normalization (`normalize_schematic_properties`) as client code.
-The native fixture provenance is in `tests/fixtures/schematics/attribute-edit/PROVENANCE.txt`.
-These tests need no KiCad installation. The verifier test double exercises failure paths through an executable boundary.
+Donor gates from jBOM schematic/title-block tests and Subdivision placement fields: `tests/functional/test_schematic_placed_symbols.py`.
+Geometry: `test_schematic_geometry.py`. Edits: `test_schematic_editing.py` and `test_schematic_attribute_deletion.py` (jBOM alias normalization as client code).
+Layer-0 lifecycle: `test_sheet_file_lifecycle.py`. Layer-1 save policy: `test_schematic_persistence.py`. Revert and `on_close`: `test_project_lifecycle.py`.
+Library updates: `test_schematic_restore.py`. ERC: `test_schematic_erc.py`. SVG: `test_schematic_svg_export.py`.
+Fixture provenance is in `tests/fixtures/schematics/*/PROVENANCE.txt`. These tests need no KiCad installation.
 
 ```bash
 uv run python -m unittest discover -s tests -q
 ```
 
-An opt-in real KiCad gate edits only disposable fixture copies:
+Opt-in real KiCad gates use disposable fixture copies:
 
 ```bash
 uv run python tests/verify_schematic_editing.py --kicad-cli /path/to/kicad-cli
-```
-
-This checks fresh exported Value and inserted attributes, one alias deletion (`W` to `Power`), six singleton nets, byte previews, explicit persistence, and no-op saves.
-
-Selected-restore gates are in `tests/functional/test_schematic_restore.py`.
-Native provenance and independently authored expected pin types are in `tests/fixtures/schematics/embedded-restore/PROVENANCE.txt`.
-The native restore gate uses only disposable fixture copies:
-
-```bash
 uv run python tests/verify_schematic_restore.py --kicad-cli /path/to/kicad-cli
-```
-
-It proves exact source recovery and output/input-to-passive corrections across three placements and six singleton pins.
-Expected types come from fixed fixture requirements, not another export of the requested replacement.
-
-ERC scenarios port kproj report and execution behavior through the public report boundary.
-`tests/functional/test_schematic_erc.py` covers pending hierarchy, grouping, exclusions, acquisition failures, raw library context, and scope limits.
-The native gate uses disposable source/library copies with recorded context provenance:
-
-```bash
 uv run python tests/verify_schematic_erc.py --kicad-cli /path/to/kicad-cli
-```
-
-It checks actual KiCad 10 JSON, typed findings, original URI resolution, and locked/read-only pending snapshots.
-
-SVG export scenarios port kproj `schematic_exporter` behavior through `Project.export_svgs` with a backend test double.
-`tests/functional/test_schematic_svg_export.py` covers pending content, sheet mapping, destination safety, and acquisition failures.
-The native gate uses a disposable two-sheet hierarchy copy:
-
-```bash
 uv run python tests/verify_schematic_svg.py --kicad-cli /path/to/kicad-cli
 ```
 
-It checks KiCad file names, root/child mapping, a non-ASCII sheet name with `/`, a rendered pending Value, unchanged sources, and existing-output refusal.
-Finding totals depend on the original reference context. The gate does not filter legitimate missing-footprint findings.
+The editing gate checks that attribute edits leave `project.netlist()` equal, then saves.
+The restore gate checks exact source recovery and that the pin-type correction changes the exported pin types.

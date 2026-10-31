@@ -22,8 +22,9 @@ The 1.0 surface is:
   hierarchy and returns a `Netlist` with `provenance`.
 - **Supported — inspect:** the `Netlist` exchange model (`components`,
   `component()`, `nets`, `net()`, `sheets`, `sheet_files`).
-- **Supported — compare:** `connectivity_sets()` on two `Netlist` values.
-  Save verification uses its own stricter electrical signature.
+- **Supported — compare:** `before == after` on two `Netlist` values
+  compares electrical content (ADR 0011 D9). `connectivity_sets()` shows
+  differences.
 - **Supported — exchange:** `Netlist.open`, `export_netlist`, and
   `obtain_netlist` for explicit `.kicad_sch` or `.net` paths.
 - **Not offered — document-only obtain:** a single child sheet is not a
@@ -40,19 +41,18 @@ import hashlib
 from kicad_primitives.projects import Project
 
 project = Project.open("/path/to/board")
-project.schematic().symbol("R1").set_attribute("Value", "22K")
+project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
 netlist = project.netlist()  # optional kicad_cli="/explicit/path/to/kicad-cli"
 print(netlist.component("R1").value)  # "22K" from pending content
 snapshot = netlist.provenance
 for document in snapshot.documents:
-    fresh = hashlib.sha256(project.schematic(document.path).to_bytes()).hexdigest()
+    fresh = hashlib.sha256(project.schematic().file(document.path).to_bytes()).hexdigest()
     print(document.path, document.is_modified, document.sha256 == fresh)
 ```
 
 `Project.netlist()` stages the captured `.kicad_pro` bytes and every hierarchy
 document's pending `to_bytes()` content. It uses the same private staging as
-save verification and `Project.erc()`.
-It does not save source, clear pending changes, or require the write guard.
+`Project.erc()`. It does not save source or clear pending changes.
 Locked projects and read-only original files remain obtainable.
 
 `provenance` is a `ProjectSnapshot` from `kicad_primitives.projects`.
@@ -66,10 +66,11 @@ results have `provenance=None`.
 staged root. Use `provenance` for original paths. Like ERC, the backend runs
 with the original project directory as its working directory.
 
-The hierarchy rules match save verification: the root schematic and project
-share a basename, and sheets are parent-relative inside the project directory.
-Other layouts raise `UnsupportedSchematicOperationError`. A missing child sheet
-raises `SchematicConflictError`. Backend failures raise
+The staging rules: the root sheet file and project share a basename, and
+sheets are parent-relative inside the project directory. Other layouts raise
+`UnsupportedSchematicOperationError`. A missing sheet file raises
+`InvalidSchematicError` when the schematic loads, or `SchematicConflictError`
+when it disappears after loading. Backend failures raise
 `KicadCliNotFoundError`, `NetlistExportError`, or `NetlistParseError`. They never
 become an empty netlist.
 
@@ -88,6 +89,21 @@ for name, path in netlist.sheet_files.items():
 
 `Netlist.open` needs no KiCad install. It requires a file whose root is
 `(export …)`.
+
+## Compare netlists
+
+```python
+before = project.netlist()
+project.schematic().files[0].symbol("R1").set_attribute("MPN", "ABC-1")
+assert project.netlist() == before   # attribute edit: no electrical change
+```
+
+`Netlist` equality compares component identity (reference, library, part) and
+every pin-to-net connection (net name, reference, pin). Export order, net
+codes, values, fields, sheet data, paths, and provenance do not count. Pin
+electrical types are not connections and do not count. `hash()` follows the
+same content. This is the client sequence that replaces the former save-time
+connectivity check: the package does not predict or excuse electrical changes.
 
 ## Connectivity compare helper
 
@@ -139,8 +155,9 @@ Format is always `kicadsexpr`. Discovery order: explicit `kicad_cli`, then
 - `KicadCliNotFoundError`: discovery failed (re-exported from private locator).
 - `FileNotFoundError`: missing schematic or netlist path.
 - `KeyError`: missing component reference or net name on lookup helpers.
-- `UnsupportedSchematicOperationError` / `SchematicConflictError`: unsupported
-  or changed hierarchy for `Project.netlist()`.
+- `UnsupportedSchematicOperationError` / `InvalidSchematicError` /
+  `SchematicConflictError`: unsupported, missing, or changed hierarchy for
+  `Project.netlist()`.
 - `ProjectLifecycleError`: `Project.netlist()` after close or discard.
 - Ordinary `OSError` subclasses still apply to filesystem failures.
 
@@ -149,8 +166,9 @@ Format is always `kicadsexpr`. Discovery order: explicit `kicad_cli`, then
 `tests/functional/test_project_netlist.py` covers `Project.netlist()` with a
 backend test double: pending hierarchy content, provenance, captured settings,
 locked/read-only sources, and acquisition failures.
-The opt-in native gate `tests/verify_schematic_editing.py` also obtains a
-pending-snapshot project netlist before its explicit save.
+Equality gates are in `tests/functional/test_netlist_exchange.py`.
+The opt-in native gate `tests/verify_schematic_editing.py` compares project
+netlists before and after attribute edits, then saves.
 
 Donor parse gates use `tests/fixtures/minimal_plant.net` (from
 FieldUnit-Subdivision). Export paths are mocked so the normal suite needs no

@@ -1,4 +1,4 @@
-"""Opt-in real KiCad restore proof using independently authored expected pin types."""
+"""Opt-in real KiCad update_from_library check with independently authored pin types."""
 
 import argparse
 import shutil
@@ -11,7 +11,7 @@ from kicad_primitives.symbols import SymbolLibrary
 
 
 def main() -> None:
-    """Prove intended output/input-to-passive corrections without source replay."""
+    """Check output/input-to-passive corrections in a real export after a plain save."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kicad-cli", type=Path)
     args = parser.parse_args()
@@ -44,7 +44,7 @@ def main() -> None:
         parent.symbol("R").body(1, 0).pin("1").set(electrical_type="input")
         parent.discard()
         assert parent.is_closed
-        project.save(kicad_cli=args.kicad_cli)
+        project.save()
         after = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)
         expected_after = {key: "passive" for key in expected_before}
         assert {
@@ -62,10 +62,10 @@ def main() -> None:
         assert schematic.embedded_symbol("SPCoast:R") is handle
         assert not project.is_modified
         inode = schematic.path.stat().st_ino
-        schematic.save(kicad_cli=args.kicad_cli)
+        schematic.save()
         assert schematic.path.stat().st_ino == inode
         print(
-            "Native restore passed: exact cache/complement, three placements, six output/input-to-passive pin effects, captured parent after terminal discard, explicit save."
+            "Native update_from_library passed: exact cache/complement, three placements, six output/input-to-passive pin effects, library edits after update ignored, plain save."
         )
 
 

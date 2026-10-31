@@ -14,7 +14,7 @@ Released donor dependencies wait for `1.0.0` on public PyPI ([ADR 0005](adr/0005
 
 ## Surface (ADR 0006 A)
 
-- **Supported:** open by path or registered nickname, with one object per open library; declared and effective (inherited) inspection; attribute set, add, and delete; pin add, set, and delete; `ensure_body`; rectangle and body-text add, set, and delete; symbol create, rename, delete, copy, and cross-library copy; SVG export; `save()` with native `.bak`, `save_as()`, `discard()`, and `close()`.
+- **Supported:** open by path or registered nickname, with one object per open library; declared and effective (inherited) inspection; attribute set, add, and delete; pin add, set, and delete; `ensure_body`; rectangle and body-text add, set, and delete; symbol create, rename, delete, copy, and cross-library copy; SVG export; `validate()`; `save()` with native `.bak` and `overwrite`; `save_as()`, `discard()`, and `close()`.
 - **Defined, explicit failure:** writes to formats other than `20251024`; effective resolution of derived symbols with their own bodies, missing parents, or cycles; deleting a symbol that another symbol extends; cross-library copy before its parent exists in the destination; ambiguous symbol, attribute, or pin identities.
 - **Deferred past 1.0:** unit split and restructure; stroke, fill, text effects, and other graphic primitives; library discovery roots on this surface (use `find_libraries` on [tables.md](tables.md)).
 
@@ -185,14 +185,17 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 ## Persistence and errors
 
 ### Close, discard, and `with`
-`path` reports the artifact's current destination. `is_modified` compares pending bytes with the successful open/save baseline.
-`save()` and `save_as(path)` advance that baseline only after successful persistence.
+`path` reports the artifact's current destination.
+`is_modified` is a flag that edits set (ADR 0009). An edit back to the original content leaves it set.
+`save()` and `save_as(path)` clear it only after successful persistence.
+The library keeps a fingerprint (size and content hash) of what it read, not a copy of the bytes.
+`validate()` checks that the current content can be written; it writes nothing and runs no KiCad.
 `close()` on a clean library writes nothing. Open then close never writes and never fails.
 `close()` on a dirty library runs `save()`, with its backup and conflict safeguards, then exits.
 If that save fails, `close()` raises the save error. The library stays open with its pending changes.
 Then retry, `save_as()` elsewhere, or `discard()`.
 
-`discard()` is terminal exit without writing. It is not rollback, reload, or a baseline reset for continued editing.
+`discard()` is terminal exit without writing. It is not rollback or reload. Library `revert()` is pending an owner decision (ADR 0011 D6 assigns it to #78).
 Close and discard invalidate owned Symbol/Body/Pin/Rectangle/Text handles.
 Operational access then raises an explicit lifecycle or stale-handle error.
 `path`, `is_closed`, and previously captured immutable inspection values remain diagnostic data.
@@ -208,13 +211,14 @@ with SymbolLibrary.open("Example.kicad_sym") as library:
 
 ### Same-location save and native backup
 
-`save()` compares disk bytes with the last successful open/save baseline.
-External changes or deletion raise `FileConflictError`, even for a no-op save.
-Reopen and reconcile external edits; do not blindly retry with a new baseline.
-Current-format no-op saves perform no replacement.
+A clean `save()` writes nothing and checks nothing, whatever the format.
+A changed `save()` runs `validate()`, then compares the disk file with the fingerprint.
+External changes or deletion raise `FileConflictError` and write nothing.
+`save(overwrite=True)` is the explicit way through a conflict (ADR 0009).
+Output equal to the disk bytes performs no replacement.
 
-Changed saves use a same-directory temporary file, preserve permission mode, flush/fsync output, recheck the baseline, and atomically replace the original.
-Before that replacement, changed symbol libraries capture the prior source as native `Foo.bak`.
+Changed saves use a same-directory temporary file, preserve permission mode, flush/fsync output, recheck the disk bytes, and atomically replace the original.
+Before that replacement, changed symbol libraries copy the bytes on disk to native `Foo.bak` (native backups from disk, ADR 0009).
 The backup replaces the extension. It does not append `.bak` to `Foo.kicad_sym`.
 Exact no-op saves replace neither source nor backup.
 Backup links, multiply linked files, unwritable targets, and source/backup collisions fail before the original write.
@@ -230,7 +234,7 @@ They remain readable and can be forked with `save_as()`.
 The writer does not bypass a source file with no write permission bits.
 This preserves permission mode, not every platform-specific ACL, extended attribute, ownership detail, or inode identity.
 
-OS errors propagate. A failed save leaves validated edits in memory for inspection and retry; the baseline advances only on success.
+OS errors propagate. A failed save leaves edits in memory for inspection and retry; the fingerprint advances only on success.
 These are optimistic single-file safeguards, not a filesystem transaction, crash-durability guarantee, or lock/session protocol.
 There is still a final check/replace race with an arbitrary external writer.
 Do not save concurrently with KiCad's symbol editor or another writer.
@@ -243,10 +247,10 @@ Its existing parent directories must not be symlinks, and its destination direct
 No parent directories are created. Use a canonical destination directory.
 
 Save-as can fork a read-only library or readable linked source because it does not overwrite that source.
-It still checks the captured source-byte baseline and rejects external changes or deletion without refreshing pending content.
-A failed save-as retains the prior path, baseline, and pending changes.
+It still checks the source against the fingerprint and rejects external changes or deletion without refreshing pending content.
+A failed save-as retains the prior path, fingerprint, and pending changes.
 A new destination needs no backup. A subsequent changed `save()` there creates its own `.bak`.
-Project same-location ZIP history is separate from this single-file operation.
+`Project.backup()` is separate from this single-file operation.
 Bounded Project save-as is a separate operation; Git `.history` support remains deferred.
 
 Errors exported from `kicad_primitives.symbols`:
