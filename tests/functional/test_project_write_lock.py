@@ -25,7 +25,8 @@ class LockQueryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = TemporaryDirectory(prefix="kp_lock_")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name).resolve()
+        self.root = Path(self.temp.name).resolve() / "board"
+        self.root.mkdir()
         (self.root / "board.kicad_pro").write_text(
             json.dumps({"meta": {"version": 1}}), encoding="utf-8"
         )
