@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from os import PathLike
@@ -66,10 +67,12 @@ __all__ = [
 class SymbolLibrary:
     """One source library with stable editable symbols and explicit persistence."""
 
-    def __init__(self, path: Path, raw: bytes) -> None:
+    def __init__(
+        self, path: Path, raw: bytes, info: os.stat_result | None = None
+    ) -> None:
         self._path = path
         self._source = _symbol_parse.read_source(raw)
-        self._fingerprint = _symbol_persist.Fingerprint.of(raw)
+        self._fingerprint = _symbol_persist.Fingerprint.of(raw, info)
         self._modified = False
         self._closed = False
         self._symbols = tuple(Symbol(self, data) for data in self._source.symbols)
@@ -161,7 +164,8 @@ class SymbolLibrary:
         existing = _registry.lookup(_KIND, location)
         if isinstance(existing, SymbolLibrary):
             return existing
-        library = cls(location, location.read_bytes())
+        info = location.stat()  # Before the read, so the stamp is never newer.
+        library = cls(location, location.read_bytes(), info)
         _registry.register(_KIND, location, library)
         return library
 
@@ -327,10 +331,10 @@ class SymbolLibrary:
             return
         self.validate()
         output = self.to_bytes()
-        _symbol_persist.save_library_source(
+        written = _symbol_persist.save_library_source(
             self._path, None if overwrite else self._fingerprint, output
         )
-        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._fingerprint = _symbol_persist.Fingerprint.of(output, written)
         self._modified = False
 
     def save_as(self, path: str | PathLike[str]) -> None:
@@ -346,10 +350,12 @@ class SymbolLibrary:
         destination = Path(path).expanduser().absolute()
         info = _symbol_persist._check_read_baseline(self._path, self._fingerprint)
         output = self.to_bytes()
-        _symbol_persist.save_new_source(destination, output, mode=info.st_mode & 0o7777)
+        written = _symbol_persist.save_new_source(
+            destination, output, mode=info.st_mode & 0o7777
+        )
         _registry.rebind(_KIND, self._path, destination, self)
         self._path = destination
-        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._fingerprint = _symbol_persist.Fingerprint.of(output, written)
         self._modified = False
 
     def discard(self) -> None:

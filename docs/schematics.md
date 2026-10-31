@@ -189,7 +189,7 @@ A later save writes only what is still unsaved. `Schematic.validate()` runs the 
 
 Only format `20260306` supports edits. Do not confuse it with symbol-library format `20251024`.
 `is_modified` is a flag that edits set (ADR 0009). An edit back to the original content leaves it set.
-The package keeps no in-memory copy of what it read: a fingerprint (size and content hash) detects conflicts.
+The package keeps no in-memory copy of what it read. A fingerprint detects conflicts: size, a stat stamp (device, inode, modification time), and a content hash. A check stats the file first. A different size is a change; the same size and stamp are no change; only otherwise is the file read and hashed, so a touched but identical file is no conflict.
 
 ## Revert
 

@@ -423,7 +423,7 @@ class SheetFile:
             return
         self.validate()
         output = self.to_bytes()
-        _symbol_persist.save_source(
+        written = _symbol_persist.save_source(
             self.path,
             None if overwrite else self._fingerprint,
             output,
@@ -431,11 +431,11 @@ class SheetFile:
             unsupported_error=UnsupportedSchematicOperationError,
             label="Sheet file",
         )
-        self._mark_saved(output)
+        self._mark_saved(output, written)
 
-    def _mark_saved(self, output: bytes) -> None:
-        """Record that *output* is now the disk content."""
-        object.__setattr__(self, "_fingerprint", Fingerprint.of(output))
+    def _mark_saved(self, output: bytes, info: os.stat_result | None = None) -> None:
+        """Record that *output* (stat *info*, when known) is now the disk content."""
+        object.__setattr__(self, "_fingerprint", Fingerprint.of(output, info))
         object.__setattr__(self, "_modified", self.to_bytes() != output)
 
     def revert(self) -> None:
@@ -449,16 +449,21 @@ class SheetFile:
         """
         self._check_open()
         try:
+            info = self.path.stat()
             raw = self.path.read_bytes()
         except FileNotFoundError as exc:
             raise SchematicConflictError(
                 f"Sheet file no longer exists: {self.path}"
             ) from exc
-        if self._fingerprint is not None and not self._fingerprint.matches(raw):
-            raise SchematicConflictError(f"Sheet file changed on disk: {self.path}")
-        self._adopt(_parse_sheet_file(self.path, raw), raw)
+        if self._fingerprint is not None:
+            decision = self._fingerprint.quick(info)
+            if decision is False or (
+                decision is None and not self._fingerprint.matches(raw)
+            ):
+                raise SchematicConflictError(f"Sheet file changed on disk: {self.path}")
+        self._adopt(_parse_sheet_file(self.path, raw), Fingerprint.of(raw, info))
 
-    def _adopt(self, fresh: SheetFile, raw: bytes) -> None:
+    def _adopt(self, fresh: SheetFile, fingerprint: Fingerprint) -> None:
         """Replace content with *fresh*, read from *raw*; invalidate old handles."""
         for symbol in self.symbols:
             object.__setattr__(symbol, "_owner", None)
@@ -471,7 +476,7 @@ class SheetFile:
         for symbol in self.symbols:
             object.__setattr__(symbol, "_owner", self)
         object.__setattr__(self, "_document", fresh._document)
-        object.__setattr__(self, "_fingerprint", Fingerprint.of(raw))
+        object.__setattr__(self, "_fingerprint", fingerprint)
         object.__setattr__(self, "_modified", False)
 
     def discard(self) -> None:
@@ -858,13 +863,12 @@ class Schematic:
 
 
 def _matches_disk(sheet_file: SheetFile) -> bool:
-    """Whether the disk file is still the file that was read."""
+    """Whether the disk file is still the file that was read (stat first)."""
+    fingerprint = sheet_file._fingerprint
     try:
-        raw = sheet_file.path.read_bytes()
+        return fingerprint is None or fingerprint.matches_path(sheet_file.path)
     except FileNotFoundError:
         return False
-    fingerprint = sheet_file._fingerprint
-    return fingerprint is None or fingerprint.matches(raw)
 
 
 def _read_sheet_file(location: Path) -> SheetFile:
@@ -876,11 +880,11 @@ def _read_sheet_file(location: Path) -> SheetFile:
             f"Expected .kicad_sch file, got: {location.suffix or '<none>'}"
         )
     try:
-        raw = location.read_bytes()
+        fingerprint, raw = Fingerprint.read(location)
     except OSError as exc:
         raise InvalidSchematicError(f"Cannot read schematic: {exc}") from exc
     sheet_file = _parse_sheet_file(location, raw)
-    object.__setattr__(sheet_file, "_fingerprint", Fingerprint.of(raw))
+    object.__setattr__(sheet_file, "_fingerprint", fingerprint)
     return sheet_file
 
 

@@ -188,14 +188,14 @@ Replacement values must be strings without NUL and must encode as UTF-8.
 `path` reports the artifact's current destination.
 `is_modified` is a flag that edits set (ADR 0009). An edit back to the original content leaves it set.
 `save()` and `save_as(path)` clear it only after successful persistence.
-The library keeps a fingerprint (size and content hash) of what it read, not a copy of the bytes.
+The library keeps a fingerprint of what it read, not a copy of the bytes: size, a stat stamp (device, inode, modification time), and a content hash. A check stats the file first; a different size is a change, the same size and stamp are no change, and only otherwise is the file read and hashed.
 `validate()` checks that the current content can be written; it writes nothing and runs no KiCad.
 `close()` on a clean library writes nothing. Open then close never writes and never fails.
 `close()` on a dirty library runs `save()`, with its backup and conflict safeguards, then exits.
 If that save fails, `close()` raises the save error. The library stays open with its pending changes.
 Then retry, `save_as()` elsewhere, or `discard()`.
 
-`discard()` is terminal exit without writing. It is not rollback or reload. Library `revert()` is pending an owner decision (ADR 0011 D6 assigns it to #78).
+`discard()` is terminal exit without writing. It is not rollback or reload. Library `revert()` belongs to [#78](https://github.com/plocher/kicad-primitives/issues/78) (ADR 0011 D6).
 Close and discard invalidate owned Symbol/Body/Pin/Rectangle/Text handles.
 Operational access then raises an explicit lifecycle or stale-handle error.
 `path`, `is_closed`, and previously captured immutable inspection values remain diagnostic data.

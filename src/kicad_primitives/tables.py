@@ -122,9 +122,11 @@ class LibraryTable:
         self._path = path
         self._library_type = library_type
         self._scope = scope
-        raw = path.read_bytes() if path.exists() else None
         # None: the file did not exist when opened; save creates it.
-        self._fingerprint = None if raw is None else _symbol_persist.Fingerprint.of(raw)
+        self._fingerprint: _symbol_persist.Fingerprint | None = None
+        raw: bytes | None = None
+        if path.exists():
+            self._fingerprint, raw = _symbol_persist.Fingerprint.read(path)
         self._modified = False
         self._source = (
             raw.decode("utf-8")
@@ -270,11 +272,11 @@ class LibraryTable:
         self.validate()
         output = self.to_bytes()
         if self._fingerprint is None:
-            _symbol_persist.save_new_source(
+            written = _symbol_persist.save_new_source(
                 self._path, output, unsupported_error=InvalidLibraryTableError
             )
         else:
-            _symbol_persist.save_source(
+            written = _symbol_persist.save_source(
                 self._path,
                 None if overwrite else self._fingerprint,
                 output,
@@ -282,7 +284,7 @@ class LibraryTable:
                 unsupported_error=InvalidLibraryTableError,
                 label="Library table",
             )
-        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._fingerprint = _symbol_persist.Fingerprint.of(output, written)
         self._modified = False
 
     def save_as(self, path: str | PathLike[str]) -> None:
@@ -300,14 +302,14 @@ class LibraryTable:
             )
             mode = info.st_mode & 0o7777
         output = self.to_bytes()
-        _symbol_persist.save_new_source(
+        written = _symbol_persist.save_new_source(
             destination,
             output,
             mode=mode,
             unsupported_error=InvalidLibraryTableError,
         )
         self._context._rebind(self, destination)
-        self._fingerprint = _symbol_persist.Fingerprint.of(output)
+        self._fingerprint = _symbol_persist.Fingerprint.of(output, written)
         self._modified = False
 
     def discard(self) -> None:
