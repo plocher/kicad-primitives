@@ -40,7 +40,6 @@ _FLAG_NAMES = frozenset(
 _WRITE_VERSION = 20260306
 
 if TYPE_CHECKING:
-    from ._schematic_restore import _RestoreIntent
     from .projects import Project
     from .symbols import SymbolLibrary
 
@@ -73,7 +72,6 @@ __all__ = [
     "SchematicSvgError",
     "SchematicSvgExport",
     "SchematicSvgFile",
-    "SchematicVerificationError",
     "SheetFile",
     "SheetSaveResult",
     "SheetSaveStatus",
@@ -105,11 +103,7 @@ class UnsupportedSchematicOperationError(SchematicError):
 
 
 class SchematicConflictError(SchematicError):
-    """A schematic or its verification context changed on disk."""
-
-
-class SchematicVerificationError(SchematicError):
-    """Pending content did not satisfy its required electrical proof."""
+    """A sheet file on disk is not the file that was read."""
 
 
 class SchematicLifecycleError(RuntimeError):
@@ -243,21 +237,24 @@ class EmbeddedSymbol:
     _owner: SheetFile = field(repr=False, compare=False)
     _alive: bool = field(default=True, init=False, repr=False, compare=False)
 
-    def restore_from(self, parent_library: SymbolLibrary, parent_name: str) -> None:
-        """Restore this concrete definition from captured parent source in memory.
+    def update_from_library(self, library: SymbolLibrary, name: str) -> None:
+        """Replace this embedded copy with *name* from *library*, in memory.
 
-        Preserve placements and unrelated source. Ordinary visible pin-type
-        corrections require explicit-save electrical proof. Unsupported
-        inheritance or electrical changes fail before changing the schematic.
+        The library definition is materialized under this embedded identity.
+        Placements and unrelated source are preserved. The edit is not saved
+        and not checked electrically; a client that cares compares
+        ``project.netlist()`` before and after. Inheritance, pin additions or
+        removals, and changes to pin names, geometry, visibility, alternates,
+        or unknown content are not supported yet and fail before any change.
         """
-        from ._schematic_restore import restore_definition
+        from ._schematic_restore import update_definition
 
         if not self._alive:
             raise UnsupportedSchematicOperationError(
                 f"Embedded symbol handle is stale after revert: {self.lib_id}"
             )
 
-        restore_definition(self._owner, self.lib_id, parent_library, parent_name)
+        update_definition(self._owner, self.lib_id, library, name)
 
 
 @dataclass(frozen=True)
@@ -360,14 +357,10 @@ class SheetFile:
     _document: Document | None = field(
         default=None, init=False, repr=False, compare=False
     )
-    _baseline: bytes = field(default=b"", init=False, repr=False, compare=False)
     _project: Project | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _embedded_handles: dict[str, EmbeddedSymbol] = field(
-        default_factory=dict, init=False, repr=False, compare=False
-    )
-    _restore_intents: dict[str, _RestoreIntent] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )
     _fingerprint: Fingerprint | None = field(
@@ -442,7 +435,6 @@ class SheetFile:
 
     def _mark_saved(self, output: bytes) -> None:
         """Record that *output* is now the disk content."""
-        object.__setattr__(self, "_baseline", output)
         object.__setattr__(self, "_fingerprint", Fingerprint.of(output))
         object.__setattr__(self, "_modified", self.to_bytes() != output)
 
@@ -473,14 +465,12 @@ class SheetFile:
         for handle in self._embedded_handles.values():
             object.__setattr__(handle, "_alive", False)
         self._embedded_handles.clear()
-        self._restore_intents.clear()
         for item in fields(self):
             if item.init and item.name != "path":
                 object.__setattr__(self, item.name, getattr(fresh, item.name))
         for symbol in self.symbols:
             object.__setattr__(symbol, "_owner", self)
         object.__setattr__(self, "_document", fresh._document)
-        object.__setattr__(self, "_baseline", raw)
         object.__setattr__(self, "_fingerprint", Fingerprint.of(raw))
         object.__setattr__(self, "_modified", False)
 
@@ -934,7 +924,6 @@ def _sheet_file_from_document(path: Path, document: Document) -> SheetFile:
         sheet_symbols=tuple(_sheet(n) for n in root.child_lists("sheet")),
     )
     object.__setattr__(schematic, "_document", document)
-    object.__setattr__(schematic, "_baseline", document.source.encode("utf-8"))
     for index, symbol in enumerate(schematic.symbols):
         object.__setattr__(symbol, "_owner", schematic)
         object.__setattr__(symbol, "_index", index)

@@ -114,7 +114,6 @@ def _project_metadata(
     return output
 
 
-
 def _destination_outputs(
     outputs: dict[Path, bytes], installed: dict[Path, os.stat_result]
 ) -> None:
@@ -284,7 +283,6 @@ def save_as(
             for old, new in zip(document.symbols, updated.symbols, strict=True):
                 for field in ("path", "attributes", "value", "footprint"):
                     object.__setattr__(old, field, getattr(new, field))
-            document._restore_intents.clear()
         project._directory = destination
         project._project_file = targets[old_project]
         project._project_baseline = outputs[project.project_file]

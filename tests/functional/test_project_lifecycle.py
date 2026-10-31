@@ -192,7 +192,7 @@ class ProjectLifecycleTests(ProjectCase):
         placed = sheet.symbol("R1")
         project.discard()
         for action in (
-            lambda: embedded.restore_from(parent, "R"),
+            lambda: embedded.update_from_library(parent, "R"),
             lambda: placed.attribute("Value"),
             lambda: sheet.embedded_symbols,
             lambda: project.erc(),
