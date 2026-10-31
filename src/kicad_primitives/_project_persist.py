@@ -76,7 +76,7 @@ def _accept_saved(document: SheetFile, output: bytes) -> None:
     """Advance the written baseline without replacing newer pending source/intents."""
     from ._schematic_restore import _cache_nodes, _inventory
 
-    object.__setattr__(document, "_baseline", output)
+    document._mark_saved(output)
     if not document._restore_intents:
         return
     baseline = parse(output.decode("utf-8"))
@@ -161,6 +161,9 @@ def save_project(
             )
             _accept_saved(document, output)
             written[document.path] = installed
+        for document in targets:
+            if document not in changed and document.to_bytes() == document._baseline:
+                document._mark_saved(document._baseline)
         project._check_open()
         _project_backup.check_fresh(project, snapshot, written)
         project.ensure_writes_allowed()

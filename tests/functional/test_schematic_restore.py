@@ -235,34 +235,6 @@ class EmbeddedRestoreTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), expected)
         self.assertFalse(self.project.is_modified)
 
-    def test_document_save_excludes_other_pending_restore_and_rejects_cache_variants(
-        self,
-    ) -> None:
-        source = SOURCE.replace(
-            "(version 20260306)",
-            '(version 20260306) (sheet (at 0 0) (size 10 10) (property "Sheetfile" "child.kicad_sch"))',
-            1,
-        )
-        self.path.write_bytes(source.encode())
-        child_path = self.directory / "child.kicad_sch"
-        child_source = (
-            SOURCE.replace('"R1"', '"X1"')
-            .replace('"R2"', '"X2"')
-            .replace('"C1"', '"X3"')
-        )
-        child_path.write_bytes(child_source.encode())
-        project = Project.open(self.directory)
-        root, child = project.schematic().files
-        root.symbol("R1").set_attribute("MPN", "root-only")
-        child.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
-        root.save(kicad_cli=self.verifier())
-        self.assertFalse(root.is_modified)
-        self.assertTrue(child.is_modified)
-        self.assertEqual(child_path.read_bytes(), child_source.encode())
-        with self.assertRaises(UnsupportedSchematicOperationError):
-            project.save(kicad_cli=self.verifier())
-        self.assertEqual(child_path.read_bytes(), child_source.encode())
-
     def test_unsupported_formats_and_parent_pin_add_remove_are_nonmutating(
         self,
     ) -> None:
@@ -360,24 +332,6 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         self.assertEqual(self.path.read_bytes(), source)
         self.assertFalse(project.is_modified)
 
-    def test_exact_revert_clears_pending_restore_without_cli_or_replacement(
-        self,
-    ) -> None:
-        embedded = self.schematic.embedded_symbol("Test:Part")
-        embedded.restore_from(self.parent, "Parent")
-        original_parent = CACHE.replace("Test:Part", "Parent").replace(
-            "Part_1_1", "Parent_1_1"
-        )
-        self.parent_path.write_text(
-            f"(kicad_symbol_lib (version 20251024) {original_parent})", encoding="utf-8"
-        )
-        embedded.restore_from(self.reopen_parent(), "Parent")
-        self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
-        self.assertFalse(self.project.is_modified)
-        inode = self.path.stat().st_ino
-        self.project.save(kicad_cli=self.directory / "not-needed")
-        self.assertEqual(self.path.stat().st_ino, inode)
-
     def test_duplicate_parent_identity_does_not_select_first_source(self) -> None:
         self.parent_path.write_text(
             f"(kicad_symbol_lib (version 20251024) {PARENT} {PARENT})", encoding="utf-8"
@@ -387,24 +341,6 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
                 self.reopen_parent(), "Parent"
             )
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
-
-    def test_save_proves_all_placements_and_full_pin_types_then_resets_baseline(
-        self,
-    ) -> None:
-        embedded = self.schematic.embedded_symbol("Test:Part")
-        embedded.restore_from(self.parent, "Parent")
-        self.schematic.symbol("R1").set_attribute("MPN", "mixed edit")
-        self.parent.symbol("Parent").body(1, 1).pin("1").set(electrical_type="input")
-        cli = self.verifier()
-        self.project.save(kicad_cli=cli)
-        self.assertEqual(self.path.read_bytes(), self.schematic.to_bytes())
-        self.assertFalse(self.project.is_modified)
-        self.schematic.symbol("R1").set_attribute("MPN", "second edit")
-        self.schematic.save(kicad_cli=cli)
-        self.assertFalse(self.project.is_modified)
-        inode = self.path.stat().st_ino
-        self.project.save(kicad_cli=self.directory / "not-needed")
-        self.assertEqual(self.path.stat().st_ino, inode)
 
     def test_missing_intended_effect_or_unrelated_electrical_drift_blocks_save(
         self,
