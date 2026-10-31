@@ -14,7 +14,7 @@ from dataclasses import replace
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType, TracebackType
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self, get_args
 
 from ._snapshot_types import ProjectSnapshot, SnapshotDocument
 
@@ -26,13 +26,17 @@ if TYPE_CHECKING:
 
 __all__ = [
     "InvalidProjectError",
+    "OnClose",
     "Project",
     "ProjectBackupError",
     "ProjectLifecycleError",
     "ProjectSnapshot",
+    "ProjectUnsavedError",
     "ProjectWriteBlockedError",
     "SnapshotDocument",
 ]
+
+OnClose = Literal["save", "discard", "raise"]
 
 
 class InvalidProjectError(ValueError):
@@ -51,6 +55,19 @@ class ProjectBackupError(OSError):
     """Project history failed; some source files may already have been saved."""
 
 
+class ProjectUnsavedError(ProjectLifecycleError):
+    """``close()`` refused because owned documents have unsaved changes.
+
+    Raised only when the project was opened with ``on_close="raise"``.
+    ``unsaved`` names each changed file. Call each document's ``save()``,
+    ``revert()``, or the project's ``discard()``, then close again.
+    """
+
+    def __init__(self, message: str, unsaved: tuple[Path, ...]) -> None:
+        super().__init__(message)
+        self.unsaved = unsaved
+
+
 class Project:
     """Design context for one KiCad project directory and its root documents."""
 
@@ -62,7 +79,9 @@ class Project:
         pcb_file: Path | None,
         text_variables: Mapping[str, str],
         project_baseline: bytes,
+        on_close: OnClose = "save",
     ) -> None:
+        self._on_close: OnClose = on_close
         self._directory = directory
         self._project_file = project_file
         self._root_files = root_files
@@ -84,21 +103,43 @@ class Project:
         """Whether the artifact exited through close or terminal discard."""
         return self._closed
 
+    @property
+    def on_close(self) -> OnClose:
+        """The close decision chosen at open: ``save``, ``discard``, or ``raise``."""
+        return self._on_close
+
     def discard(self) -> None:
-        """Terminally abandon the Project without writing or resetting baselines."""
+        """End the Project and its documents without a read or a write.
+
+        Unsaved changes are dropped. Discard cannot fail and is idempotent.
+        """
         self._closed = True
 
     def close(self) -> None:
-        """Exit, saving first only when there is something to persist.
+        """End the Project, applying the ``on_close`` choice to unsaved changes.
 
-        A clean Project closes without writing. Pending changes run
-        :meth:`save`. If that save fails, the error propagates and the Project
-        stays open with its pending state. Close is idempotent.
+        A clean Project closes without writing, whatever the choice.
+
+        - ``save``: save every changed owned document (:meth:`save`), then
+          close. If the save fails, the error propagates and the Project stays
+          open with what is still unsaved.
+        - ``discard``: drop all unsaved changes and close.
+        - ``raise``: refuse with :class:`ProjectUnsavedError`, which names the
+          changed files. The Project stays open.
+
+        Close is idempotent.
         """
         if self._closed:
             return
         if self.is_modified:
-            self.save()
+            if self._on_close == "save":
+                self.save()
+            elif self._on_close == "raise":
+                unsaved = tuple(f.path for f in self._sheet_files() if f.is_modified)
+                names = ", ".join(str(path) for path in unsaved)
+                raise ProjectUnsavedError(
+                    f"Project has unsaved changes: {names}", unsaved
+                )
         self.discard()
 
     def __enter__(self) -> Self:
@@ -112,7 +153,7 @@ class Project:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Close on normal exit; discard without writing when an exception exits."""
+        """Apply ``on_close`` on normal exit; discard when an exception exits."""
         if exc_type is None:
             self.close()
         else:
@@ -131,7 +172,9 @@ class Project:
         return tuple(self._schematic._files.values())
 
     @classmethod
-    def open(cls, path: str | PathLike[str] = ".") -> Project:
+    def open(
+        cls, path: str | PathLike[str] = ".", *, on_close: OnClose = "save"
+    ) -> Project:
         """Open the project that a directory or any file in it refers to.
 
         *path* is a directory, or the path of any file in a directory. That
@@ -142,7 +185,13 @@ class Project:
         A missing project file or root sheet file raises
         :class:`InvalidProjectError`. The PCB ``<name>.kicad_pcb`` is optional.
         ``text_variables`` are read now; missing maps are empty, not errors.
+
+        *on_close* chooses what :meth:`close` does with unsaved changes, as
+        KiCad's close-project dialog does: ``save`` (save all, the default),
+        ``discard`` (do not save), or ``raise`` (cancel and name them).
         """
+        if on_close not in get_args(OnClose):
+            raise ValueError(f"on_close must be one of {get_args(OnClose)}")
         location = Path(path).expanduser().absolute()
         if location.is_dir():
             directory = location
@@ -159,7 +208,15 @@ class Project:
         root_files = _root_files(directory, name, payload)
         pcb = directory / f"{name}.kicad_pcb"
         pcb_file = pcb if pcb.is_file() else None
-        return cls(directory, project_file, root_files, pcb_file, variables, baseline)
+        return cls(
+            directory,
+            project_file,
+            root_files,
+            pcb_file,
+            variables,
+            baseline,
+            on_close,
+        )
 
     def save(self) -> None:
         """Save every changed document the project owns, without closing.

@@ -10,14 +10,20 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from kicad_primitives.projects import Project
-from kicad_primitives.schematics import SchematicSaveError
+from kicad_primitives.projects import Project, ProjectUnsavedError
+from kicad_primitives.schematics import (
+    SchematicConflictError,
+    SchematicSaveError,
+    UnsupportedSchematicOperationError,
+)
 from tests.functional.test_schematic_editing import SOURCE
 
 EDITED = SOURCE.replace(b'"10K"', b'"22K"')
 
 
-class ProjectLifecycleTests(unittest.TestCase):
+class ProjectCase(unittest.TestCase):
+    """Disposable one-sheet project; hierarchy() adds a child sheet file."""
+
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -47,6 +53,8 @@ class ProjectLifecycleTests(unittest.TestCase):
             if path.is_file()
         }
 
+
+class ProjectLifecycleTests(ProjectCase):
     def test_clean_open_and_close_write_nothing(self) -> None:
         before = self.snapshot()
         project = Project.open(self.pro)
@@ -204,6 +212,99 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.assertEqual(
             {p: v[:2] for p, v in after.items()}, {p: v[:2] for p, v in before.items()}
         )
+
+
+class OnCloseTests(ProjectCase):
+    """KiCad's close-project dialog: save all, do not save, or cancel."""
+
+    def test_on_close_save_is_the_default(self) -> None:
+        self.assertEqual(Project.open(self.pro).on_close, "save")
+
+    def test_on_close_discard_drops_unsaved_changes(self) -> None:
+        project = Project.open(self.pro, on_close="discard")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
+        project.close()
+        self.assertTrue(project.is_closed)
+        self.assertEqual(self.sch.read_bytes(), SOURCE)
+
+    def test_on_close_raise_names_unsaved_files_and_stays_open(self) -> None:
+        _, child = self.hierarchy()
+        project = Project.open(self.pro, on_close="raise")
+        _root_file, child_file = project.schematic().files
+        child_file.symbol("R2").set_attribute("Value", "33K")
+        with self.assertRaises(ProjectUnsavedError) as caught:
+            project.close()
+        self.assertEqual(caught.exception.unsaved, (child,))
+        self.assertFalse(project.is_closed)
+        child_file.save()
+        project.close()
+        self.assertTrue(project.is_closed)
+        self.assertIn(b'"33K"', child.read_bytes())
+        clean = Project.open(self.pro, on_close="raise")
+        clean.schematic()
+        clean.close()
+        self.assertTrue(clean.is_closed)
+
+    def test_with_block_applies_on_close_and_discards_on_exception(self) -> None:
+        with (
+            self.assertRaises(ProjectUnsavedError),
+            Project.open(self.pro, on_close="raise") as project,
+        ):
+            project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
+        self.assertFalse(project.is_closed)
+        project.discard()
+        with self.assertRaises(KeyError), Project.open(self.pro) as project:
+            project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
+            raise KeyError("client failure")
+        self.assertEqual(self.sch.read_bytes(), SOURCE)
+
+    def test_invalid_on_close_fails_at_open(self) -> None:
+        with self.assertRaises(ValueError):
+            Project.open(self.pro, on_close="maybe")  # type: ignore[arg-type]
+
+
+class SchematicRevertTests(ProjectCase):
+    def test_revert_reloads_every_sheet_file_and_keeps_identity(self) -> None:
+        project, child = self.hierarchy()
+        schematic = project.schematic()
+        root_file, child_file = schematic.files
+        old = child_file.symbol("R2")
+        root_file.symbol("R1").set_attribute("Value", "22K")
+        old.set_attribute("Value", "33K")
+        schematic.revert()
+        self.assertIs(project.schematic(), schematic)
+        self.assertEqual(schematic.files, (root_file, child_file))
+        self.assertFalse(schematic.is_modified)
+        self.assertEqual(child_file.to_bytes(), child.read_bytes())
+        with self.assertRaises(UnsupportedSchematicOperationError):
+            old.set_attribute("Value", "44K")
+        child_file.symbol("R2").set_attribute("Value", "44K")
+        self.assertTrue(schematic.is_modified)
+
+    def test_revert_refuses_any_changed_file_and_changes_nothing(self) -> None:
+        project, child = self.hierarchy()
+        schematic = project.schematic()
+        root_file, _child_file = schematic.files
+        root_file.symbol("R1").set_attribute("Value", "22K")
+        child.write_bytes(child.read_bytes() + b"\n")
+        with self.assertRaises(SchematicConflictError):
+            schematic.revert()
+        self.assertTrue(root_file.is_modified)
+        self.assertEqual(root_file.symbol("R1").value, "22K")
+
+    def test_revert_walks_the_trees_again(self) -> None:
+        project, _child = self.hierarchy()
+        schematic = project.schematic()
+        self.assertEqual(len(schematic.files), 2)
+        # Another tool saved a root without the child sheet; revert after a
+        # save of ours picks up the disk state we wrote, then the new tree.
+        root_file = schematic.files[0]
+        flat = SOURCE
+        self.sch.write_bytes(flat)
+        root_file._mark_saved(flat)  # Pretend our last save wrote this.
+        schematic.revert()
+        self.assertEqual(schematic.files, (root_file,))
+        self.assertEqual(root_file.sheet_symbols, ())
 
 
 if __name__ == "__main__":
