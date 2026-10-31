@@ -12,7 +12,7 @@ from lossless_sexpr import ListNode, TextEdit, apply_edits, parse, quote
 
 from . import _erc_context, _project_files, _project_json, _symbol_parse, tables
 from .projects import InvalidProjectError, Project
-from .schematics import Schematic, SchematicConflictError
+from .schematics import SchematicConflictError, SheetFile
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ def collect(
     project: Project,
     destination: Path,
     name: str,
-    documents: tuple[Schematic, ...],
+    documents: tuple[SheetFile, ...],
     captured: dict[Path, _project_files._Input],
     outputs: dict[Path, bytes],
     targets: dict[Path, Path],

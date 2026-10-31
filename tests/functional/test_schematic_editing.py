@@ -29,7 +29,7 @@ class SchematicEditingTests(unittest.TestCase):
         self.path = self.directory / "board.kicad_sch"
         self.path.write_bytes(SOURCE)
         self.project = Project.open(self.directory)
-        self.schematic = self.project.schematic()
+        self.schematic = self.project.schematic().files[0]
 
     def test_update_preserves_presentation_and_old_handles_observe_edits(self) -> None:
         symbol = self.schematic.symbol("R1")
@@ -42,8 +42,8 @@ class SchematicEditingTests(unittest.TestCase):
         self.assertEqual(symbol.value, "33K")
         self.assertEqual(symbol.attribute("Manufacturer").value, "Yageo")
         self.assertIs(self.schematic.symbol("R1"), symbol)
-        self.assertIs(self.project.schematic(), self.schematic)
-        self.assertIs(self.project.schematics()[0], self.schematic)
+        self.assertIs(self.project.schematic().files[0], self.schematic)
+        self.assertIs(self.project.schematic().files[0], self.schematic)
         self.assertTrue(self.schematic.is_modified)
         self.assertTrue(self.project.is_modified)
         self.assertEqual(self.path.read_bytes(), SOURCE)
@@ -84,7 +84,7 @@ class SchematicEditingTests(unittest.TestCase):
             )
         )
         with self.assertRaises(AmbiguousPlacedSymbolError):
-            Project.open(self.directory).schematic()
+            Project.open(self.directory).schematic().files[0]
 
     def test_mandatory_duplicates_fail_intake_without_first_wins_or_skipping(
         self,
@@ -102,7 +102,7 @@ class SchematicEditingTests(unittest.TestCase):
                 )
                 self.path.write_bytes(source)
                 with self.assertRaises(AmbiguousPlacedSymbolError):
-                    Project.open(self.directory).schematic()
+                    Project.open(self.directory).schematic().files[0]
                 self.assertEqual(self.path.read_bytes(), source)
 
     def test_custom_repeated_attributes_remain_inspectable_without_first_wins(
@@ -114,7 +114,7 @@ class SchematicEditingTests(unittest.TestCase):
             b'(property "Manufacturer" ""',
         )
         self.path.write_bytes(source)
-        symbol = Project.open(self.directory).schematic().symbol("R1")
+        symbol = Project.open(self.directory).schematic().files[0].symbol("R1")
         self.assertEqual(
             [p.value for p in symbol.attributes if p.name == "MPN"], ["first", "second"]
         )
@@ -136,7 +136,7 @@ class SchematicEditingTests(unittest.TestCase):
         ):
             with self.subTest(name=name, source=source):
                 self.path.write_bytes(source)
-                schematic = Project.open(self.directory).schematic()
+                schematic = Project.open(self.directory).schematic().files[0]
                 with self.assertRaises(UnsupportedSchematicOperationError):
                     schematic.symbol("R1").set_attribute(name, value)
                 self.assertEqual(schematic.to_bytes(), source)
@@ -150,7 +150,7 @@ class SchematicEditingTests(unittest.TestCase):
             r'(generator eeschema) (opaque "café \"x\"")'.encode(),
         )
         self.path.write_bytes(source)
-        schematic = Project.open(self.directory).schematic()
+        schematic = Project.open(self.directory).schematic().files[0]
         symbol = schematic.symbol("R1")
         symbol.set_attribute("Value", 'résistor "A"\\B')
         symbol.set_attribute("New", "first")

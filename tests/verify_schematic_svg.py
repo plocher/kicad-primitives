@@ -24,7 +24,7 @@ def main() -> None:
         for path in fixture.glob("*.kicad_*"):
             shutil.copyfile(path, root / path.name)
         project = Project.open(root)
-        schematic, child = project.schematics()
+        schematic, child = project.schematic().files
         originals = {p: p.read_bytes() for p in (schematic.path, child.path)}
         reference = schematic.symbols[0].reference
         schematic.symbol(reference).set_attribute("Value", TOKEN)
@@ -62,7 +62,7 @@ def main() -> None:
             source.replace(b'"Sheetname" "shared1"', '"Sheetname" "Ünï/x"'.encode())
         )
         renamed_project = Project.open(renamed)
-        _root, renamed_child = renamed_project.schematics()
+        _root, renamed_child = renamed_project.schematic().files
         result = renamed_project.export_svgs(
             base / "svg-renamed", kicad_cli=args.kicad_cli
         )

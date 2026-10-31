@@ -52,7 +52,7 @@ class StructureTests(GeometryCase):
 )"""
         )
         self.write("child.kicad_sch", "(kicad_sch (version 20250114))")
-        sch = project.schematic()
+        sch = project.schematic().files[0]
 
         self.assertEqual(len(sch.wires), 1)
         wire = sch.wires[0]
@@ -83,8 +83,8 @@ class StructureTests(GeometryCase):
         self.assertEqual(len(sch.no_connects), 1)
         self.assertEqual((sch.no_connects[0].x, sch.no_connects[0].y), (70.0, 70.0))
 
-        self.assertEqual(len(sch.sheets), 1)
-        sheet = sch.sheets[0]
+        self.assertEqual(len(sch.sheet_symbols), 1)
+        sheet = sch.sheet_symbols[0]
         self.assertEqual(sheet.name, "Child")
         self.assertEqual(sheet.filename, "child.kicad_sch")
         self.assertEqual(
@@ -96,19 +96,23 @@ class StructureTests(GeometryCase):
         self.assertEqual([s.reference for s in sch.symbols], ["R1"])
 
     def test_empty_geometry_is_empty_tuples(self) -> None:
-        sch = self.project(
-            """(kicad_sch (version 20250114)
+        sch = (
+            self.project(
+                """(kicad_sch (version 20250114)
   (symbol (lib_id "Device:R") (at 0 0 0) (uuid u)
     (property "Reference" "R1") (property "Value" "1"))
 )"""
-        ).schematic()
+            )
+            .schematic()
+            .files[0]
+        )
         self.assertEqual(sch.wires, ())
         self.assertEqual(sch.junctions, ())
         self.assertEqual(sch.labels, ())
         self.assertEqual(sch.global_labels, ())
         self.assertEqual(sch.hierarchical_labels, ())
         self.assertEqual(sch.no_connects, ())
-        self.assertEqual(sch.sheets, ())
+        self.assertEqual(sch.sheet_symbols, ())
 
     def test_sheet_file_resolves_relative_to_parent_via_project(self) -> None:
         self.write("main.kicad_pro", json.dumps({"meta": {"version": 1}}))
@@ -127,9 +131,9 @@ class StructureTests(GeometryCase):
 )""",
         )
         project = Project.open(self.root)
-        root = project.schematic()
-        self.assertEqual(root.sheets[0].filename, "blocks/child.kicad_sch")
-        child = project.schematic(self.root / "blocks/child.kicad_sch")
+        root = project.schematic().files[0]
+        self.assertEqual(root.sheet_symbols[0].filename, "blocks/child.kicad_sch")
+        child = project.schematic().file(self.root / "blocks/child.kicad_sch")
         self.assertEqual(len(child.wires), 1)
         self.assertEqual(child.wires[0].points, ((1.0, 1.0), (2.0, 2.0)))
 

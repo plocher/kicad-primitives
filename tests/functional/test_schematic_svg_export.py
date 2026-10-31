@@ -15,7 +15,7 @@ from unittest.mock import patch
 from kicad_primitives.netlist import KicadCliNotFoundError
 from kicad_primitives.projects import Project, ProjectLifecycleError
 from kicad_primitives.schematics import (
-    SchematicConflictError,
+    InvalidSchematicError,
     SchematicSvgError,
     SchematicSvgExport,
     UnsupportedSchematicOperationError,
@@ -85,7 +85,7 @@ class SchematicSvgExportTests(unittest.TestCase):
             return self.project.export_svgs(self.out, kicad_cli=self.cli, **kwargs)  # type: ignore[arg-type]
 
     def test_exports_pending_hierarchy_with_sheet_mapping_without_saving(self) -> None:
-        root, _child = self.project.schematics()
+        root, _child = self.project.schematic().files
         originals = (self.path.read_bytes(), self.child.read_bytes())
         root.symbol("R1").set_attribute("Value", "22K")
         result = self.export()
@@ -223,7 +223,7 @@ class SchematicSvgExportTests(unittest.TestCase):
                 self.base / "other", kicad_cli=self.cli
             )
         self.child.unlink()
-        with self.assertRaises(SchematicConflictError):
+        with self.assertRaises(InvalidSchematicError):
             self.project.export_svgs(self.base / "gone", kicad_cli=self.cli)
         self.project.discard()
         with self.assertRaises(ProjectLifecycleError):

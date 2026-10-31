@@ -76,7 +76,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         )
         self.parent = SymbolLibrary.open(self.parent_path)
         self.project = Project.open(self.directory)
-        self.schematic = self.project.schematic()
+        self.schematic = self.project.schematic().files[0]
 
     def reopen_parent(self) -> SymbolLibrary:
         """Exit the registered parent and read the file on disk again."""
@@ -146,7 +146,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
     def test_crlf_quoted_multiline_and_unknown_payload_are_not_reindented(self) -> None:
         source = SOURCE.replace("\n", "\r\n")
         self.path.write_bytes(source.encode())
-        schematic = Project.open(self.directory).schematic()
+        schematic = Project.open(self.directory).schematic().files[0]
         parent = PARENT.replace(
             "new graphics", 'new \\"quoted\\" graphics\nliteral second line'
         ).replace("\n", "\r\n")
@@ -203,7 +203,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         ):
             with self.subTest(source=source):
                 self.path.write_bytes(source.encode())
-                schematic = Project.open(self.directory).schematic()
+                schematic = Project.open(self.directory).schematic().files[0]
                 with self.assertRaises(error):
                     schematic.embedded_symbol("Test:Part").restore_from(
                         self.parent, "Parent"
@@ -252,7 +252,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
         )
         child_path.write_bytes(child_source.encode())
         project = Project.open(self.directory)
-        root, child = project.schematics()
+        root, child = project.schematic().files
         root.symbol("R1").set_attribute("MPN", "root-only")
         child.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
         root.save(kicad_cli=self.verifier())
@@ -285,7 +285,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
                 self.reopen_parent(), "Parent"
             )
         self.path.write_bytes(SOURCE.replace("20260306", "20250114").encode())
-        old = Project.open(self.directory).schematic()
+        old = Project.open(self.directory).schematic().files[0]
         with self.assertRaises(UnsupportedSchematicOperationError):
             old.embedded_symbol("Test:Part").restore_from(self.parent, "Parent")
         self.assertEqual(self.schematic.to_bytes(), SOURCE.encode())
@@ -299,7 +299,7 @@ class EmbeddedRestoreTests(unittest.TestCase):
                 source = SOURCE.replace(old, ambiguous, 1).encode()
                 self.path.write_bytes(source)
                 project = Project.open(self.directory)
-                schematic = project.schematic()
+                schematic = project.schematic().files[0]
                 with self.assertRaises(UnsupportedSchematicOperationError):
                     schematic.embedded_symbol("Test:Part").restore_from(
                         self.parent, "Parent"
@@ -353,7 +353,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         source = SOURCE.replace("Test:Part", "Part").encode()
         self.path.write_bytes(source)
         project = Project.open(self.directory)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         with self.assertRaises(UnsupportedSchematicOperationError):
             schematic.embedded_symbol("Part").restore_from(self.parent, "Parent")
         self.assertEqual(schematic.to_bytes(), source)
@@ -419,7 +419,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
             with self.subTest(mode=mode):
                 self.path.write_bytes(SOURCE.encode())
                 project = Project.open(self.directory)
-                schematic = project.schematic()
+                schematic = project.schematic().files[0]
                 schematic.embedded_symbol("Test:Part").restore_from(
                     self.parent, "Parent"
                 )
@@ -438,7 +438,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
         for path in (fixtures / "embedded-restore").glob("*.kicad_*"):
             shutil.copyfile(path, self.directory / path.name)
         project = Project.open(self.directory / "cpNode-IOX.kicad_pro")
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         parent = SymbolLibrary.open(self.directory / "parent.kicad_sym")
         schematic.embedded_symbol("SPCoast:R").restore_from(parent, "R")
         self.assertEqual(
@@ -462,7 +462,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text(output)
                     '(unit 1) (uuid "first")', f'{addition} (uuid "first")', 1
                 )
                 self.path.write_bytes(source.encode())
-                schematic = Project.open(self.directory).schematic()
+                schematic = Project.open(self.directory).schematic().files[0]
                 with self.assertRaises(UnsupportedSchematicOperationError):
                     schematic.embedded_symbol("Test:Part").restore_from(
                         self.parent, "Parent"

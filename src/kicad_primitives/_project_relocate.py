@@ -31,10 +31,10 @@ from .projects import (
     _read_text_variables,
 )
 from .schematics import (
-    Schematic,
     SchematicConflictError,
     SchematicVerificationError,
-    _schematic_from_document,
+    SheetFile,
+    _sheet_file_from_document,
 )
 
 
@@ -148,7 +148,7 @@ def _write_stage(directory: Path, files: dict[Path, bytes]) -> None:
 
 def _prove(
     project: Project,
-    documents: tuple[Schematic, ...],
+    documents: tuple[SheetFile, ...],
     frozen: dict[Path, bytes],
     mapped: dict[Path, bytes],
     destination: Path,
@@ -381,7 +381,7 @@ def save_as(
     )
     _current(project, generation, inputs, directories)
     projections = {
-        d.path: _schematic_from_document(
+        d.path: _sheet_file_from_document(
             targets[d.path], parse(outputs[targets[d.path]].decode("utf-8"))
         )
         for d in documents
@@ -445,7 +445,7 @@ def save_as(
             object.__setattr__(document, "path", targets[source])
             object.__setattr__(document, "_document", updated._document)
             object.__setattr__(document, "_baseline", outputs[targets[source]])
-            object.__setattr__(document, "sheets", updated.sheets)
+            object.__setattr__(document, "sheet_symbols", updated.sheet_symbols)
             for old, new in zip(document.symbols, updated.symbols, strict=True):
                 for field in ("path", "attributes", "value", "footprint"):
                     object.__setattr__(old, field, getattr(new, field))
@@ -459,7 +459,11 @@ def save_as(
         )
         project._pcb_file = None if old_pcb is None else targets[old_pcb]
         project._pcb_baseline = None if old_pcb is None else outputs[targets[old_pcb]]
-        project._schematics = {document.path: document for document in documents}
+        if project._schematic is not None:
+            project._schematic._rebind(
+                () if project._schematic_file is None else (project._schematic_file,),
+                documents,
+            )
         project._history_pending = False
     except Exception as exc:
         exc.add_note(

@@ -11,10 +11,10 @@ from lossless_sexpr import AtomNode, Document, ListNode, parse, quote
 from .schematics import (
     AmbiguousEmbeddedSymbolError,
     InvalidSchematicError,
-    Schematic,
     SchematicVerificationError,
+    SheetFile,
     UnsupportedSchematicOperationError,
-    _schematic_from_document,
+    _sheet_file_from_document,
 )
 from .symbols import SymbolLibrary
 
@@ -84,7 +84,7 @@ def _root(document: Document) -> ListNode:
     return roots[0]
 
 
-def cache_nodes(schematic: Schematic) -> dict[str, ListNode]:
+def cache_nodes(schematic: SheetFile) -> dict[str, ListNode]:
     assert schematic._document is not None
     return _cache_nodes(schematic._document)
 
@@ -265,7 +265,7 @@ def _materialize(
 
 
 def restore_definition(
-    schematic: Schematic, lib_id: str, parent_library: SymbolLibrary, parent_name: str
+    schematic: SheetFile, lib_id: str, parent_library: SymbolLibrary, parent_name: str
 ) -> None:
     schematic._check_open()
     if not isinstance(parent_library, SymbolLibrary):
@@ -299,7 +299,7 @@ def restore_definition(
     ):
         _check_placements(schematic, intent)
     edited = source[: target.span.start] + materialized + source[target.span.end :]
-    updated = _schematic_from_document(schematic.path, parse(edited))
+    updated = _sheet_file_from_document(schematic.path, parse(edited))
     restored = cache_nodes(updated)[lib_id]
     assert updated._document is not None
     if (
@@ -313,7 +313,7 @@ def restore_definition(
     schematic._restore_intents[lib_id] = intent
 
 
-def _pending_restore_intents(schematic: Schematic) -> tuple[_RestoreIntent, ...]:
+def _pending_restore_intents(schematic: SheetFile) -> tuple[_RestoreIntent, ...]:
     """Project latest explicit choices against the actual current saved baseline."""
     if not schematic._restore_intents:
         return ()
@@ -337,7 +337,7 @@ def _export_pins(pins: tuple[_PinFact, ...]) -> tuple[tuple[str, str, str], ...]
     return tuple(sorted((pin.number, pin.name, pin.electrical_type) for pin in pins))
 
 
-def _check_placements(schematic: Schematic, intent: _RestoreIntent) -> tuple[str, ...]:
+def _check_placements(schematic: SheetFile, intent: _RestoreIntent) -> tuple[str, ...]:
     qualified = intent.lib_id.rsplit(":", 1)
     if len(qualified) != 2 or not all(qualified):
         raise UnsupportedSchematicOperationError(
@@ -386,8 +386,8 @@ def _check_placements(schematic: Schematic, intent: _RestoreIntent) -> tuple[str
 
 def predict_restored_signature(
     before: _ElectricalSignature,
-    documents: tuple[Schematic, ...],
-    changed: tuple[Schematic, ...],
+    documents: tuple[SheetFile, ...],
+    changed: tuple[SheetFile, ...],
 ) -> _ElectricalSignature:
     """Predict actual export effects from baseline evidence and captured facts only."""
     node_updates: dict[tuple[str, str], tuple[str, str]] = {}

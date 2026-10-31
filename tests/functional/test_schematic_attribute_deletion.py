@@ -69,18 +69,18 @@ class AttributeDeletionTests(unittest.TestCase):
     def open(self, source: bytes = SOURCE) -> tuple[Project, PlacedSymbol]:
         self.path.write_bytes(source)
         project = Project.open(self.directory)
-        return project, project.schematic().symbol("R1")
+        return project, project.schematic().files[0].symbol("R1")
 
     def test_delete_removes_node_and_separator_only_without_writing(self) -> None:
         project, symbol = self.open()
         symbol.delete_attribute("Manufacturer")
         self.assertEqual(
-            project.schematic().to_bytes(), SOURCE.replace(MANUFACTURER, b"")
+            project.schematic().files[0].to_bytes(), SOURCE.replace(MANUFACTURER, b"")
         )
         self.assertNotIn("Manufacturer", [a.name for a in symbol.attributes])
         with self.assertRaises(KeyError):
             symbol.attribute("Manufacturer")
-        self.assertIs(project.schematic().symbol("R1"), symbol)
+        self.assertIs(project.schematic().files[0].symbol("R1"), symbol)
         self.assertTrue(project.is_modified)
         self.assertEqual(self.path.read_bytes(), SOURCE)
 
@@ -88,7 +88,7 @@ class AttributeDeletionTests(unittest.TestCase):
         project, symbol = self.open()
         symbol.set_attribute("MPN", "X")
         symbol.delete_attribute("MPN")
-        self.assertEqual(project.schematic().to_bytes(), SOURCE)
+        self.assertEqual(project.schematic().files[0].to_bytes(), SOURCE)
         self.assertFalse(project.is_modified)
 
     def test_compact_and_crlf_layouts_drop_only_their_separator(self) -> None:
@@ -96,13 +96,13 @@ class AttributeDeletionTests(unittest.TestCase):
         project, symbol = self.open(compact)
         symbol.delete_attribute("MPN")
         self.assertEqual(
-            project.schematic().to_bytes(), SOURCE.replace(MANUFACTURER, b"")
+            project.schematic().files[0].to_bytes(), SOURCE.replace(MANUFACTURER, b"")
         )
         crlf = SOURCE.replace(b"\n", b"\r\n")
         project, symbol = self.open(crlf)
         symbol.delete_attribute("Manufacturer")
         self.assertEqual(
-            project.schematic().to_bytes(),
+            project.schematic().files[0].to_bytes(),
             crlf.replace(MANUFACTURER.replace(b"\n", b"\r\n"), b""),
         )
 
@@ -138,7 +138,7 @@ class AttributeDeletionTests(unittest.TestCase):
                 project, symbol = self.open(source)
                 with self.assertRaises(error):
                     symbol.delete_attribute(name)
-                self.assertEqual(project.schematic().to_bytes(), source)
+                self.assertEqual(project.schematic().files[0].to_bytes(), source)
                 self.assertEqual(self.path.read_bytes(), source)
 
     def test_invalid_names_raise_ordinary_errors(self) -> None:
@@ -172,7 +172,7 @@ class AttributeDeletionTests(unittest.TestCase):
         cli = self.directory / "fake-cli"
         cli.write_text(FAKE_CLI, encoding="utf-8")
         cli.chmod(0o755)
-        pending = project.schematic().to_bytes()
+        pending = project.schematic().files[0].to_bytes()
         project.save(kicad_cli=cli)
         self.assertEqual(self.path.read_bytes(), pending)
         self.assertFalse(project.is_modified)

@@ -59,13 +59,13 @@ def main() -> None:
         assert prl.is_file()
         originals[prl] = (prl.read_bytes(), prl.stat().st_ino)
         probe = Project.open(pro)
-        probe.schematic().symbol("R3")
+        probe.schematic().files[0].symbol("R3")
         probe.close(kicad_cli=root / "must-not-run")
         assert probe.is_closed
         assert {p: (p.read_bytes(), p.stat().st_ino) for p in originals} == originals
         assert not (root / "cpNode-IOX-backups").exists()
         project = Project.open(pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         placed = schematic.symbol("R3")
         placed.set_attribute("Value", "22K")
         pending = schematic.to_bytes()
@@ -97,7 +97,7 @@ def main() -> None:
             assert archive.read(pcb.name) == _EMPTY_BOARD
             assert archive.read(prl.name) == originals[prl][0]
         assert sch.read_bytes() == pending
-        assert project.schematic() is schematic
+        assert project.schematic().files[0] is schematic
         assert schematic.symbol("R3") is placed
         for path in (pro, pcb):
             assert (path.read_bytes(), path.stat().st_ino) == originals[path]
@@ -109,7 +109,7 @@ def main() -> None:
         else:
             raise AssertionError("An exited Project retained an editable placement")
         second = Project.open(pro)
-        second.schematic().symbol("R3").set_attribute("Value", "33K")
+        second.schematic().files[0].symbol("R3").set_attribute("Value", "33K")
         saved = {p: (p.read_bytes(), p.stat().st_ino) for p in originals}
         second.discard()
         second.close()

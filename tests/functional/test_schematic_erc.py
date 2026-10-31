@@ -140,7 +140,7 @@ class ProjectErcTests(unittest.TestCase):
     def test_report_preserves_grouping_details_and_uses_pending_locked_readonly_sources(
         self,
     ) -> None:
-        root, child = self.project.schematics()
+        root, child = self.project.schematic().files
         original = {p: p.read_bytes() for p in (self.path, self.child_path, self.pro)}
         root.symbol("R1").set_attribute("Value", "root pending")
         child.symbol("R2").set_attribute("Value", "child pending")
@@ -323,14 +323,14 @@ class ProjectErcTests(unittest.TestCase):
             self.project.erc(kicad_cli=self.verifier(payload))
 
     def test_document_scope_is_explicitly_unsupported_before_cli(self) -> None:
-        for document in self.project.schematics():
+        for document in self.project.schematic().files:
             with self.assertRaises(UnsupportedSchematicOperationError):
                 document.erc(kicad_cli=self.directory / "must-not-run")
 
     def test_severity_all_requires_native_coverage_without_losing_future_tokens(
         self,
     ) -> None:
-        document = self.project.schematic()
+        document = self.project.schematic().files[0]
         original = self.path.read_bytes()
         document.symbol("R1").set_attribute("Value", "pending")
         pending = document.to_bytes()

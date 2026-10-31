@@ -77,8 +77,8 @@ def main() -> None:
             ("C1", "2"),
         }
         project = Project.open(pro)
-        document = project.schematic()
-        child = project.schematic(child_path)
+        document = project.schematic().files[0]
+        child = project.schematic().file(child_path)
         placed = document.symbol("C0")
         cache_id = child.symbol("C1").lib_id
         embedded = child.embedded_symbol(cache_id)
@@ -93,8 +93,10 @@ def main() -> None:
         expected_pcb = originals[pcb][0].replace(
             b'(sheetfile "issue23403.kicad_sch")', b'(sheetfile "Renamed.kicad_sch")'
         )
-        assert project.schematic() is document and document.symbol("C0") is placed
-        assert project.schematic(destination / child_path.name) is child
+        assert (
+            project.schematic().files[0] is document and document.symbol("C0") is placed
+        )
+        assert project.schematic().file(destination / child_path.name) is child
         assert child.embedded_symbol(cache_id) is embedded
         assert placed.path == destination / "Renamed.kicad_sch"
         assert (

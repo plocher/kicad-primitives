@@ -14,9 +14,9 @@ from . import _symbol_persist
 from ._schematic_restore import _pending_restore_intents, predict_restored_signature
 from .netlist import export_netlist
 from .schematics import (
-    Schematic,
     SchematicConflictError,
     SchematicVerificationError,
+    SheetFile,
     UnsupportedSchematicOperationError,
 )
 
@@ -37,41 +37,27 @@ def _internal_path(project: Project, path: Path) -> Path:
     return normalized
 
 
-def _hierarchy(project: Project) -> tuple[Schematic, ...]:
-    """Walk owned source strictly: missing/external sheets must not be omitted."""
+def _hierarchy(project: Project) -> tuple[SheetFile, ...]:
+    """Return the loaded hierarchy, strict about missing and external sheets."""
     if project.schematic_file is None:
         return ()
-    result: list[Schematic] = []
-    visited: set[Path] = set()
-    active: set[Path] = set()
-
-    def visit(path: Path) -> None:
-        path = _internal_path(project, path)
-        if path in active:
-            raise UnsupportedSchematicOperationError("Cyclic schematic hierarchy")
-        if path in visited:
-            return
-        if not path.is_file():
-            raise SchematicConflictError(f"Missing hierarchy schematic: {path}")
-        schematic = project._load_schematic(path)
-        result.append(schematic)
-        visited.add(path)
-        active.add(path)
-        for sheet in schematic.sheets:
-            filename = Path(sheet.filename)
-            if filename.is_absolute() or "${" in sheet.filename:
+    files = project.schematic().files
+    for sheet_file in files:
+        _internal_path(project, sheet_file.path)
+        if not sheet_file.path.is_file():
+            raise SchematicConflictError(
+                f"Missing hierarchy schematic: {sheet_file.path}"
+            )
+        for sheet in sheet_file.sheet_symbols:
+            if Path(sheet.filename).is_absolute():
                 raise UnsupportedSchematicOperationError(
                     f"Unsupported Sheetfile for save verification: {sheet.filename}"
                 )
-            visit(path.parent / filename)
-        active.remove(path)
-
-    visit(project.schematic_file)
-    return tuple(result)
+    return files
 
 
 def _preflight(
-    project: Project, documents: tuple[Schematic, ...], changed: tuple[Schematic, ...]
+    project: Project, documents: tuple[SheetFile, ...], changed: tuple[SheetFile, ...]
 ) -> None:
     project.ensure_writes_allowed()
     _internal_path(project, project.project_file)
@@ -89,16 +75,16 @@ def _preflight(
             document._baseline,
             conflict_error=SchematicConflictError,
             unsupported_error=UnsupportedSchematicOperationError,
-            label="Schematic",
+            label="Sheet file",
         )
         if document in changed:
             if document.version != 20260306:
                 raise UnsupportedSchematicOperationError(
-                    f"Schematic format {document.version} is read-only"
+                    f"Sheet file format {document.version} is read-only"
                 )
             if not stat.S_IMODE(info.st_mode) & 0o222:
                 raise PermissionError(
-                    f"Schematic has no write permission bits: {document.path}"
+                    f"Sheet file has no write permission bits: {document.path}"
                 )
             parent = document.path.parent
             mode = stat.S_IMODE(parent.stat().st_mode)
@@ -108,7 +94,7 @@ def _preflight(
                 or not os.access(parent, os.W_OK | os.X_OK)
             ):
                 raise PermissionError(
-                    f"Schematic destination directory is not writable: {parent}"
+                    f"Sheet file destination directory is not writable: {parent}"
                 )
 
 
@@ -232,8 +218,8 @@ def _electrical_signature(
 
 def _verify(
     project: Project,
-    documents: tuple[Schematic, ...],
-    changed: tuple[Schematic, ...],
+    documents: tuple[SheetFile, ...],
+    changed: tuple[SheetFile, ...],
     kicad_cli: str | os.PathLike[str] | None,
 ) -> None:
     root = project.schematic_file
@@ -274,7 +260,7 @@ def _verify(
 
 def save_schematics(
     project: Project,
-    selected: tuple[Schematic, ...],
+    selected: tuple[SheetFile, ...],
     *,
     kicad_cli: str | os.PathLike[str] | None,
 ) -> None:

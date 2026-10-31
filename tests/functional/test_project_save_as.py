@@ -102,7 +102,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         placed = schematic.symbol("R1")
         placed.set_attribute("Value", "22K")
         original = {p: (p.read_bytes(), p.stat().st_ino) for p in (self.pro, self.sch)}
@@ -120,7 +120,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.assertEqual(project.directory, self.destination)
         self.assertEqual(project.project_file, self.destination / "New.kicad_pro")
         self.assertEqual(project.schematic_file, self.destination / "New.kicad_sch")
-        self.assertIs(project.schematic(), schematic)
+        self.assertIs(project.schematic().files[0], schematic)
         self.assertIs(schematic.symbol("R1"), placed)
         self.assertEqual(schematic.path, project.schematic_file)
         self.assertEqual(placed.path, project.schematic_file)
@@ -257,7 +257,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        project.schematic().symbol("R1").set_attribute("Value", "22K")
+        project.schematic().files[0].symbol("R1").set_attribute("Value", "22K")
         for path in (self.pro, self.sch):
             path.chmod(0o444)
         self.source.chmod(0o555)
@@ -276,13 +276,13 @@ class ProjectSaveAsTests(unittest.TestCase):
     ) -> None:
         child_path = self.hierarchy()
         project = Project.open(self.pro)
-        root = project.schematic()
-        child = project.schematic(child_path)
+        root = project.schematic().files[0]
+        child = project.schematic().file(child_path)
         placed = child.symbol("R2")
         root_raw, child_raw = root.to_bytes(), child.to_bytes()
         project.save_as(self.destination, "New", kicad_cli=self.verifier())
         self.assertIs(
-            project.schematic(self.destination / "sub/child.kicad_sch"), child
+            project.schematic().file(self.destination / "sub/child.kicad_sch"), child
         )
         self.assertIs(child.symbol("R2"), placed)
         self.assertEqual(placed.path, self.destination / "sub/child.kicad_sch")
@@ -412,7 +412,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         placed = schematic.symbol("R1")
         placed.set_attribute("Value", "22K")
         real_link = os.link
@@ -429,7 +429,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         ):
             project.save_as(self.destination, "New", kicad_cli=self.verifier())
         self.assertEqual(project.directory, self.source)
-        self.assertIs(project.schematic(), schematic)
+        self.assertIs(project.schematic().files[0], schematic)
         self.assertEqual(placed.path, self.sch)
         self.assertTrue(project.is_modified)
         self.assertEqual(self.pro.read_bytes(), _JSON)
@@ -444,7 +444,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self,
     ) -> None:
         project = Project.open(self.pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         schematic.symbol("R1").set_attribute("Value", "22K")
         real_link = os.link
         changed = False
@@ -469,7 +469,7 @@ class ProjectSaveAsTests(unittest.TestCase):
             project.save_as(self.destination, "New", kicad_cli=self.verifier())
         self.assertTrue(changed)
         self.assertEqual(project.directory, self.source)
-        self.assertIs(project.schematic(), schematic)
+        self.assertIs(project.schematic().files[0], schematic)
         self.assertTrue(project.is_modified)
         self.assertEqual(self.sch.read_bytes(), _SOURCE)
         self.assertTrue((self.destination / ".foreign-moved.kicad_sch").is_file())
@@ -489,7 +489,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         }
         pro = source / "issue23403.kicad_pro"
         project = Project.open(pro)
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         placed = schematic.symbol("C0")
         destination = self.root / "native-clone"
         output = destination / "Renamed.kicad_sch"
@@ -517,7 +517,7 @@ class ProjectSaveAsTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(project.directory, source)
         self.assertEqual(project.project_file, pro)
-        self.assertIs(project.schematic(), schematic)
+        self.assertIs(project.schematic().files[0], schematic)
         self.assertEqual(placed.path, source / "issue23403.kicad_sch")
         self.assertEqual(placed.value, "LATE-PENDING-EDIT")
         self.assertTrue(project.is_modified)

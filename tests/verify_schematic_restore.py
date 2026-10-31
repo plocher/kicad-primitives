@@ -21,7 +21,7 @@ def main() -> None:
         for path in (fixtures / "embedded-restore").glob("*.kicad_*"):
             shutil.copyfile(path, root / path.name)
         project = Project.open(root / "cpNode-IOX.kicad_pro")
-        schematic = project.schematic()
+        schematic = project.schematic().files[0]
         parent = SymbolLibrary.open(root / "parent.kicad_sym")
         original = schematic.to_bytes()
         before = obtain_netlist(schematic.path, kicad_cli=args.kicad_cli)

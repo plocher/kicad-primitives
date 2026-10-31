@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from ._schematic_persist import _hierarchy
 from ._snapshot_types import ProjectSnapshot, SnapshotDocument
-from .schematics import Schematic, UnsupportedSchematicOperationError
+from .schematics import SheetFile, UnsupportedSchematicOperationError
 
 if TYPE_CHECKING:
     from .projects import Project
@@ -29,7 +29,7 @@ class PendingHierarchy:
     """Captured pending hierarchy content and its provenance."""
 
     root: Path
-    documents: tuple[Schematic, ...]
+    documents: tuple[SheetFile, ...]
     content: Mapping[Path, bytes]
     snapshot: ProjectSnapshot
 
