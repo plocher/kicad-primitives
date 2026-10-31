@@ -92,7 +92,6 @@ class Project:
         self._project_baseline = project_baseline
         self._pcb_baseline = None if pcb_file is None else pcb_file.read_bytes()
         self._closed = False
-        self._generation = 0
 
     def _check_open(self) -> None:
         if self._closed:
@@ -356,23 +355,26 @@ class Project:
 
         return export_schematic_svgs(self, output_dir, kicad_cli=kicad_cli)
 
-    def save_as(
-        self,
-        new_path: str | PathLike[str],
-        new_project_name: str,
-        *,
-        kicad_cli: str | PathLike[str] | None = None,
-    ) -> None:
-        """Persist a new directory/name and rebind only after complete verified success.
+    def save_as(self, new_path: str | PathLike[str], new_project_name: str) -> None:
+        """Write the project to a new directory and name, then rebind to it.
 
-        Preserve original source and stable owned handles. Refuse existing or
-        unsafe destinations and unprovable metadata/dependency layouts. Failed
-        publication can leave an incomplete destination, never a source rebind.
+        Write every owned document with its current unsaved content. Copy
+        every other project-local file from disk with the same relative
+        layout, rewriting local references and this project's identity
+        (including its instance ``(project ...)`` entries). External
+        references stay external and are not copied. After success the
+        Project and its documents point at the copy; the original directory
+        stays untouched.
+
+        Refuse an existing or overlapping destination and the documented
+        unsupported layouts. The save-as runs no KiCad, writes no backup, and
+        checks no lock (ADR 0011 D8). A failure can leave an incomplete
+        destination, never a rebind.
         """
         self._check_open()
         from ._project_relocate import save_as
 
-        save_as(self, new_path, new_project_name, kicad_cli=kicad_cli)
+        save_as(self, new_path, new_project_name)
 
     @property
     def directory(self) -> Path:
