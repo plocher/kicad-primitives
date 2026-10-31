@@ -2,7 +2,7 @@
 
 Date: 2026-10-30
 
-Status: Proposed. Decisions grilled with the owner on [#75](https://github.com/plocher/kicad-primitives/issues/75) on 2026-10-30. Waiting for owner approval.
+Status: Accepted by the owner on 2026-10-31. Decisions grilled with the owner on [#75](https://github.com/plocher/kicad-primitives/issues/75) on 2026-10-30.
 
 Related: [ADR 0008](0008-artifact-objects-and-explicit-persistence.md), [ADR 0009](0009-primitives-not-an-executive.md), [#78](https://github.com/plocher/kicad-primitives/issues/78) (KiCad and Project scopes), [#79](https://github.com/plocher/kicad-primitives/issues/79) (sheet model and per-instance data).
 
