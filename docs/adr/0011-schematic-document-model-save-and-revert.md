@@ -160,6 +160,22 @@ Choose B. It maps onto KiCad's close-project dialog.
 - Library ownership follows the library's type, not how a client reached it. Project-table libraries belong to that project. Global-table and table-less libraries belong to the `KiCad` scope. This part is implemented with #78.
 - Deviation: KiCad's close-project also settles global libraries, because KiCad has one project open at a time. The package can hold several projects. A client that wants KiCad's exact behavior calls `project.close()`, then `kicad.close()`.
 
+Project scope. `project.save()` writes every open, project-owned artifact that has unsaved changes, and nothing else.
+
+| Artifact | Project-owned when | Saved by `project.save()` |
+| --- | --- | --- |
+| Schematic (sheet files) | Always | Now |
+| `.kicad_pro` | Always | When a settings editor exists. None exists today, so it is never changed. |
+| PCB | Always | When a board editor exists |
+| Project library tables (`sym-lib-table`, `fp-lib-table` in the project directory) | Always | When opened through the project (#78) |
+| Libraries | Listed in the project's table | #78 |
+| Drawing sheets (`.kicad_wks`) | Referred to by the project's settings | When a worksheet artifact exists |
+
+- Global-table libraries, table-less libraries, and global drawing sheets belong to the `KiCad` scope. `project.save()` never writes them.
+- An artifact that was never opened is never written.
+- Files that no editor changes (`.kicad_prl`, `.kicad_dru`, jobsets) are never written.
+- A library listed in both the project table and the global table is to be decided in #78. The proposal is that the project owns it, because the project table wins in KiCad's nickname resolution.
+
 ### D6. Revert
 
 - Documents and items have `revert()`. It drops unsaved edits and reloads from disk.
@@ -188,8 +204,11 @@ Choose B. It maps onto KiCad's close-project dialog.
 
 ### D8. project.save_as()
 
-- Only `project.save_as(destination, name)` exists. It covers "copy the whole schematic". There is no `Schematic.save_as`.
-- It writes every owned document's current unsaved content to the new location. It copies the project's other files from disk.
+- Project documents (schematic, PCB, project file) have no `save_as` of their own. They exist only inside a project, so `project.save_as(destination, name)` is how they move.
+- Libraries keep their own `save_as`. They are independent artifacts that can exist without a project (`SymbolLibrary.save_as()`, `Footprint.save_as()`).
+- `project.save_as()` writes every open owned document with its current unsaved content.
+- It copies every other project-local file from disk with the same relative layout. This is the ordinary local context in `docs/projects.md`: UI state, rules, drawing sheets, simulator workbooks, local and nested library tables, and local libraries.
+- It rewrites local URIs where needed. External references (global libraries, paths outside the project directory) stay external and are not copied.
 - It rewrites project identity, including this project's instance `(project ...)` entries. Other projects' entries stay unchanged.
 - After success, it rebinds the `Project` and its documents to the copy. The original directory stays untouched.
 - It keeps the file-integrity rules: it refuses an existing destination, and it keeps the documented limits on relocatable layouts.
