@@ -91,9 +91,16 @@ class NetlistComponent:
         return self.part or self.lib
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Netlist:
     """Parsed KiCad kicadsexpr netlist exchange dataset.
+
+    Equality compares electrical content only (ADR 0011 D9): component
+    identity (reference, library, part) and every pin-to-net connection (net
+    name, reference, pin). Export order, net codes, values, fields, sheet
+    data, paths, and provenance do not count. So a client checks an edit with
+    ``before == after``: an attribute edit compares equal, an electrical edit
+    does not. :func:`connectivity_sets` shows the differences.
 
     ``provenance`` is set only by :meth:`kicad_primitives.projects.Project.netlist`.
     It records the project settings and exact hierarchy content that were
@@ -140,6 +147,30 @@ class Netlist:
         if not roots or roots[0].head != "export":
             raise NetlistParseError(f"Root node is not export: {location}")
         return _parse_export(roots[0], location)
+
+    def _electrical_key(
+        self,
+    ) -> tuple[frozenset[tuple[str, str, str]], frozenset[tuple[str, str, str]]]:
+        components = frozenset(
+            (component.reference, component.lib, component.part)
+            for component in self.components.values()
+        )
+        connections = frozenset(
+            (net.name, node.reference, node.pin)
+            for net in self.nets
+            for node in net.nodes
+        )
+        return components, connections
+
+    def __eq__(self, other: object) -> bool:
+        """Compare component identity and pin-to-net connections only."""
+        if not isinstance(other, Netlist):
+            return NotImplemented
+        return self._electrical_key() == other._electrical_key()
+
+    def __hash__(self) -> int:
+        """Hash the same electrical content that equality compares."""
+        return hash(self._electrical_key())
 
     def component(self, reference: str) -> NetlistComponent:
         """Return one component by reference designator."""

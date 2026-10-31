@@ -149,7 +149,7 @@ class AttributeDeletionTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 symbol.delete_attribute(name)
 
-    def test_jbom_alias_normalization_saves_with_connectivity_proof(self) -> None:
+    def test_jbom_alias_normalization_saves_and_keeps_the_netlist_equal(self) -> None:
         source = SOURCE.replace(
             b'(property "Manufacturer" ""',
             b'(property "V" "5V" (at 52 58 0))\n'
@@ -159,6 +159,10 @@ class AttributeDeletionTests(unittest.TestCase):
             b'    (property "Manufacturer" ""',
         )
         project, symbol = self.open(source)
+        cli = self.directory / "fake-cli"
+        cli.write_text(FAKE_CLI, encoding="utf-8")
+        cli.chmod(0o755)
+        before = project.netlist(kicad_cli=cli)
         conflicts = normalize_aliases(symbol)
         self.assertEqual(conflicts, ["A"])
         self.assertEqual(symbol.attribute("Voltage").value, "5V")
@@ -168,6 +172,7 @@ class AttributeDeletionTests(unittest.TestCase):
             with self.assertRaises(KeyError):
                 symbol.attribute(alias)
         self.assertEqual(self.path.read_bytes(), source)
+        self.assertEqual(project.netlist(kicad_cli=cli), before)
 
         pending = project.schematic().files[0].to_bytes()
         project.save()
@@ -183,9 +188,7 @@ class AttributeDeletionTests(unittest.TestCase):
         before = project.netlist(kicad_cli=cli)
         symbol.delete_attribute("Net")
         after = project.netlist(kicad_cli=cli)
-        self.assertNotEqual(
-            [net.name for net in before.nets], [net.name for net in after.nets]
-        )
+        self.assertNotEqual(before, after)
         project.save()
         self.assertEqual(
             self.path.read_bytes(), project.schematic().files[0].to_bytes()

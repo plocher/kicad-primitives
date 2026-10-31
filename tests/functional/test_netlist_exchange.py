@@ -80,6 +80,62 @@ class NetlistParseTests(unittest.TestCase):
             model.net("/missing")
 
 
+class NetlistEqualityTests(unittest.TestCase):
+    """ADR 0011 D9: equality is electrical content, not export detail."""
+
+    def write(self, root: Path, name: str, body: str) -> Netlist:
+        path = root / name
+        path.write_text(body, encoding="utf-8")
+        return Netlist.open(path)
+
+    def test_order_codes_values_fields_and_paths_do_not_count(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = self.write(
+                root,
+                "a.net",
+                '(export (version E) (design (source "a.kicad_sch"))'
+                " (components (comp (ref R1) (value 10K) (libsource (lib Device) (part R)))"
+                " (comp (ref R2) (value 1K) (libsource (lib Device) (part R))))"
+                ' (nets (net (code 1) (name "A") (node (ref R1) (pin 1)) (node (ref R2) (pin 1)))'
+                ' (net (code 2) (name "B") (node (ref R1) (pin 2)))))',
+            )
+            second = self.write(
+                root,
+                "b.net",
+                '(export (version F) (design (source "b.kicad_sch"))'
+                " (components (comp (ref R2) (value 2K) (libsource (lib Device) (part R))"
+                ' (fields (field (name "MPN") "X")))'
+                " (comp (ref R1) (value 22K) (libsource (lib Device) (part R))))"
+                ' (nets (net (code 9) (name "B") (node (ref R1) (pin 2) (pintype passive)))'
+                ' (net (code 7) (name "A") (node (ref R2) (pin 1)) (node (ref R1) (pin 1)))))',
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(hash(first), hash(second))
+            self.assertNotEqual(first, object())
+
+    def test_connection_net_name_and_component_identity_count(self) -> None:
+        base = (
+            "(export (version E) (components (comp (ref R1) (libsource (lib Device) (part R))))"
+            ' (nets (net (code 1) (name "A") (node (ref R1) (pin 1)))))'
+        )
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = self.write(root, "base.net", base)
+            for index, changed in enumerate(
+                (
+                    base.replace("(pin 1)", "(pin 2)"),
+                    base.replace('(name "A")', '(name "B")'),
+                    base.replace("(part R)", "(part C)"),
+                    base.replace("(ref R1) (libsource", "(ref R9) (libsource"),
+                )
+            ):
+                with self.subTest(changed=changed):
+                    self.assertNotEqual(
+                        original, self.write(root, f"changed-{index}.net", changed)
+                    )
+
+
 class NetlistExportTests(unittest.TestCase):
     def test_export_requires_schematic_file(self) -> None:
         with TemporaryDirectory() as tmp:
