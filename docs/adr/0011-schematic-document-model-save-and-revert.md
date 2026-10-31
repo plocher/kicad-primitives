@@ -41,6 +41,16 @@ This ADR fixes the nouns and the save, revert, close, backup, and save-as behavi
 - Every removed behavior is possible as a short client sequence of public primitives.
 - Each deviation from KiCad is named here and on the usage page.
 
+## Layers
+
+This ADR uses the three-layer frame that the owner locked in [#78](https://github.com/plocher/kicad-primitives/issues/78).
+
+- **Layer 0: files.** One file with a data model limited to what that file says. Every layer-0 artifact keeps the full lifecycle: open, read, modify, validate, save, revert, discard, close.
+- **Layer 1: the joined-up view.** Scopes (`Project`, later `KiCad`) and cross-file documents (`Schematic`) join layer-0 artifacts with KiCad's cross-file rules. A scope drives the lifecycle of the artifacts it owns.
+- **Layer 2: policy.** Plain functions built from layers 0 and 1.
+
+Clients use the layer that fits. Layer 1 adds joining-up. It does not hide or replace layer-0 operations.
+
 ## KiCad facts that drive the decisions
 
 - KiCad's `SCHEMATIC` holds a hierarchy. Opening it loads every reachable sheet. A file used by several sheet boxes loads once as one `SCH_SCREEN`.
@@ -85,6 +95,13 @@ Scope split:
 - This ADR renames today's `Schematic` class to `SheetFile` and today's `SheetInstance` class to `SheetSymbol`. It adds the new `Schematic` with `files`.
 - #79 owns instance trees, per-instance data, `SymbolInstance`, the box as the instance's port interface, sheet-symbol add, change, and delete, and `sheet_file.duplicate()`.
 - `SheetFile.symbol(reference)` and `PlacedSymbol.reference` stay as documented debt until #79 replaces them with instance lookups.
+
+Layers:
+
+- `SheetFile` is a layer-0 artifact with the full lifecycle, including `SheetFile.open(path)` and `save()`. `SheetFile.open(path)` replaces the free function `open_schematic()`.
+- A `SheetFile` knows nothing about the hierarchy. It cannot keep parent sheet-symbol pins matched with its hierarchical labels. Its usage page states this limit.
+- `Schematic` is a layer-1 document. `Schematic.save()` applies D3 and D4 over the `SheetFile` saves.
+- This reverses an earlier grilling lock that single-sheet save is not public. With layers, single-file I/O is public layer-0 behavior, and the hierarchy save is the layer-1 operation.
 
 ### D2. Project reference, validity, and entry
 
@@ -131,6 +148,7 @@ Choose C.
 | Short-lived system error (interrupted call, busy file, sync-tool hold, timeout) | During a write | Continue with other sheets. At the end, retry the failed sheets once after a short wait. Check for conflicts again first. |
 | Lasting system error (disk full, read-only volume, hard I/O error) | During a write | Stop at once. Write no more sheets. |
 
+- `Schematic.save()` is the layer-1 operation. It runs this policy over the layer-0 `SheetFile` saves.
 - Write child sheets before their parents. A parent on disk then never names a child file that does not exist.
 - Written sheets become saved. All other sheets stay unsaved.
 - `SchematicSaveError` lists each sheet as written, conflict, or failed, with the reason.
@@ -151,12 +169,14 @@ Choose B. It maps onto KiCad's close-project dialog.
 - `Project.open(ref, on_close="save" | "discard" | "raise")`. The default is `"save"`.
   - `save`: save every changed document the project owns, then close. This is "save all".
   - `discard`: drop all unsaved edits and close. This is "do not save all".
-  - `raise`: refuse to close while anything is unsaved, and name it. This is "cancel". The client then calls each named document's `save()` or `revert()` and closes again.
+  - `raise`: refuse to close while anything is unsaved, and name it. This is "cancel". The client then calls each named document's `save()`, `revert()`, or `discard()` and closes again.
 - `project.save()` saves every changed document the project owns, without closing. Today that is the schematic. The PCB and project-table libraries join it later. It does not run `kicad-cli`, write a ZIP, or check locks. Its error lists what saved and what did not.
 - A `with` block applies `on_close` on normal exit. It discards when an exception exits it.
 - The "unpublished history" retry in close is removed.
-- Only scopes end things. `project.close()` and `project.discard()` exist. `kicad.close()` and `kicad.discard()` follow with #78. Documents and items have `save()` and `revert()`, but no `close()`.
-- A per-document close adds nothing to save and revert. It would also invalidate handles that other code shares through the open registry.
+- Every artifact keeps the full layer-0 lifecycle, including `close()` and `discard()`.
+- A scope drives the lifecycle of the artifacts it owns. `project.close()` calls each owned artifact's validate, save, and close according to `on_close`. This is the layer-1 usage model. Layer-0 clients call the artifact operations directly.
+- `kicad.close()` and `kicad.discard()` follow with #78.
+- What happens when code calls `close()` on an artifact that a scope also holds is decided in #78.
 - Library ownership follows the library's type, not how a client reached it. Project-table libraries belong to that project. Global-table and table-less libraries belong to the `KiCad` scope. This part is implemented with #78.
 - Deviation: KiCad's close-project also settles global libraries, because KiCad has one project open at a time. The package can hold several projects. A client that wants KiCad's exact behavior calls `project.close()`, then `kicad.close()`.
 
@@ -178,8 +198,12 @@ Project scope. `project.save()` writes every open, project-owned artifact that h
 
 ### D6. Revert
 
-- Documents and items have `revert()`. It drops unsaved edits and reloads from disk.
-- The object keeps its identity, and `is_modified` becomes false. Handles to things inside it become invalid. Clients get fresh ones.
+- Every artifact has `revert()`, beside `discard()`. Revert drops unsaved edits and reloads from disk.
+- After a revert, the object keeps its identity, and `is_modified` becomes false. Handles to things inside it become invalid. Clients get fresh ones.
+- Revert and discard have different jobs:
+  - `revert()` starts the artifact over from disk, and the client keeps using it. It reads the disk, so it can fail (missing file, fingerprint mismatch, permissions).
+  - `discard()` ends the artifact without a read or a write, so it cannot fail (ADR 0008).
+  - Error paths use `discard()`: a `with` block that exits on an exception, and `on_close="discard"`. A revert there could replace the original error with a conflict error, or stop a close part-way.
 - Save and revert differ in granularity on purpose. Save writes files, so its unit follows storage. Revert changes only memory, so it works at any level.
 
 | | Schematic | Library | Item |
@@ -251,25 +275,22 @@ Add:
 - **Sheet file**: one `.kicad_sch` file. Content edits to it reach every instance of it. KiCad `SCH_SCREEN`. _Avoid_: sheet, schematic, for one file.
 - **Sheet symbol**: the box on a parent sheet file that points at a target sheet file. Its pins are the electrical interface of the instance. KiCad `SCH_SHEET`.
 - **Sheet instance**: one placement of a sheet file in the hierarchy, identified by its UUID path. It holds per-placement data. KiCad `SCH_SHEET_PATH`.
-- **Revert**: drop unsaved edits of a document or item and reload it from disk. The object stays open.
-- **Scope**: an owner of documents that can be closed or discarded. Today: `Project`. Later: `KiCad` (#78).
+- **Revert**: drop unsaved edits of an artifact or item and reload it from disk. The object stays open.
+- **Scope**: a layer-1 owner of artifacts that drives their lifecycle. Closing a scope applies its `on_close` choice to its unsaved artifacts. Today: `Project`. Later: `KiCad` (#78).
+- **Layer 0 / Layer 1 / Layer 2**: files / the joined-up view / policy (#78).
 
-Change:
-
-- **Close**: ends a scope, and applies the scope's `on_close` choice to its unsaved documents.
-- **Discard**: ends a scope without writing. Documents and items revert instead.
+Close and Discard keep their ADR 0008 meanings.
 
 ## Relationship to earlier ADRs
 
 - Amends ADR 0008:
   - "A dirty close always saves" becomes the `on_close` choice for scopes.
-  - Terminal discard applies to scopes only. Documents and items revert.
+  - Adds `revert()` beside the terminal `discard()`, which is unchanged.
   - The Project ZIP and same-location lifecycle section is replaced by D3 to D8.
-  - The independent-artifact lifecycle for libraries and tables is revisited in #78.
 - Amends ADR 0009:
   - Refines composite splits 1 to 3: save, close, and save-as.
   - Withdraws the rollout rule "each split adds its recipe".
-  - Removal of library `close()` is decided in #78.
+  - Adds the three-layer frame (#78). The ADR 0009 artifact lifecycle becomes the layer-0 lifecycle, plus `revert()`.
 - Does not change ADR 0002, ADR 0003, or ADR 0006.
 
 ## Consequences and implementation order
@@ -278,15 +299,15 @@ Implement under #75 on one feature branch, as serial validated commits:
 
 1. Nouns. Rename `Schematic` to `SheetFile` and `SheetInstance` to `SheetSymbol`. Add `Schematic` with `files`. Add `project.schematic()`. Remove `project.schematics()`. Update `CONTEXT.md`.
 2. Project reference and validity check. Remove `backup_size_limit_bytes`.
-3. Sheet-file fingerprint, flag-based `is_modified`, and public `validate()`.
+3. `SheetFile` layer-0 lifecycle: public `SheetFile.open(path)` (replaces `open_schematic()`), fingerprint, flag-based `is_modified`, `validate()`, `save()`, `revert()`, `discard()`, and `close()`.
 4. `Schematic.save()` with the D3 write set, the D4 failure policy, and `overwrite`. `project.save()` as the umbrella. Remove the electrical check, ZIP, and lock check from save.
-5. `on_close`, `revert()`, and scope-only discard. Remove the history retry.
+5. `on_close` and `Schematic.revert()`. Remove the history retry.
 6. `project.backup()`.
 7. Trim `project.save_as()`.
 8. `update_from_library`. Remove restore intents and the pin-type prediction.
 9. Remove `ensure_writes_allowed()` and `write_is_permitted()`.
 10. `Netlist.__eq__`.
-11. `SymbolLibrary` and `LibraryTable`: `validate()`, flag-based `is_modified`, fingerprint, and `overwrite`.
+11. `SymbolLibrary` and `LibraryTable`: `validate()`, flag-based `is_modified`, fingerprint, `overwrite`, and `revert()`.
 12. Move tests, update the usage pages (`projects.md`, `schematics.md`, `netlist.md`, `symbol-libraries.md`, `tables.md`), and update `CHANGELOG.md`.
 
 Each step keeps the suite green and records its verification in the commit body.
