@@ -7,7 +7,9 @@ Donor anchors (behavior only; jBOM product UX and stderr chatter stay behind):
 
 Package policy improvements locked here:
 - Sheetfile paths resolve relative to the parent sheet directory, not the project root.
-- Opening accepts a project directory or an explicit .kicad_pro path.
+- Opening accepts a project directory or the path of any file in it; the
+  directory must hold exactly one .kicad_pro (jBOM rule, ADR 0011 D2).
+- Root sheet files come from top_level_sheets, else <name>.kicad_sch, and must exist.
 - text_variables absent/empty/null is a normal empty map, not an error.
 """
 
@@ -69,27 +71,60 @@ class OpenAndDiscoveryTests(ProjectCase):
     def test_empty_directory_requires_project_file(self) -> None:
         with self.assertRaises(InvalidProjectError) as cm:
             Project.open(self.root)
-        self.assertIn("No project files found", str(cm.exception))
+        self.assertIn("Not a KiCad project", str(cm.exception))
 
-    def test_multiple_projects_prefers_directory_name_match(self) -> None:
-        canonical = self.write_json(
-            f"{self.root.name}.kicad_pro", {"meta": {"version": 1}}
-        )
-        self.write_json("other_project.kicad_pro", {"meta": {"version": 1}})
-
-        project = Project.open(self.root)
-
-        self.assertEqual(project.project_file, canonical.resolve())
-
-    def test_multiple_projects_without_name_match_picks_first_alphabetically(
+    def test_multiple_projects_are_ambiguous_even_with_an_explicit_file(
         self,
     ) -> None:
         alpha = self.write_json("alpha.kicad_pro", {"meta": {"version": 1}})
         self.write_json("beta.kicad_pro", {"meta": {"version": 1}})
+        self.write("alpha.kicad_sch", "(kicad_sch (version 20250114))")
+        for reference in (self.root, alpha):
+            with self.subTest(reference=reference):
+                with self.assertRaises(InvalidProjectError) as cm:
+                    Project.open(reference)
+                self.assertIn("Ambiguous", str(cm.exception))
 
+    def test_any_file_in_the_directory_is_a_project_reference(self) -> None:
+        pro = self.write_json("board.kicad_pro", {"meta": {"version": 1}})
+        sch = self.write("board.kicad_sch", "(kicad_sch (version 20250114))")
+        notes = self.write("notes.txt", "not KiCad")
+        for reference in (sch, notes):
+            with self.subTest(reference=reference):
+                self.assertEqual(Project.open(reference).project_file, pro.resolve())
+
+    def test_top_level_sheets_select_the_root_sheet_files(self) -> None:
+        self.write_json(
+            "board.kicad_pro",
+            {
+                "schematic": {
+                    "top_level_sheets": [
+                        {"filename": "a.kicad_sch", "name": "A", "uuid": "u-a"},
+                        {"filename": "b.kicad_sch", "name": "B", "uuid": "u-b"},
+                    ]
+                }
+            },
+        )
+        a = self.write("a.kicad_sch", "(kicad_sch (version 20250114))")
+        b = self.write("b.kicad_sch", "(kicad_sch (version 20250114))")
         project = Project.open(self.root)
+        self.assertEqual(project.root_sheet_files, (a.resolve(), b.resolve()))
+        self.assertEqual(
+            [f.path for f in project.schematic().root_files],
+            [a.resolve(), b.resolve()],
+        )
 
-        self.assertEqual(project.project_file, alpha.resolve())
+    def test_missing_root_sheet_file_is_not_a_valid_project(self) -> None:
+        self.write_json("board.kicad_pro", {"meta": {"version": 1}})
+        with self.assertRaises(InvalidProjectError):
+            Project.open(self.root)
+        self.write_json(
+            "board.kicad_pro",
+            {"schematic": {"top_level_sheets": [{"filename": "gone.kicad_sch"}]}},
+        )
+        self.write("board.kicad_sch", "(kicad_sch (version 20250114))")
+        with self.assertRaises(InvalidProjectError):
+            Project.open(self.root)
 
     def test_schematic_prefers_project_stem_over_other_names(self) -> None:
         self.write_json("board.kicad_pro", {"meta": {"version": 1}})
@@ -109,15 +144,12 @@ class OpenAndDiscoveryTests(ProjectCase):
 
         self.assertEqual(project.schematic_file, normal.resolve())
 
-    def test_autosave_schematic_used_when_only_option(self) -> None:
+    def test_autosave_schematic_is_not_a_root_sheet_file(self) -> None:
         self.write_json("board.kicad_pro", {"meta": {"version": 1}})
-        autosave = self.write(
-            "_autosave-board.kicad_sch", "(kicad_sch (version 20250114))"
-        )
+        self.write("_autosave-board.kicad_sch", "(kicad_sch (version 20250114))")
 
-        project = Project.open(self.root)
-
-        self.assertEqual(project.schematic_file, autosave.resolve())
+        with self.assertRaises(InvalidProjectError):
+            Project.open(self.root)
 
 
 class HierarchyTests(ProjectCase):
@@ -194,10 +226,6 @@ class HierarchyTests(ProjectCase):
 
         self.assertEqual(files, (main.resolve(), present.resolve()))
 
-    def test_no_root_schematic_yields_empty_hierarchy(self) -> None:
-        self.write_json("board.kicad_pro", {"meta": {"version": 1}})
-        self.assertEqual(Project.open(self.root).schematic_files(), ())
-
     def test_escaped_unicode_sheetfile_uses_structure_without_geometry_read(
         self,
     ) -> None:
@@ -254,6 +282,7 @@ class TextVariablesTests(ProjectCase):
                 (root / "demo.kicad_pro").write_text(
                     json.dumps(payload), encoding="utf-8"
                 )
+                (root / "demo.kicad_sch").write_text("(kicad_sch (version 20250114))")
                 project = Project.open(root)
                 self.assertEqual(dict(project.text_variables), {})
 
@@ -262,6 +291,7 @@ class TextVariablesTests(ProjectCase):
             "demo.kicad_pro",
             {"text_variables": {"OK": "yes", "BAD": 3, "ALSO": ["no"]}},
         )
+        self.write("demo.kicad_sch", "(kicad_sch (version 20250114))")
         project = Project.open(self.root)
         self.assertEqual(dict(project.text_variables), {"OK": "yes"})
 
@@ -272,6 +302,7 @@ class TextVariablesTests(ProjectCase):
 
     def test_variables_mapping_is_read_only(self) -> None:
         self.write_json("demo.kicad_pro", {"text_variables": {"A": "1"}})
+        self.write("demo.kicad_sch", "(kicad_sch (version 20250114))")
         project = Project.open(self.root)
         with self.assertRaises(TypeError):
             project.text_variables["B"] = "2"  # type: ignore[index]

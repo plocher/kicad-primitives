@@ -322,6 +322,9 @@ class ProjectSaveAsTests(unittest.TestCase):
     def test_ambiguous_known_json_members_or_additional_roots_fail_before_destination(
         self,
     ) -> None:
+        (self.source / "Other.kicad_sch").write_bytes(
+            (self.source / "Old.kicad_sch").read_bytes()
+        )
         for raw in (
             b'{"meta":{"filename":"Old.kicad_pro","filename":"Other.kicad_pro"}}',
             b'{"meta":{},"meta":{}}',

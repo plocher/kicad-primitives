@@ -166,8 +166,14 @@ class ProjectNetlistTests(unittest.TestCase):
         self.assertTrue(self.project.is_modified)
 
     def test_unsupported_context_and_closed_project_fail_explicitly(self) -> None:
-        (self.directory / "other.kicad_pro").write_text("{}", encoding="utf-8")
-        mismatched = Project.open(self.directory / "other.kicad_pro")
+        other = self.directory.parent / "other"
+        other.mkdir()
+        (other / "board.kicad_sch").write_bytes(self.path.read_bytes())
+        (other / "other.kicad_pro").write_text(
+            '{"schematic": {"top_level_sheets": [{"filename": "board.kicad_sch"}]}}',
+            encoding="utf-8",
+        )
+        mismatched = Project.open(other)
         with self.assertRaises(UnsupportedSchematicOperationError):
             mismatched.netlist(kicad_cli=self.cli)
         self.child.unlink()

@@ -217,11 +217,17 @@ class SchematicSvgExportTests(unittest.TestCase):
         (self.directory / "~board.kicad_pro.lck").touch()
         locked = Project.open(self.directory)
         self.assertEqual(len(locked.export_svgs(self.out, kicad_cli=self.cli).files), 2)
-        (self.directory / "other.kicad_pro").write_text("{}", encoding="utf-8")
+        other = self.base / "other-project"
+        other.mkdir()
+        (other / "board.kicad_sch").write_bytes(
+            (self.directory / "board.kicad_sch").read_bytes()
+        )
+        (other / "other.kicad_pro").write_text(
+            '{"schematic": {"top_level_sheets": [{"filename": "board.kicad_sch"}]}}',
+            encoding="utf-8",
+        )
         with self.assertRaises(UnsupportedSchematicOperationError):
-            Project.open(self.directory / "other.kicad_pro").export_svgs(
-                self.base / "other", kicad_cli=self.cli
-            )
+            Project.open(other).export_svgs(self.base / "other", kicad_cli=self.cli)
         self.child.unlink()
         with self.assertRaises(InvalidSchematicError):
             self.project.export_svgs(self.base / "gone", kicad_cli=self.cli)

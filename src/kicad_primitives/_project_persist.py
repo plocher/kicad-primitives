@@ -17,7 +17,7 @@ from .projects import (
     ProjectBackupError,
     ProjectLifecycleError,
     ProjectWriteBlockedError,
-    _find_companion,
+    _companion,
 )
 from .schematics import SchematicConflictError, UnsupportedSchematicOperationError
 
@@ -31,17 +31,10 @@ def _context(project: Project) -> None:
         raise UnsupportedSchematicOperationError(
             "Project settings must be a JSON object"
         )
-    for suffix, expected in (
-        (".kicad_sch", project.schematic_file),
-        (".kicad_pcb", project.pcb_file),
+    if _companion(project.directory, project.base_name, ".kicad_pcb") != (
+        project.pcb_file
     ):
-        actual = _find_companion(
-            project.directory, project.base_name, project.directory.name, suffix
-        )
-        if actual != expected:
-            raise SchematicConflictError(
-                f"Project companion membership changed: {suffix}"
-            )
+        raise SchematicConflictError("Project companion membership changed: .kicad_pcb")
     if project.pcb_file is not None:
         path = _schematic_persist._internal_path(project, project.pcb_file)
         assert project._pcb_baseline is not None
