@@ -234,6 +234,55 @@ class Project:
         if self._schematic is not None:
             self._schematic.save()
 
+    @property
+    def backup_directory(self) -> Path:
+        """KiCad's conventional backup location: ``<directory>/<name>-backups``.
+
+        A constant naming convention, not a setting. Pass it to :meth:`backup`
+        to use the project location.
+        """
+        return self._directory / f"{self.base_name}-backups"
+
+    def backup(
+        self,
+        destination: str | PathLike[str],
+        *,
+        size_limit_bytes: int | None = None,
+    ) -> Path:
+        """Archive the project files as they are on disk now; return the ZIP path.
+
+        The archive does not save first and does not include unsaved edits.
+        Use it to archive the current state before changing anything. It
+        holds every project-local KiCad file (project, schematic, PCB,
+        settings, rules, drawing sheets, library tables, local libraries),
+        skipping hidden entries and backup folders.
+
+        The ZIP is ``<destination>/<name>-YYYY-MM-DD_HHMMSS.zip`` (KiCad's
+        convention). A second backup in the same second gets a ``-001``
+        suffix and never overwrites. *destination* is created when missing;
+        its parent must exist. Use :attr:`backup_directory` for the project
+        location.
+
+        *size_limit_bytes* omitted means "do not prune". When given, the
+        oldest archives of this project in *destination* are removed until
+        the total size fits; the new archive is never removed. The method
+        reads no settings and never decides on its own whether to run.
+
+        Raises:
+            ProjectBackupError: unsafe destination, member, or archive.
+            PermissionError: unreadable members or unwritable destination.
+        """
+        self._check_open()
+        if size_limit_bytes is not None and (
+            isinstance(size_limit_bytes, bool)
+            or not isinstance(size_limit_bytes, int)
+            or size_limit_bytes <= 0
+        ):
+            raise ValueError("size_limit_bytes must be a positive integer or None")
+        from ._project_backup import backup
+
+        return backup(self, Path(destination).expanduser().absolute(), size_limit_bytes)
+
     def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
         """Check the full pending hierarchy without saving or clearing changes.
 

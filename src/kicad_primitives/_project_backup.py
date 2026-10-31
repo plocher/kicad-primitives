@@ -1,4 +1,8 @@
-"""Bounded explicit-save ZIP snapshots; no scheduler, Git, or transactions."""
+"""Project backup ZIPs of on-disk files: explicit destination, optional pruning.
+
+ADR 0011 D7. No scheduler, no settings, no save. KiCad's conventions are
+constants: ``<name>-backups/`` and ``<name>-YYYY-MM-DD_HHMMSS.zip``.
+"""
 
 from __future__ import annotations
 
@@ -72,63 +76,60 @@ def _safe_name(name: str) -> None:
         raise ProjectBackupError(f"Unsafe ZIP member name: {name!r}")
 
 
-def _safe_path(project: Project, path: Path) -> None:
-    if not path.is_relative_to(project.directory) or path.resolve() != path:
-        raise ProjectBackupError(
-            f"Snapshot requires contained non-symlink paths: {path}"
-        )
+def _safe_path(root: Path, path: Path) -> None:
+    if not path.is_relative_to(root) or path.resolve() != path:
+        raise ProjectBackupError(f"Backup requires contained non-symlink paths: {path}")
 
 
-def _read_member(project: Project, path: Path) -> tuple[bytes, os.stat_result]:
-    _safe_path(project, path)
+def _read_member(root: Path, path: Path) -> tuple[bytes, os.stat_result]:
+    _safe_path(root, path)
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
         raise ProjectBackupError(
-            f"Snapshot requires a regular singly linked member: {path}"
+            f"Backup requires a regular singly linked member: {path}"
         )
     if not stat.S_IMODE(info.st_mode) & 0o444 or not os.access(path, os.R_OK):
-        raise PermissionError(f"Snapshot member is not readable: {path}")
+        raise PermissionError(f"Backup member is not readable: {path}")
     raw = path.read_bytes()
     if _symbol_persist._file_version(info) != _symbol_persist._file_version(
         path.lstat()
     ):
-        raise ProjectBackupError(f"Snapshot member changed during read: {path}")
+        raise ProjectBackupError(f"Backup member changed during read: {path}")
     return raw, info
 
 
-def _inventory(project: Project) -> tuple[Path, ...]:
+def _inventory(project: Project, exclude: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Project-local KiCad files, skipping hidden entries and backup folders."""
     result: list[Path] = []
-    history = project.directory / f"{project.base_name}-backups"
+    root = project.directory
 
     def visit(directory: Path) -> None:
-        _safe_path(project, directory)
+        _safe_path(root, directory)
         info = directory.lstat()
         if (
             not stat.S_IMODE(info.st_mode) & 0o444
             or not stat.S_IMODE(info.st_mode) & 0o111
         ):
-            raise PermissionError(f"Snapshot directory is not readable: {directory}")
+            raise PermissionError(f"Backup directory is not readable: {directory}")
         for path in sorted(directory.iterdir()):
-            if path.name.startswith(".") or path == history:
+            if path.name.startswith(".") or path in exclude:
                 continue
             info = path.lstat()
             if stat.S_ISLNK(info.st_mode):
-                raise ProjectBackupError(f"Snapshot cannot follow a link: {path}")
+                raise ProjectBackupError(f"Backup cannot follow a link: {path}")
             if stat.S_ISDIR(info.st_mode):
                 visit(path)
             elif path.suffix.lower() in _EXTENSIONS or path.name in _BARE_NAMES:
-                _safe_name(path.relative_to(project.directory).as_posix())
+                _safe_name(path.relative_to(root).as_posix())
                 result.append(path)
 
-    visit(project.directory)
+    visit(root)
     return tuple(result)
 
 
-def _history_directory(project: Project, *, create: bool = False) -> Path:
-    directory = project.directory / f"{project.base_name}-backups"
-    _safe_path(project, directory)
-    if directory.exists():
-        if not directory.is_dir():
+def _destination(directory: Path, *, create: bool) -> Path:
+    if directory.exists() or directory.is_symlink():
+        if directory.is_symlink() or not directory.is_dir():
             raise ProjectBackupError(
                 f"Backup destination is not a directory: {directory}"
             )
@@ -148,6 +149,7 @@ def _history_directory(project: Project, *, create: bool = False) -> Path:
 def _managed_archives(
     project: Project, directory: Path
 ) -> tuple[tuple[Path, os.stat_result], ...]:
+    """Archives in *directory* that this project's naming convention made."""
     if not directory.exists():
         return ()
     pattern = re.compile(
@@ -157,7 +159,7 @@ def _managed_archives(
     for path in sorted(directory.iterdir()):
         if not pattern.fullmatch(path.name):
             continue
-        _safe_path(project, path)
+        _safe_path(directory, path)
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise ProjectBackupError(f"Unsafe managed archive: {path}")
@@ -186,19 +188,20 @@ def _managed_archives(
 
 
 def prepare(
-    project: Project, outputs: Mapping[Path, bytes], required: tuple[Path, ...]
+    project: Project,
+    outputs: Mapping[Path, bytes],
+    required: tuple[Path, ...],
+    exclude: tuple[Path, ...],
 ) -> _Snapshot:
-    """Freeze every included member and validate a complete post-save ZIP."""
-    directory = _history_directory(project)
-    _managed_archives(project, directory)
-    paths = _inventory(project)
+    """Freeze every included member and validate a complete ZIP."""
+    paths = _inventory(project, exclude)
     if not set(required).issubset(paths):
         raise ProjectBackupError(
-            "Required owned files were excluded from the snapshot inventory"
+            "Required owned files were excluded from the backup inventory"
         )
     members: list[_Member] = []
     for path in paths:
-        raw, info = _read_member(project, path)
+        raw, info = _read_member(project.directory, path)
         name = path.relative_to(project.directory).as_posix()
         members.append(_Member(path, name, raw, outputs.get(path, raw), info))
     return build(tuple(members))
@@ -230,45 +233,43 @@ def build(members: tuple[_Member, ...]) -> _Snapshot:
 
 
 def check_fresh(
-    project: Project, snapshot: _Snapshot, written: Mapping[Path, os.stat_result]
+    project: Project, snapshot: _Snapshot, exclude: tuple[Path, ...]
 ) -> None:
-    """Check inventory and exact input/output versions without refreshing the snapshot."""
-    if _inventory(project) != tuple(m.path for m in snapshot.members):
-        raise ProjectBackupError("Project snapshot membership changed during save")
+    """Check that the inventory and every member are unchanged since capture."""
+    if _inventory(project, exclude) != tuple(m.path for m in snapshot.members):
+        raise ProjectBackupError("Project file membership changed during backup")
     for member in snapshot.members:
-        raw, info = _read_member(project, member.path)
-        expected = written.get(member.path)
-        if expected is None:
-            matches = _symbol_persist._file_version(
-                info
-            ) == _symbol_persist._file_version(member.info)
-        else:
-            matches = (
-                info.st_dev,
-                info.st_ino,
-                info.st_mode,
-                info.st_size,
-                info.st_mtime_ns,
-            ) == (
-                expected.st_dev,
-                expected.st_ino,
-                expected.st_mode,
-                expected.st_size,
-                expected.st_mtime_ns,
-            )
-        if not matches or raw != (
-            member.output if expected is not None else member.raw
+        raw, info = _read_member(project.directory, member.path)
+        if (
+            _symbol_persist._file_version(info)
+            != _symbol_persist._file_version(member.info)
+            or raw != member.raw
         ):
             raise ProjectBackupError(
-                f"Snapshot member changed during save: {member.path}"
+                f"Backup member changed during read: {member.path}"
             )
 
 
-def publish(project: Project, snapshot: _Snapshot) -> Path:
-    """Publish one complete unique archive, then prune old recognized snapshots."""
-    directory = _history_directory(project, create=True)
+def publish(
+    project: Project,
+    snapshot: _Snapshot,
+    directory: Path,
+    limit: int | None,
+) -> Path:
+    """Publish one complete unique archive, then prune old ones over *limit*."""
+    directory = _destination(directory, create=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    index = 0
+    # Start after the highest index already used in this second, so a newer
+    # archive never takes a pruned older name and sorts as the oldest.
+    taken = re.compile(
+        rf"{re.escape(project.base_name)}-{re.escape(stamp)}(?:-(\d{{3,}}))?\.zip"
+    )
+    used = [
+        int(match.group(1) or "0")
+        for entry in directory.iterdir()
+        if (match := taken.fullmatch(entry.name))
+    ]
+    index = max(used) + 1 if used else 0
     while True:
         suffix = "" if index == 0 else f"-{index:03d}"
         path = directory / f"{project.base_name}-{stamp}{suffix}.zip"
@@ -294,18 +295,19 @@ def publish(project: Project, snapshot: _Snapshot) -> Path:
         installed.st_size,
         installed.st_mtime_ns,
     ):
-        raise ProjectBackupError("Published archive changed during save")
+        raise ProjectBackupError("Published archive changed during backup")
+    if limit is None:
+        return path
     archives = _managed_archives(project, directory)
     own_index = next(
         (index for index, (candidate, _) in enumerate(archives) if candidate == path),
         None,
     )
     if own_index is None:
-        raise ProjectBackupError("Published archive disappeared before retention")
-    limit = 0  # No pruning: ADR 0011 D7 moves the size limit to project.backup().
+        raise ProjectBackupError("Published archive disappeared before pruning")
     total = sum(info.st_size for _, info in archives)
     for old, before in archives[:own_index]:
-        if limit == 0 or total <= limit:
+        if total <= limit:
             break
         current = old.lstat()
         if _symbol_persist._file_version(current) != _symbol_persist._file_version(
@@ -315,3 +317,15 @@ def publish(project: Project, snapshot: _Snapshot) -> Path:
         old.unlink()
         total -= before.st_size
     return path
+
+
+def backup(project: Project, destination: Path, size_limit_bytes: int | None) -> Path:
+    """Archive the project files as they are on disk now into *destination*."""
+    directory = destination.parent.resolve() / destination.name
+    exclude = (project.directory / f"{project.base_name}-backups", directory)
+    _destination(directory, create=False)
+    _managed_archives(project, directory)
+    required = (project.project_file, *project.root_sheet_files)
+    snapshot = prepare(project, {}, required, exclude)
+    check_fresh(project, snapshot, exclude)
+    return publish(project, snapshot, directory, size_limit_bytes)

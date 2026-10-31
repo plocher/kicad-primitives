@@ -423,7 +423,7 @@ def save_as(
         _schematic_persist._hierarchy(context)
         _current(project, generation, inputs, directories)
         context.ensure_writes_allowed()
-        _project_backup.publish(context, snapshot)
+        _project_backup.publish(context, snapshot, context.backup_directory, None)
         _current(project, generation, inputs, directories)
         _destination_locks(owned_targets)
         _destination_outputs(outputs, installed)
