@@ -1,18 +1,14 @@
-"""Bounded same-location schematic persistence; no session/transaction framework."""
+"""Strict hierarchy paths and netlist evidence for project staging and save-as proof."""
 
 from __future__ import annotations
 
 import os
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lossless_sexpr import ListNode, ParseError, parse
 
-from . import _symbol_persist
-from ._schematic_restore import _pending_restore_intents, predict_restored_signature
-from .netlist import export_netlist
 from .schematics import (
     SchematicConflictError,
     SchematicVerificationError,
@@ -54,48 +50,6 @@ def _hierarchy(project: Project) -> tuple[SheetFile, ...]:
                     f"Unsupported Sheetfile for save verification: {sheet.filename}"
                 )
     return files
-
-
-def _preflight(
-    project: Project, documents: tuple[SheetFile, ...], changed: tuple[SheetFile, ...]
-) -> None:
-    project.ensure_writes_allowed()
-    _internal_path(project, project.project_file)
-    _symbol_persist._check_baseline(
-        project.project_file,
-        project._project_baseline,
-        conflict_error=SchematicConflictError,
-        unsupported_error=UnsupportedSchematicOperationError,
-        label="Project verification context",
-    )
-    for document in documents:
-        _internal_path(project, document.path)
-        info = _symbol_persist._check_baseline(
-            document.path,
-            document._baseline,
-            conflict_error=SchematicConflictError,
-            unsupported_error=UnsupportedSchematicOperationError,
-            label="Sheet file",
-        )
-        if document in changed:
-            if document.version != 20260306:
-                raise UnsupportedSchematicOperationError(
-                    f"Sheet file format {document.version} is read-only"
-                )
-            if not stat.S_IMODE(info.st_mode) & 0o222:
-                raise PermissionError(
-                    f"Sheet file has no write permission bits: {document.path}"
-                )
-            parent = document.path.parent
-            mode = stat.S_IMODE(parent.stat().st_mode)
-            if (
-                not mode & 0o222
-                or not mode & 0o111
-                or not os.access(parent, os.W_OK | os.X_OK)
-            ):
-                raise PermissionError(
-                    f"Sheet file destination directory is not writable: {parent}"
-                )
 
 
 @dataclass(frozen=True)
@@ -214,57 +168,3 @@ def _electrical_signature(
     return _ElectricalSignature(
         tuple(sorted(identities)), tuple(sorted(named_nets)), tuple(sorted(libparts))
     )
-
-
-def _verify(
-    project: Project,
-    documents: tuple[SheetFile, ...],
-    changed: tuple[SheetFile, ...],
-    kicad_cli: str | os.PathLike[str] | None,
-) -> None:
-    root = project.schematic_file
-    assert root is not None
-    if root.stem != project.project_file.stem:
-        raise UnsupportedSchematicOperationError(
-            "Save verification requires matching root schematic and project basenames"
-        )
-    from ._pending_snapshot import staged_hierarchy
-
-    with staged_hierarchy(
-        project,
-        {document.path: document._baseline for document in documents},
-        prefix="kicad-primitives-schematic-",
-    ) as stage:
-        staged_root = stage / root.relative_to(project.directory)
-        before_path = export_netlist(
-            staged_root, stage / "before.net", kicad_cli=kicad_cli
-        )
-        include_libparts = any(
-            _pending_restore_intents(document) for document in changed
-        )
-        before = _electrical_signature(before_path, include_libparts=include_libparts)
-        expected = predict_restored_signature(before, documents, changed)
-        for document in changed:
-            (stage / document.path.relative_to(project.directory)).write_bytes(
-                document.to_bytes()
-            )
-        after_path = export_netlist(
-            staged_root, stage / "after.net", kicad_cli=kicad_cli
-        )
-        after = _electrical_signature(after_path, include_libparts=include_libparts)
-        if expected != after:
-            raise SchematicVerificationError(
-                "Pending content does not match the independently predicted electrical signature"
-            )
-
-
-def save_schematics(
-    project: Project,
-    selected: tuple[SheetFile, ...],
-    *,
-    kicad_cli: str | os.PathLike[str] | None,
-) -> None:
-    """Save selected documents through their owning Project's snapshot safety net."""
-    from ._project_persist import save_project
-
-    save_project(project, selected, kicad_cli=kicad_cli)

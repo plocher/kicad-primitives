@@ -340,7 +340,7 @@ class ProjectSaveAsTests(unittest.TestCase):
                 self.assertFalse(self.destination.exists())
                 self.assertEqual(project.directory, self.source)
                 self.assertEqual(self.pro.read_bytes(), raw)
-                project.close(kicad_cli=self.root / "must-not-run")
+                project.close()
                 self.assertEqual(self.pro.read_bytes(), raw)
 
     def test_root_child_filename_collision_is_rejected_before_any_destination(

@@ -8,7 +8,6 @@ from kicad_primitives.projects import Project
 from kicad_primitives.schematics import (
     AmbiguousPlacedSymbolError,
     PlacedSymbol,
-    SchematicVerificationError,
     UnsupportedSchematicOperationError,
 )
 from tests.functional.test_schematic_editing import SOURCE
@@ -170,25 +169,28 @@ class AttributeDeletionTests(unittest.TestCase):
                 symbol.attribute(alias)
         self.assertEqual(self.path.read_bytes(), source)
 
-        cli = self.directory / "fake-cli"
-        cli.write_text(FAKE_CLI, encoding="utf-8")
-        cli.chmod(0o755)
         pending = project.schematic().files[0].to_bytes()
-        project.save(kicad_cli=cli)
+        project.save()
         self.assertEqual(self.path.read_bytes(), pending)
         self.assertFalse(project.is_modified)
 
-    def test_deletion_that_changes_connectivity_blocks_save(self) -> None:
+    def test_client_sees_an_electrical_deletion_and_save_still_writes(self) -> None:
         source = SOURCE.replace(MANUFACTURER, b'\n    (property "Net" "disconnect")')
         project, symbol = self.open(source)
-        symbol.delete_attribute("Net")
         cli = self.directory / "fake-cli"
         cli.write_text(FAKE_CLI, encoding="utf-8")
         cli.chmod(0o755)
-        with self.assertRaises(SchematicVerificationError):
-            project.save(kicad_cli=cli)
-        self.assertEqual(self.path.read_bytes(), source)
-        self.assertTrue(project.is_modified)
+        before = project.netlist(kicad_cli=cli)
+        symbol.delete_attribute("Net")
+        after = project.netlist(kicad_cli=cli)
+        self.assertNotEqual(
+            [net.name for net in before.nets], [net.name for net in after.nets]
+        )
+        project.save()
+        self.assertEqual(
+            self.path.read_bytes(), project.schematic().files[0].to_bytes()
+        )
+        self.assertFalse(project.is_modified)
 
 
 if __name__ == "__main__":

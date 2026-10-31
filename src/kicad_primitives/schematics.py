@@ -12,7 +12,7 @@ from math import isfinite
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType, TracebackType
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from lossless_sexpr import AtomNode, Document, ListNode, ParseError, parse, quote
 
@@ -69,11 +69,14 @@ __all__ = [
     "SchematicConflictError",
     "SchematicError",
     "SchematicLifecycleError",
+    "SchematicSaveError",
     "SchematicSvgError",
     "SchematicSvgExport",
     "SchematicSvgFile",
     "SchematicVerificationError",
     "SheetFile",
+    "SheetSaveResult",
+    "SheetSaveStatus",
     "SheetSymbol",
     "TitleBlock",
     "UnsupportedSchematicOperationError",
@@ -111,6 +114,41 @@ class SchematicVerificationError(SchematicError):
 
 class SchematicLifecycleError(RuntimeError):
     """A sheet file is closed or discarded."""
+
+
+SheetSaveStatus = Literal["written", "conflict", "failed", "unsaved"]
+
+
+@dataclass(frozen=True)
+class SheetSaveResult:
+    """What :meth:`Schematic.save` did with one changed sheet file.
+
+    ``written``: saved. ``conflict``: the disk file is not the file read; not
+    written. ``failed``: an error stopped this file; ``reason`` says which.
+    ``unsaved``: not attempted, because the save stopped first.
+    """
+
+    path: Path
+    status: SheetSaveStatus
+    reason: str = ""
+
+
+class SchematicSaveError(SchematicError):
+    """``Schematic.save()`` did not write every changed sheet file.
+
+    ``results`` lists each changed sheet file, children before parents, as
+    written, conflict, failed, or unsaved, with the reason. Written files
+    are saved; all others keep their unsaved changes.
+    """
+
+    def __init__(self, message: str, results: tuple[SheetSaveResult, ...]) -> None:
+        detail = "; ".join(
+            f"{result.path.name}: {result.status}"
+            + (f" ({result.reason})" if result.reason else "")
+            for result in results
+        )
+        super().__init__(f"{message}: {detail}" if detail else message)
+        self.results = results
 
 
 @dataclass(frozen=True)
@@ -745,6 +783,61 @@ class Schematic:
         """Whether any sheet file has unsaved changes."""
         self._check_open()
         return any(sheet_file.is_modified for sheet_file in self._files.values())
+
+    def validate(self) -> None:
+        """Run the content checks on every changed sheet file; write nothing.
+
+        Raises:
+            SchematicSaveError: some changed sheet files have invalid content
+                or a read-only format. ``results`` names them.
+        """
+        self._check_open()
+        from . import _schematic_save
+
+        _schematic_save.validate(self)
+
+    def save(self, *, overwrite: bool = False) -> None:
+        """Write the sheet files that have unsaved changes; touch no others.
+
+        This deviates from KiCad on purpose (ADR 0011 D3): KiCad rewrites
+        every sheet file. A clean save writes nothing. Child sheet files are
+        written before their parents. The save runs no KiCad, makes no
+        backup, and checks no lock.
+
+        Failure policy (ADR 0011 D4): invalid content, an unwritable target,
+        or missing permissions found before any write stop the save with
+        nothing written. A conflict (the disk file is not the file read)
+        leaves that sheet unsaved and is never retried; *overwrite* is the
+        explicit way through. A short-lived system error is retried once at
+        the end. A lasting or unknown system error stops the save at once.
+
+        Raises:
+            SchematicSaveError: not every changed sheet file was written.
+                ``results`` lists each one. A later save writes only what is
+                still unsaved.
+        """
+        self._check_open()
+        from . import _schematic_save
+
+        _schematic_save.save(self, overwrite=overwrite)
+
+    def _write_order(self) -> tuple[SheetFile, ...]:
+        """Every loaded sheet file once, each child before its parents."""
+        order: dict[Path, SheetFile] = {}
+
+        def visit(path: Path) -> None:
+            if path in order or path not in self._files:
+                return
+            sheet_file = self._files[path]
+            for sheet in sheet_file.sheet_symbols:
+                visit(Path(os.path.normpath(path.parent / sheet.filename)))
+            order[path] = sheet_file
+
+        for root in self._roots:
+            visit(Path(os.path.abspath(root)))
+        for path in self._files:
+            visit(path)
+        return tuple(order.values())
 
     def _rebind(self, roots: tuple[Path, ...], files: tuple[SheetFile, ...]) -> None:
         """Adopt relocated paths after a successful project save-as."""

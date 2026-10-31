@@ -73,8 +73,6 @@ class Project:
         self._project_baseline = project_baseline
         self._pcb_baseline = None if pcb_file is None else pcb_file.read_bytes()
         self._closed = False
-        # True after source writes whose ZIP history has not yet published.
-        self._history_pending = False
         self._generation = 0
 
     def _check_open(self) -> None:
@@ -90,18 +88,17 @@ class Project:
         """Terminally abandon the Project without writing or resetting baselines."""
         self._closed = True
 
-    def close(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
+    def close(self) -> None:
         """Exit, saving first only when there is something to persist.
 
-        A clean Project closes without writing. Pending changes, or source
-        writes from an earlier save whose ZIP history did not publish, run
-        :meth:`save` with *kicad_cli*. If that save fails, the error propagates
-        and the Project stays open with its pending state. Close is idempotent.
+        A clean Project closes without writing. Pending changes run
+        :meth:`save`. If that save fails, the error propagates and the Project
+        stays open with its pending state. Close is idempotent.
         """
         if self._closed:
             return
-        if self.is_modified or self._history_pending:
-            self.save(kicad_cli=kicad_cli)
+        if self.is_modified:
+            self.save()
         self.discard()
 
     def __enter__(self) -> Self:
@@ -164,20 +161,21 @@ class Project:
         pcb_file = pcb if pcb.is_file() else None
         return cls(directory, project_file, root_files, pcb_file, variables, baseline)
 
-    def save(self, *, kicad_cli: str | PathLike[str] | None = None) -> None:
-        """Save the supported Project file set and publish an exact ZIP snapshot.
+    def save(self) -> None:
+        """Save every changed document the project owns, without closing.
 
-        Strictly include the entire internal schematic hierarchy, captured JSON,
-        and optional unchanged raw PCB. Verify changed schematic electrical state.
-        Preserve unchanged source bytes/inodes. Publish ZIP history after source
-        writes, even for a clean explicit save. Later I/O/history failure may leave
-        earlier files saved; a later save or close retries history. No project transaction,
-        implicit persistence, autosave scheduler, or Git history is supplied.
+        Today that is the schematic (:meth:`Schematic.save
+        <kicad_primitives.schematics.Schematic.save>`). An artifact that was
+        never opened is never written. The save runs no KiCad, writes no
+        backup, and checks no lock (ADR 0011 D5).
+
+        Raises:
+            SchematicSaveError: some changed sheet files were not written;
+                its ``results`` list what saved and what did not.
         """
         self._check_open()
-        from ._project_persist import save_project
-
-        save_project(self, None, kicad_cli=kicad_cli)
+        if self._schematic is not None:
+            self._schematic.save()
 
     def erc(self, *, kicad_cli: str | PathLike[str] | None = None) -> ErcReport:
         """Check the full pending hierarchy without saving or clearing changes.
