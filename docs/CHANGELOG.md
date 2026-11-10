@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Capture HITL research as adversarial map input and a post-1.0 MCP anchor: `docs/review/hitl-comparison-2026-11-10.md` and proposed ADR 0012 (`docs/adr/0012-future-mcp-tool-surface.md`). Not accepted; not a 1.0 gate; no public API change.
+
 - Implement ADR 0011, the schematic document model (#75). Breaking, pre-1.0:
   - Nouns: the one-file class `Schematic` is now `SheetFile` (KiCad `SCH_SCREEN`); `SheetInstance` (the box) is now `SheetSymbol`, and `SheetFile.sheets` is `sheet_symbols`. The new layer-1 `Schematic` is the project's set of sheet trees, with `files`, `root_files`, `file(path)`, `save()`, `validate()`, and `revert()`. `Project.schematic()` returns it; `Project.schematics()` and `Project.schematic(path)` are removed.
   - `Project.open(path=".", on_close="save")`: a directory or any file in it, which must hold exactly one `*.kicad_pro`. Root sheet files come from `top_level_sheets`, else `<name>.kicad_sch`, and must exist (`Project.root_sheet_files`). The PCB is `<name>.kicad_pcb`. `on_close` is `save`, `discard`, or `raise` (`ProjectUnsavedError`).
