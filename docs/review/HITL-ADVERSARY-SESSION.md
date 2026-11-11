@@ -1,6 +1,6 @@
 # HITL adversary session (setup)
 
-Status: session stub. Work in this worktree only.
+Status: complete. Output: [external-survey-synthesis-2026-11-11.md](external-survey-synthesis-2026-11-11.md) (Structured-B: four external notes plus HITL, one synthesis).
 
 Primary checkout: `/Users/jplocher/Dropbox/KiCad/kicad-primitives` is free for #78 (ADR 0010 grilling).
 

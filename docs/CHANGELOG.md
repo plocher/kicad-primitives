@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Capture HITL research as adversarial map input and a post-1.0 MCP anchor: `docs/review/hitl-comparison-2026-11-10.md` and proposed ADR 0012 (`docs/adr/0012-future-mcp-tool-surface.md`). Not accepted; not a 1.0 gate; no public API change.
+- Add a Structured-B survey of four more KiCad-agent projects (kicad-happy, Seeed kicad-mcp-server, KiCad-AI-Assistant, KiCadAI) and a synthesis with a claim matrix and ranked cracks (`docs/review/external-survey-synthesis-2026-11-11.md`). Research only; no decisions.
 
 - Implement ADR 0011, the schematic document model (#75). Breaking, pre-1.0:
   - Nouns: the one-file class `Schematic` is now `SheetFile` (KiCad `SCH_SCREEN`); `SheetInstance` (the box) is now `SheetSymbol`, and `SheetFile.sheets` is `sheet_symbols`. The new layer-1 `Schematic` is the project's set of sheet trees, with `files`, `root_files`, `file(path)`, `save()`, `validate()`, and `revert()`. `Project.schematic()` returns it; `Project.schematics()` and `Project.schematic(path)` are removed.
