@@ -195,5 +195,6 @@ The owner reviewed the cracks. Positions:
 ## Effect on PR #83
 
 - The HITL note needs no correction. Its "claims worth attacking" rows are now answered or sharpened here.
-- ADR 0012 stays **Proposed only**. The edits above wait for the owner.
-- Recommended: land this synthesis and the four notes in #83, apply the ADR 0012 edits the owner accepts, then merge.
+- ADR 0012 is revised with the owner decisions above and stays **Proposed only**.
+- ADR 0003 carries the owner's 2026-11-11 amendment (C5).
+- Follow-ups: comments on #78, #34, #79; new tickets #84 (grill), #85 (test gate), #86 (deferred research).
