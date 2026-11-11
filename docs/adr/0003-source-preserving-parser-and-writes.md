@@ -271,6 +271,8 @@ The write contract has three parts:
 
 Byte preservation is the measure of part 2: "unchanged outside the scope". It is not a goal on its own.
 
+Byte preservation has no role inside an artifact that an operation creates or deletes as a whole ("create a new project", "delete this library file"). There is nothing to compare against. Part 1 carries creation; deletion is checked by absence. The scope boundary moves up one level: siblings and files outside the created or deleted artifact stay unchanged. Inserting or deleting a node inside an existing file is not whole-artifact creation or deletion; the surrounding content is still preserved.
+
 **Verification is a functional and unit test concern, not a runtime preventive check.**
 The operation-specific verification classes above (no-op, targeted edit, connectivity-preserving, intentional electrical) are acceptance contracts for tests.
 Prove the tooling robust and reliable before release. Do not make the user absorb the project's lack of confidence at runtime.

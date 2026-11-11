@@ -226,8 +226,9 @@ This does not authorize parallel decision-making or reopen the one-at-a-time hum
   operation's scope allows; everything else round-trips unchanged. Output must also be
   schema-correct: KiCad's own save is the reference for created and changed nodes. Byte
   preservation measures "unchanged outside the scope"; it does not limit a scope the operation
-  needs. Prove this in functional and unit tests before release, not with runtime checks
-  (ADR 0003 amendment 2026-11-11).
+  needs, and it has no role inside a whole artifact that is created or deleted (only its
+  siblings stay unchanged). Prove this in functional and unit tests before release, not with
+  runtime checks (ADR 0003 amendment 2026-11-11).
 
 - **Simplicity is always better than complexity**.  Design principles like YAGNI, DRY argue that simple and correct always beats complex, because complex is often not correct.
    - **One parser.** Do not add an s-expression parser beside the one chosen; improve and extend it.
