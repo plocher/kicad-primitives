@@ -143,7 +143,7 @@ kicad-happy carries `diagnostics` for near-miss joins and skipped steps. Our pri
 
 Follow-up: **park**. Revisit if a consumer reports a silent partial read.
 
-## Proposed ADR 0012 edits (for owner decision, not applied)
+## Proposed ADR 0012 edits (applied 2026-11-11, as adjusted by the owner decisions below)
 
 1. §6 becomes "Relationship to external KiCad-agent projects". HITL plus the four surveyed projects, each with one line on what it informs. Reviews live in `docs/review/`; popularity accepts nothing.
 2. Candidate C wording: sibling **agent surface** with one tool contract; MCP and CLI-plus-JSON-Schema are transports (C6).
@@ -156,7 +156,7 @@ Follow-up: **park**. Revisit if a consumer reports a silent partial read.
 9. Release composites: netlist compare and DRC parity as separate named steps (C7).
 10. Open questions: add rule 8 scope (C9) and item-creation timing (C4).
 
-## Proposed tickets and grills (for owner decision, not filed)
+## Proposed tickets and grills (filed 2026-11-11; see Owner decisions)
 
 | Item | Kind | Attach to |
 | --- | --- | --- |
@@ -195,6 +195,6 @@ The owner reviewed the cracks. Positions:
 ## Effect on PR #83
 
 - The HITL note needs no correction. Its "claims worth attacking" rows are now answered or sharpened here.
-- ADR 0012 is revised with the owner decisions above and stays **Proposed only**.
-- ADR 0003 carries the owner's 2026-11-11 amendment (C5).
+- ADR 0012 is revised with the owner decisions above and **accepted** by the owner on 2026-11-11 (post-1.0 anchor).
+- ADR 0003 carries the owner's 2026-11-11 amendment (C5), **accepted** the same day.
 - Follow-ups: comments on #78, #34, #79; new tickets #84 (grill), #85 (test gate), #86 (deferred research).
