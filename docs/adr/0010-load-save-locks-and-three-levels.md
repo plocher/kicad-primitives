@@ -39,9 +39,9 @@ A first pass in the same session kept `open` and `close`. It produced eleven loc
 
 ## Definition of success
 
-- A unit test can state what each level-0 call does in one sentence.
+- A functional test can state what each level-0 call promises in one sentence.
 - Each protection that leaves a primitive is still available, as a separate call or as a level-2 function.
-- A client at level 1 works in a model. It names files only when it wants to.
+- A client at level 1 works in a model. If level-1 capabilities are insufficient or undesirable, it uses level-0 capabilities to access files.
 - Each rule belongs to one level.
 
 ## KiCad facts that drive the decision
@@ -155,16 +155,44 @@ This keeps the three layers that the owner locked on #78 and sharpens their mean
 5. **Lock and unlock** (`open`, `close`). `open` fails when another session holds the lock. No save consults a lock.
 6. **Table edits with explicit values:** `add_entry(nickname, uri)`. URI-to-path and path-to-URI are pure functions of the values given.
 7. **Find the configuration directory**, as its own call.
+8. **Make an empty model** of a file kind, for a file that does not exist yet. A project often has no `sym-lib-table`. A test machine has no `kicad_common.json`.
 
 Levels 0 and 1 have no read-only mode. A tool that does not call `save()` writes nothing.
 A dry run is a load, changes in memory, and no save.
 
 A sheet file has a level-0 load because it is a file. It has no open and no close.
 
+#### The model is a design boundary
+
+A model carries the methods that a client needs to read it and to change it. The edit operations that exist today are part of the model.
+A model is a self-contained and self-consistent abstraction.
+The levels above it, and clients, depend on its surface.
+That surface separates public from private, and stable from experimental. Both distinctions are necessary for an abstraction that can change over time.
+
+#### Files and their loaders
+
+One file and one model is the unit of level 0. This table lists the KiCad files and the state of the code on 2026-11-11.
+
+| File | Model today | State |
+| --- | --- | --- |
+| `.kicad_sym` | `SymbolLibrary` | Exists |
+| `.kicad_mod`, in a `.pretty` directory | `Footprint`, with `FootprintLibrary` for the directory | Exists |
+| `sym-lib-table`, `fp-lib-table` | `LibraryTable` | Exists, but only reachable through `LibraryTables` |
+| `.kicad_sch` | `SheetFile` | Exists |
+| Exported netlist (`.net`) | `Netlist` | Exists, read only |
+| `.kicad_pro` | None. `Project` reads it internally. | Loader to build |
+| `kicad_common.json` | None. The table code reads only its path variables. | Loader to build |
+| `.kicad_pcb` | None. `Project` keeps its bytes. | Placeholder until the PCB work (#34) |
+| `.kicad_wks`, `.kicad_dru`, `.kicad_prl`, `.kicad_jobset`, `design-block-lib-table` | None | Placeholder |
+
+A file kind with no loader gets a placeholder. The placeholder raises an explicit not-implemented error. This keeps the shape complete, and a client sees at once what is missing.
+
 ### D4. Level 1: the model
 
-- **The root.** `KiCad.begin(settings, symbol_table, footprint_table)` joins parts that are already loaded. It reads nothing. A test harness passes its own parts. `KiCad.load()` is built on `begin`: it finds the configuration directory, loads the three files, and joins them.
-- **A project** is an association of files: the project file, the sheet files, the tables, the board, and the settings for fabrication. `Project.load(ref)` finds the project file, walks the sheet hierarchy, loads each sheet once, and joins them. The project tables go over the global tables. The reference rule of ADR 0011 D2 stays.
+- **The root.** `KiCad.begin(settings, symbol_table, footprint_table)` joins parts that are already loaded. It reads nothing, and it uses only the values that it gets. A test harness passes its own parts. `KiCad.load()` is built on `begin`: it finds the configuration directory, loads the three files, reads the path variables of the process environment, and joins them.
+- **A project** is an association of files: the project file, the sheet files, the tables, the board, and the settings for fabrication. `Project.begin(...)` joins loaded parts and reads nothing, as `KiCad.begin` does. `Project.load(ref)` is built on it: it finds the project file, walks the sheet hierarchy, loads each sheet once, and joins them. The reference rule of ADR 0011 D2 stays.
+- **Models join the root by an explicit add.** Models are loaded independently. An add joins a project to the root, and the project tables then go over the global tables. A model that is not added works alone, but it cannot use what the root holds. Before the add, a project resolves only its own tables. A convenience can load and add in one call.
+- **Tables.** A table can include other table files. The set of tables is a level-1 association that follows KiCad's include rule.
 - **Parts are single inside one model.** A part reached twice is the same object. Two loads of the same project are two models.
 - **Libraries are reached through the model.** By nickname, a library loads on first use. Listing nicknames loads no library. By path, a library joins the same collection, marked as not in a table. The table file does not change.
 - **Adding a library to a table** is `table.add(lib, nickname)` on an explicit table. The URI takes the form that fits that table. Like KiCad, the nickname defaults to the file stem.
@@ -175,9 +203,52 @@ A sheet file has a level-0 load because it is a file. It has no open and no clos
 
 A client that works at level 1 reaches sheets as parts of the project. It does not load a sheet file itself.
 
+#### Worked example: one project in one root
+
+The names are illustrative. The example leaves out nested tables, the board, and locks.
+
+```python
+# Level 0: one file, one model.
+config_dir   = find_config_dir()                    # or a directory that a test names
+settings     = Settings.load(config_dir / "kicad_common.json")
+global_syms  = LibraryTable.load(config_dir / "sym-lib-table")
+global_fps   = LibraryTable.load(config_dir / "fp-lib-table")
+
+project_dir  = Path("boards/SPCoast")
+project_file = ProjectFile.load(project_dir / "SPCoast.kicad_pro")
+project_syms = LibraryTable.load(project_dir / "sym-lib-table")
+project_fps  = LibraryTable.load(project_dir / "fp-lib-table")
+
+# The sheet hierarchy, by KiCad's rules, written out by hand.
+sheets, todo = {}, [project_dir / name for name in project_file.top_level_sheets]
+while todo:
+    path = todo.pop()
+    if path not in sheets:                          # a file used twice loads once
+        sheets[path] = SheetFile.load(path)
+        todo += [path.parent / s.filename for s in sheets[path].sheet_symbols]
+
+# Level 1: join. These calls read nothing.
+root    = KiCad.begin(settings, global_syms, global_fps)
+project = Project.begin(project_file, sheets, project_syms, project_fps)
+root.add(project)                                   # project tables now go over the global ones
+
+lib = project.symbol_libraries["Device"]            # this library file loads here, on first use
+
+# The level-1 convenience gives the same result:
+root    = KiCad.load()
+project = root.load_project("boards/SPCoast")
+```
+
+What the example showed:
+
+- A project needs its own join, `Project.begin`, as the partner of `KiCad.begin`.
+- Level 0 needs the "make an empty model" block. Today a table that does not exist opens as an empty table. No other file kind does this.
+- The hierarchy walk is KiCad's rule, so `Project.load(ref)` is level 1. A client can also write the walk itself from level-0 loads.
+- Path variables have a hidden input today. The table code merges them from the settings, the project file, the project directory, and the process environment (`_build_path_variables` in `src/kicad_primitives/tables.py`). Under this ADR, `KiCad.load()` reads the process environment, and `begin` gets the values.
+
 ### D5. Level 2: convenience choices
 
-These are candidates. The owner keeps or drops each one later.
+These are thought anchors, not proposals. They show what level 2 is for. The owner decides later which ones exist.
 
 - `save_safely()`: validity check, backup, save, and retry.
 - `save_if_safe()`: lock, check for a change on disk, save, and unlock.
@@ -187,14 +258,14 @@ These are candidates. The owner keeps or drops each one later.
 
 Dry-run reporting stays with the client.
 
-ADR 0011 D10 said that no recipes module ships until a recipe is needed. `save_safely()` and `save_if_safe()` are the first ones that the owner named.
+ADR 0011 D10 stays: no level-2 function ships until one is needed. `save_safely()` and `save_if_safe()` are the first examples that the owner named.
 
 ### D6. What this removes
 
 - The process-wide registry of open objects, and "one copy per file per process".
 - `close()`, `discard()`, and `with` support on models, and the errors for use after close.
 - The `on_close` choice at levels 0 and 1.
-- The checks inside `save()`: the conflict check and its `overwrite` argument, the validity check, the symbol `.bak` copy, and the retry. They become the separate calls of D3 and the functions of D5.
+- The checks inside `save()`: the conflict check and its `overwrite` argument, the validity check, the symbol `.bak` copy, and the retry. They become the separate calls of D3. A level-2 function can combine them.
 - The library open that takes a nickname-or-path string, and its hidden lookup in the default tables.
 - "Library ownership follows type" and "one `KiCad` object per config home per process".
 - The special error for a close on one sheet file of a project.
@@ -218,10 +289,10 @@ The owner accepts this cost. The other ADR 0009 write promises stay: no partial 
 ## Not decided here
 
 - The names of the calls.
-- How a project gets its root: as an argument, or loaded behind `Project.load(ref)`.
+- How the package marks a call as public or private, and as stable or experimental.
 - What a save of several files reports when one file fails. This is the part of ADR 0011 D4 that is not the conflict class or the retry.
 - Whether a `with` block marks the span of a lock.
-- Which level-2 functions ship, and in which order.
+- Which level-2 functions exist.
 
 ## Relationship to earlier ADRs
 
@@ -241,7 +312,7 @@ The owner accepts this cost. The other ADR 0009 write promises stay: no partial 
   - Replaces: D5, `on_close`, and who ends things.
   - Replaces: the `discard()` half of D6. Revert is deferred. The fingerprint stays as the record for the "changed on disk" check.
   - Renames: the layer-0 `SheetFile.open(path)` of D1 becomes a load.
-  - Meets: the condition of D10 for the first level-2 functions.
+  - Keeps: D10. No level-2 function ships until one is needed.
 - **ADR 0012.**
   - Section 3 stays agent-surface policy. Its sentence "the library rule does not change" needs new wording, because the package gains lock and unlock.
   - Section 2 maps onto load, change, validate, and save without a change of intent.
@@ -261,11 +332,12 @@ A possible order for the implementation tickets:
 
 1. Split save at level 0: the bare save, the "changed on disk" check, the validity check, and the backup.
 2. Remove the registry, `close()`, `discard()`, `with`, and `on_close` from models. Rename the file opens to loads.
-3. Add the lock block, after the research.
-4. Add the root: find the configuration directory, load the settings, `KiCad.begin`, and `KiCad.load`.
-5. Add the library collection on the model, and `table.add`.
-6. Move `Project` to `load`, with `open` and `close` as its lock.
-7. Add the first level-2 functions.
+3. Add the loaders for `kicad_common.json` and `.kicad_pro`, the empty models, and the placeholders for file kinds with no loader.
+4. Add the lock block, after the research.
+5. Add the root: find the configuration directory, `KiCad.begin`, and `KiCad.load`.
+6. Add the library collection on the model, and `table.add`.
+7. Move `Project` to `begin` and `load`, with the explicit add to the root, and with `open` and `close` as its lock.
+8. Add a level-2 function when a client needs one.
 
 ADR 0006 scope does not change. The shipped surfaces of Projects, Schematics, Symbol libraries, Footprint libraries, and Tables change, so their usage pages change with each ticket.
 
