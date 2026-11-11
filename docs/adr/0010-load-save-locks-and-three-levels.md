@@ -206,6 +206,7 @@ A client that works at level 1 reaches sheets as parts of the project. It does n
 #### Worked example: one project in one root
 
 The names are illustrative. The example leaves out nested tables, the board, and locks.
+Until the calls are designed, this example is the logical placeholder for `KiCad.load()` and for the project load: each convenience does what the level-0 and join steps here do.
 
 ```python
 # Level 0: one file, one model.
