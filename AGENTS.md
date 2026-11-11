@@ -222,8 +222,12 @@ This does not authorize parallel decision-making or reopen the one-at-a-time hum
 
    - **Functional gates, not fixtures.** A behavioural test (round-trip a real file byte for
   byte; export a netlist with `kicad-cli` before and after an edit and compare connectivity)
-   - **Byte preservation is a feature.** An edit touches only the nodes it means to; everything
-  else round-trips unchanged. KiCad's own save is the reference for formatting inserted nodes.
+   - **Byte preservation is a feature, proven by tests.** An edit touches only the nodes its
+  operation's scope allows; everything else round-trips unchanged. Output must also be
+  schema-correct: KiCad's own save is the reference for created and changed nodes. Byte
+  preservation measures "unchanged outside the scope"; it does not limit a scope the operation
+  needs. Prove this in functional and unit tests before release, not with runtime checks
+  (ADR 0003 amendment 2026-11-11).
 
 - **Simplicity is always better than complexity**.  Design principles like YAGNI, DRY argue that simple and correct always beats complex, because complex is often not correct.
    - **One parser.** Do not add an s-expression parser beside the one chosen; improve and extend it.

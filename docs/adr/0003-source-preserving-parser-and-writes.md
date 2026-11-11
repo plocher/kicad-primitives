@@ -2,7 +2,7 @@
 
 Date: 2026-10-22
 
-Status: Accepted by the owner on 2026-10-22.
+Status: Accepted by the owner on 2026-10-22. Amended by the owner on 2026-11-11 (write contract and where verification runs; see the amendment at the end).
 
 Ticket: [Write philosophy: byte-preserve vs tree rewrite vs one parser](https://github.com/plocher/kicad-primitives/issues/4)
 
@@ -250,3 +250,41 @@ The ticket records local evidence locations. Raw scratch data remain local. No o
 
 This decision does not resolve the job/session seam, complete lift inventory, CLI locator policy, or 1.0 completeness.
 Those remain their own tickets and owner decisions.
+
+## Amendment 2026-11-11: write contract and where verification runs
+
+Source: owner positions on the [external survey synthesis](../review/external-survey-synthesis-2026-11-11.md), crack C5.
+
+### Problem
+
+The text above can be read as "byte preservation is the goal" and as "verification runs at runtime". Both readings are wrong.
+Byte preservation is necessary for some uses but not sufficient.
+A strict byte rule can also block an operation whose correct result touches many nodes, such as `update_from_library`.
+
+### Decision
+
+The write contract has three parts:
+
+1. **Schema-correct.** Output is valid KiCad 10 content that KiCad itself accepts.
+2. **No unrelated corruption.** Content outside the operation's scope is unchanged.
+3. **The operation defines its scope.** Each operation states what it may change. `update_from_library` may change many attributes and must leave named others alone. A larger rewrite is correct when the operation's meaning requires it.
+
+Byte preservation is the measure of part 2: "unchanged outside the scope". It is not a goal on its own.
+
+**Verification is a functional and unit test concern, not a runtime preventive check.**
+The operation-specific verification classes above (no-op, targeted edit, connectivity-preserving, intentional electrical) are acceptance contracts for tests.
+Prove the tooling robust and reliable before release. Do not make the user absorb the project's lack of confidence at runtime.
+
+Runtime checks that stay:
+
+- input syntax and supported-format intake;
+- operation preconditions, so an unsupported or unsafe operation fails before any change (unchanged from above);
+- file-integrity promises (ADR 0009): no silent overwrite, no partial file, no stray files, native backups from disk.
+
+Test contracts gain one gate for part 1: compare created or changed output with KiCad's own re-save (for example `kicad-cli … upgrade --force`) as whitespace-free token streams, with a reasoned allowlist. This is the testable form of "KiCad's save output is the reference" above.
+
+### Consequences
+
+- No runtime byte-comparison or post-write re-verification is added to save paths. The current code has none.
+- New operations document their scope in their usage page and test it.
+- Connectivity checks remain client sequences (ADR 0009), not runtime steps.

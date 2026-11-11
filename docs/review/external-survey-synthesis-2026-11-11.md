@@ -174,6 +174,24 @@ Follow-up: **park**. Revisit if a consumer reports a silent partial read.
 4. **Library authoring is unpressed.** No subject edits symbol or footprint libraries in depth. Our deepest shipped area got no adversary.
 5. **Snapshots move.** Each clone is one commit. Two subjects changed in the last week.
 
+## Owner decisions (2026-11-11)
+
+The owner reviewed the cracks. Positions:
+
+| Crack | Decision | Where recorded |
+| --- | --- | --- |
+| C1 session model | Version 1 is correct first: each call is one full lifecycle (open, apply, validate, save or discard), with batch and preview. Sessions, caching, and predictive reads are version 2 wins. A session start is the trigger for one pre-session backup, skipping in-session backups, with cleanup at end. | ADR 0012 §2 |
+| C2 KiCad open | Read-only when a KiCad lock is seen. The interactive session may ask the user to fix it. No lock-removal API in version 1. Library rule unchanged (lock is a query). | ADR 0012 §3; comment on #78 |
+| C3 read depth | Agreed. | Comments on #34, #79 |
+| C4 item creation | Agreed. | Grill #84 |
+| C5 write contract | Byte preservation is necessary, not sufficient. The contract is schema-correct output plus no corruption outside the operation's scope; the operation defines its scope. Byte preservation is a test concern, not a runtime preventive check: prove the tooling before release. | ADR 0003 amendment; AGENTS; test gate #85 |
+| C6 transport | Agreed. MCP is one transport. | ADR 0012 candidate C |
+| C7 release gates | Agreed, and wider: netlist parity is one gate among DRC, inventory, supply chain, errata, and more. | ADR 0012 §5 |
+| C8 evidence | Agreed, with staged adoption: tools without the vocabulary are wrapped as `unknown`. | ADR 0012 §4.6 |
+| C9 IPC / KiCad API | Agreed. The API is incomplete; expect to re-implement. | ADR 0012 §6 |
+| C10 native backends | Agreed. Native implementation is the better long-term answer; timing is per capability. | ADR 0012 §9; deferred research #86 |
+| C11 degraded read | Parked (no owner action requested). | — |
+
 ## Effect on PR #83
 
 - The HITL note needs no correction. Its "claims worth attacking" rows are now answered or sharpened here.
