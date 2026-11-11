@@ -3,6 +3,7 @@
 Date: 2026-11-10, revised 2026-11-11
 
 Status: **Accepted by the owner on 2026-11-11.** Post-1.0 anchor: not a 1.0 gate and not an implementation ticket. The 2026-11-11 revision records owner positions from the [external survey synthesis](../review/external-survey-synthesis-2026-11-11.md).
+Amended by [ADR 0010](0010-load-save-locks-and-three-levels.md) on 2026-11-11: the wording of section 3 about the library lock rule. Sections 2 and 4.3 rely on the conflict check. ADR 0010 makes that check a separate call, so the agent surface calls it before a save.
 
 Related: ADR 0002 (TOC), ADR 0003 (writes, as amended 2026-11-11), ADR 0005 (distribution), ADR 0006 (1.0 bar), ADR 0007 (private CLI discovery), ADR 0008 (artifacts), ADR 0009 (primitives), ADR 0011 (schematic model). Review input: [HITL comparison](../review/hitl-comparison-2026-11-10.md) and the [external survey synthesis](../review/external-survey-synthesis-2026-11-11.md).
 
@@ -120,7 +121,7 @@ KiCad 10 cannot save or revert a schematic over its API. A file writer beside a 
 - **Rule:** when a native KiCad lock exists for any document a call would write, the call is read-only. Mutating tools refuse with a clear message that names the locked file and asks the user to close it in KiCad.
 - Read tools continue to work.
 - **No lock-removal tool in version 1.** A stale lock after a KiCad crash is the user's to fix. An interactive session may ask the user to fix it.
-- The library rule does not change: `is_locked` and `lock_file` stay queries (ADR 0009). The refusal is agent-surface policy.
+- No package write consults a lock, and `is_locked` and `lock_file` stay queries (ADR 0009). The package can also take and release a lock (ADR 0010). The refusal is agent-surface policy.
 - A KiCad plugin that runs inside KiCad is a different product with different options. It is out of scope here.
 
 ### 4. Tool design rules

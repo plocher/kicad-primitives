@@ -2,7 +2,7 @@
 
 Date: 2026-11-11
 
-Status: Proposed. The owner agreed the direction in the grilling session on [#78](https://github.com/plocher/kicad-primitives/issues/78) on 2026-11-11. Not accepted.
+Status: Accepted by the owner on 2026-11-11. Decisions grilled with the owner on [#78](https://github.com/plocher/kicad-primitives/issues/78) on 2026-11-11, and reviewed on [PR #87](https://github.com/plocher/kicad-primitives/pull/87).
 
 Related: [ADR 0008](0008-artifact-objects-and-explicit-persistence.md), [ADR 0009](0009-primitives-not-an-executive.md), [ADR 0011](0011-schematic-document-model-save-and-revert.md), [ADR 0012](0012-future-mcp-tool-surface.md), [#79](https://github.com/plocher/kicad-primitives/issues/79) (sheet model and per-instance data).
 
@@ -315,19 +315,22 @@ The owner accepts this cost. The other ADR 0009 write promises stay: no partial 
   - Renames: the layer-0 `SheetFile.open(path)` of D1 becomes a load.
   - Keeps: D10. No level-2 function ships until one is needed.
 - **ADR 0012.**
-  - Section 3 stays agent-surface policy. Its sentence "the library rule does not change" needs new wording, because the package gains lock and unlock.
+  - Section 3 stays agent-surface policy. Its sentence about the library lock rule has new wording, because the package gains lock and unlock.
   - Section 2 maps onto load, change, validate, and save without a change of intent.
+  - Sections 2 and 4.3 rely on the conflict check. That check is now a separate call, so the agent surface calls it before a save.
 - **Ticket #78.** This ADR replaces the owner locks in its comments about scopes that close, library ownership, and the save and revert table. It answers the open point there about the nickname: it defaults to the file stem.
 
 ## Consequences and implementation order
 
-This ADR authorizes no code. Implementation tickets follow acceptance.
+This ADR authorizes no code. Implementation tickets follow.
 
-On acceptance:
+Done at acceptance, on 2026-11-11:
 
-- Update `AGENTS.md` and `CONTEXT.md`.
-- Update the index and mark the replaced parts of ADR 0008, ADR 0009, ADR 0011, and ADR 0012.
-- Close #78 and add its line to the map.
+- `AGENTS.md` and `CONTEXT.md` follow this ADR.
+- The index, ADR 0008, ADR 0009, ADR 0011, and ADR 0012 carry amendment notes.
+- #78 is closed, and the map has its line.
+
+Until the implementation tickets land, the code keeps the earlier lifecycle. The usage pages describe the code, so each page changes with its ticket.
 
 A possible order for the implementation tickets:
 
@@ -342,7 +345,7 @@ A possible order for the implementation tickets:
 
 ADR 0006 scope does not change. The shipped surfaces of Projects, Schematics, Symbol libraries, Footprint libraries, and Tables change, so their usage pages change with each ticket.
 
-## Glossary changes (CONTEXT.md, on acceptance)
+## Glossary changes (CONTEXT.md)
 
 Add:
 

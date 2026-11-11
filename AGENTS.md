@@ -46,27 +46,42 @@ contract; older versions are supported read-only when possible.
 
 ## Scope: public functional areas
 
+### Load and save, locks, and three levels (locked)
+
+Canonical decision: [ADR 0010](docs/adr/0010-load-save-locks-and-three-levels.md). It replaces parts of ADR 0008, ADR 0009, and ADR 0011. Where another line in this file conflicts with it, ADR 0010 wins.
+Transition: the code still has the earlier lifecycle (`open`, `close`, `discard`, `on_close`, the registry, and the checks inside `save()`). Implementation tickets move it. New work follows ADR 0010. Do not extend the earlier lifecycle. The usage pages describe the code, so each page changes with its ticket.
+Load and save move data and hold nothing. Open and close take and release a lock, and do nothing else.
+Every load makes a new, independent model. No registry, no shared copy, and no close on a model. A model that a client drops loses its unsaved edits.
+`save()` writes the file and checks nothing. It replaces the file whole. The "changed on disk" check, the validity check, and the backup are separate calls.
+Known cost: a bare `save()` can write over a file that changed on disk. "No silent overwrite" holds only when the client uses the check, the lock, or a level-2 function.
+Level 0 is building blocks: one file, one model, one job per call. Level 1 is what KiCad requires: it creates and manages the in-memory model. Level 2 is convenience choices built only from the levels below.
+A client at level 1 works in a model. If level-1 capabilities are insufficient or undesirable, it uses level-0 capabilities to access files.
+A model is a design boundary. It carries its own methods. Its surface separates public from private, and stable from experimental.
+Every KiCad file kind has a loader, or a placeholder that raises an explicit not-implemented error (table in ADR 0010 D3).
+Level 1: `KiCad.begin(...)` and `Project.begin(...)` join loaded parts and read nothing. `KiCad.load()` and `Project.load(ref)` are built on them. A model joins the root by an explicit add. The worked example in ADR 0010 D4 is the logical placeholder for the conveniences.
+Libraries are reached through the model: by nickname on first use, or by path, marked as not in a table. `table.add(lib, nickname)` defaults the nickname to the file stem, like KiCad.
+Levels 0 and 1 have no read-only mode and no `on_close`. A dry run is a load, changes in memory, and no save.
+No level-2 function ships until one is needed. The ADR 0010 D5 items are thought anchors, not proposals.
+Lock code waits for the research on KiCad 10.0.7 lock files (#88). A lock of the package's own for libraries, and revert, are deferred.
+Names of calls in ADR 0010 are illustrative, except load and save, open and close, and `begin`.
+
 ### Artifact-object library model (locked)
 
 Canonical decision: [ADR 0008](docs/adr/0008-artifact-objects-and-explicit-persistence.md).
 This package is a library of KiCad capabilities, not a client application or workflow engine.
-Clients open an artifact, select its objects, inspect or change them, inspect pending changes, and choose save, save as, or discard.
+Clients load an artifact, select its objects, inspect or change them, inspect pending changes, and choose save or save as.
 Expose focused operations on the relevant objects, such as `PlacedSymbol.set_attribute`, rather than project-level target-selection workflows.
-Mutations change in-memory content. Do not save on mutation, discard, or finalization. A layer-0 artifact's `close()` saves pending changes (ADR 0008 amendment); a scope's `close()` applies its `on_close` choice (ADR 0011).
+Mutations change in-memory content. Only an explicit save writes (ADR 0010).
 Clients own selection, iteration, approvals, batch reports, and application dry-run behavior.
 The library owns KiCad invariants, source preservation, change tracking, and applicable persistence safeguards.
 Project ownership supplies schematic and PCB context. It does not force every edit onto `Project`.
 `set_attribute` means create if absent, update if different, and exact no-op if equal. Reject ambiguity.
 Reference annotation and flags have their own semantics.
-`SymbolLibrary`, physical `LibraryTable`, `SheetFile`, and `Footprint` artifacts implement the lifecycle defined in ADR 0008 and its 2026-10-29 amendment.
-Open then close never writes and never fails. A clean `close()` is a no-op exit.
-A dirty `close()` runs the normal `save()`. If that save fails, close raises and the artifact stays open with its pending changes.
-`discard()` is terminal exit without writing. It invalidates owned editable handles, not a reset for continued editing.
-A `with` block closes on normal exit and discards on an exception. Close after exit is idempotent.
+ADR 0010 replaces the ADR 0008 lifecycle of `close()`, `discard()`, and `with`, and the 2026-10-29 close amendment. `SymbolLibrary`, physical `LibraryTable`, `SheetFile`, and `Footprint` keep that lifecycle in code until the implementation tickets land.
 Single-file save-as refuses existing or unsafe destinations and rebinds only after success.
-Changed independent symbol-library overwrites require native `Foo.bak` backup behavior, with the bytes on disk at save time. Table saves do not invent a backup.
-`Project` save, close, backup, and save-as follow ADR 0011 (below). Save writes files only; it runs no KiCad, makes no ZIP, and checks no lock.
-Do not acquire or delete native peer locks. `is_locked` and `lock_file` are queries; no write consults them.
+KiCad's symbol-library save writes a native `Foo.bak` from the bytes on disk. Under ADR 0010 that backup is a separate call. Table saves do not invent a backup.
+`Project` save, backup, and save-as follow ADR 0011 as amended by ADR 0010. Save writes files only; it runs no KiCad, makes no ZIP, and checks no lock.
+`is_locked` and `lock_file` are queries; no write consults them. Lock and unlock are a level-0 block under ADR 0010. Do not write lock code before the research (#88). Do not delete another session's lock.
 Git-backed `.history` interoperability remains deferred research #58, owner grilling #59, and design #60.
 Do not add a Git dependency, autosave scheduler, branching/merge/rollback policy, or a universal session/transaction framework.
 Existing gaps are debt to fix, not precedent. No compatibility aliases for misleading pre-1.0 names without an actual consumer need.
@@ -75,28 +90,28 @@ Existing gaps are debt to fix, not precedent. No compatibility aliases for misle
 
 Canonical decision: [ADR 0009](docs/adr/0009-primitives-not-an-executive.md).
 A public operation does one job to one artifact, runs KiCad only when that is its stated purpose, calls no other public capability as a hidden step, and makes no workflow decision for the client.
-File-integrity promises stay inside primitives: no silent overwrite (conflicts raise; `save(overwrite=True)` is the explicit way through), no partial file, no stray KiCad files, native backups from disk.
+File-integrity promises inside primitives: no partial file, no stray KiCad files, and no in-memory original. ADR 0010 moves "no silent overwrite" and the native backup out of `save()` into separate calls.
 Policy (connectivity verification, backup, ERC, discovery roots, URI style, peer-lock guards) lives above primitives, in client code or in plain recipe functions built only from public primitives. Primitives never call recipes. ADR 0011 D10: no recipes module ships until a recipe is needed.
-Every artifact has one lifecycle: open, read, modify, validate, write, close. `validate()` is public and runs no KiCad. `is_modified` is a setter-maintained flag.
+Every artifact has one sequence: load, read, modify, save (ADR 0010). `validate()` is public, runs no KiCad, and is not a hidden step of `save()`. `is_modified` is a setter-maintained flag.
 Connectivity verification is a client sequence: `before = project.netlist()`, edit, `after = project.netlist()`, `before == after`. The package does not predict or excuse expected electrical changes.
 Peer locks are a query (`is_locked`, `lock_file`), not a write guard.
-Footprint libraries are two levels: a directory with cached `summaries` and explicit `refresh()`, plus per-file `Footprint` artifacts; `on_close` is chosen at open (`save` default). Delete, rename, create, and copy are immediate directory operations.
+Footprint libraries are two levels: a directory with cached `summaries` and explicit `refresh()`, plus per-file `Footprint` artifacts. ADR 0010 removes their `on_close` choice. Delete, rename, create, and copy are immediate directory operations.
 `update_from_library(library, name)` replaces a project's embedded copy with the library definition, in memory; the family covers symbols, footprints (#34), and worksheets (future).
 The composite operations that predated ADR 0009 were split by ADR 0011 (#75, PR #81). The removed checks were removed, not moved into recipes.
 
 ### Schematic document model, save, and revert (locked)
 
-Canonical decision: [ADR 0011](docs/adr/0011-schematic-document-model-save-and-revert.md), with owner amendments to D6 and D9.
-Layers: layer 0 is one file with the full lifecycle; layer 1 is scopes (`Project`, later `KiCad`) and cross-file documents (`Schematic`); layer 2 is policy. Layer 1 does not hide layer-0 operations.
+Canonical decision: [ADR 0011](docs/adr/0011-schematic-document-model-save-and-revert.md), with owner amendments to D6 and D9, and as amended by ADR 0010.
+Levels follow ADR 0010: level 0 is one file and one model; level 1 is what KiCad requires (`KiCad`, `Project`, `Schematic`); level 2 is convenience choices. Level 1 does not hide level-0 operations.
 Nouns: `SheetFile` is one `.kicad_sch` (KiCad `SCH_SCREEN`); `SheetSymbol` is the box (`SCH_SHEET`); a sheet instance is one placement (`SCH_SHEET_PATH`, #79); `Schematic` is the project's set of sheet trees (`SCHEMATIC`). Do not add a bare `Sheet` class.
 A project reference is a directory or any file in it, with exactly one `*.kicad_pro`. Root sheet files come from `top_level_sheets`, else `<name>.kicad_sch`, and must exist. Entry is through `Project`.
-`Schematic.save()` writes only changed sheet files, children first, under the D4 failure policy (a deliberate deviation from KiCad's rewrite-all). `project.save()` saves every changed owned document and nothing else.
-`Project.open(on_close="save" | "discard" | "raise")` maps KiCad's close-project dialog. Error paths use `discard()`.
-Every artifact gets `revert()` beside `discard()`. In scope now: `SheetFile` and `Schematic`. Library and item revert belong to #78.
-No in-memory original. A fingerprint check runs `stat()` first: a different size is a change; the same size and stamp (device, inode, mtime) are no change; only otherwise is the file read and hashed.
+`Schematic.save()` writes only changed sheet files, children first (a deliberate deviation from KiCad's rewrite-all). ADR 0010 moves the conflict class and the retry of D4 to level 2. `project.save()` saves every changed owned document and nothing else.
+ADR 0010 replaces D5: no `on_close` and no `discard()` at levels 0 and 1. `open` and `close` on a project are its lock.
+`SheetFile` and `Schematic` have `revert()` today. Further revert work is deferred (ADR 0010 D7). At level 0, a new load does the same job.
+No in-memory original. A fingerprint check runs `stat()` first: a different size is a change; the same size and stamp (device, inode, mtime) are no change; only otherwise is the file read and hashed. The fingerprint is the record for the "changed on disk" check.
 `project.backup(destination, size_limit_bytes=None)` archives disk state with explicit arguments and no built-in policy. `project.save_as()` writes, copies, rewrites identity, and rebinds; it runs no proof and writes no ZIP.
 `Netlist` equality compares component identity and typed pin-to-net connections; pin electrical types count because they affect ERC.
-Closing or discarding one project-owned artifact alone, the `KiCad` scope, and library ownership are #78 work.
+ADR 0010 resolves #78: a model has no close, library ownership is gone, and the `KiCad` root is a level-1 join.
 
 ### Functional ownership
 
@@ -132,7 +147,7 @@ Exposed unimplemented operations raise an explicit unsupported-operation excepti
 Canonical decision: [ADR 0012](docs/adr/0012-future-mcp-tool-surface.md). It schedules no work and is not a 1.0 gate.
 An agent surface is a sibling artifact over public primitives: one tool contract, several transports (MCP, CLI plus JSON Schema). Nothing agent-specific enters `kicad_primitives`.
 Version 1 is correct first: each call is one full lifecycle with batch and preview. Sessions and caching are version 2.
-Writes refuse when KiCad holds a lock; the library lock stays a query. Release gates are an open set with a shared verdict vocabulary.
+Writes refuse when KiCad holds a lock. That refusal is agent-surface policy; no package write consults a lock. Release gates are an open set with a shared verdict vocabulary.
 Native backends replace `kicad-cli` one capability at a time, when an ADR 0012 section 9 trigger fires.
 
 Inventory used, unused, and unimplemented capabilities separately from defects and exclusions.
@@ -212,7 +227,7 @@ This does not authorize parallel decision-making or reopen the one-at-a-time hum
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0009, ADR 0011, and ADR 0012 (post-1.0 anchor). Mainline after the decision map is bounded implementation under those ADRs (Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0012. ADR 0010 amends ADR 0008, 0009, and 0011. ADR 0012 is a post-1.0 anchor. Mainline after the decision map is bounded implementation under those ADRs (the ADR 0010 rework, Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
 3. Remaining map grilling is just-in-time (`#8` job/session, `#6` post-1.0 cutover rules) when a workflow needs it—not by lowest issue number.
 
 ## Working agreements
