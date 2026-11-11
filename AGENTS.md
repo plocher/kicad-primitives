@@ -127,6 +127,14 @@ PCB editing belongs to intended scope and follows schematic and library editing 
 Exposed unimplemented operations raise an explicit unsupported-operation exception before making changes.
 3D models remain out of scope until requested. Variants are deferred future work under ADR 0006.
 
+### Future agent tool surface (locked, post-1.0)
+
+Canonical decision: [ADR 0012](docs/adr/0012-future-mcp-tool-surface.md). It schedules no work and is not a 1.0 gate.
+An agent surface is a sibling artifact over public primitives: one tool contract, several transports (MCP, CLI plus JSON Schema). Nothing agent-specific enters `kicad_primitives`.
+Version 1 is correct first: each call is one full lifecycle with batch and preview. Sessions and caching are version 2.
+Writes refuse when KiCad holds a lock; the library lock stays a query. Release gates are an open set with a shared verdict vocabulary.
+Native backends replace `kicad-cli` one capability at a time, when an ADR 0012 section 9 trigger fires.
+
 Inventory used, unused, and unimplemented capabilities separately from defects and exclusions.
 Parity equals used capabilities. Consumer usability also needs migration recipes and documentation.
 Consumer usability is not package completeness. Releasability follows ADR 0006.
@@ -204,7 +212,7 @@ This does not authorize parallel decision-making or reopen the one-at-a-time hum
 ### Next-session default
 
 1. Read map #1 Decisions + this file + survey + ADR index.
-2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0009 and ADR 0011. Mainline after the decision map is bounded implementation under those ADRs (Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
+2. Claim the first open, unblocked, unclaimed frontier ticket unless the owner names another. Locked spine: ADR 0002–0009, ADR 0011, and ADR 0012 (post-1.0 anchor). Mainline after the decision map is bounded implementation under those ADRs (Projects hierarchy, symbol authoring depth, tables, connectivity, and so on).
 3. Remaining map grilling is just-in-time (`#8` job/session, `#6` post-1.0 cutover rules) when a workflow needs it—not by lowest issue number.
 
 ## Working agreements

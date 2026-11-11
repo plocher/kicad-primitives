@@ -2,7 +2,7 @@
 
 Date: 2026-11-10, revised 2026-11-11
 
-Status: **Proposed only.** Not accepted. Not a 1.0 gate. Not an implementation ticket. The 2026-11-11 revision records owner positions from the [external survey synthesis](../review/external-survey-synthesis-2026-11-11.md); the ADR as a whole still waits for owner acceptance.
+Status: **Accepted by the owner on 2026-11-11.** Post-1.0 anchor: not a 1.0 gate and not an implementation ticket. The 2026-11-11 revision records owner positions from the [external survey synthesis](../review/external-survey-synthesis-2026-11-11.md).
 
 Related: ADR 0002 (TOC), ADR 0003 (writes, as amended 2026-11-11), ADR 0005 (distribution), ADR 0006 (1.0 bar), ADR 0007 (private CLI discovery), ADR 0008 (artifacts), ADR 0009 (primitives), ADR 0011 (schematic model). Review input: [HITL comparison](../review/hitl-comparison-2026-11-10.md) and the [external survey synthesis](../review/external-survey-synthesis-2026-11-11.md).
 
@@ -71,7 +71,7 @@ Pros: matches ADR 0009; keeps the MIT core clean; one contract across hosts and 
 
 Cons: two artifacts to release; the agent surface can still grow a shadow executive if discipline fails.
 
-**Proposed choice.**
+**Chosen.**
 
 ### D. Adopt an external project as the agent surface
 
@@ -81,7 +81,7 @@ Cons: every surveyed project rewrites whole files, appends text, or keeps two or
 
 **Reject** as the architecture. Keep external projects as inspiration only (§7).
 
-## Proposed decision (non-binding until accepted)
+## Decision
 
 Choose **C**, with the rules below.
 
@@ -207,12 +207,12 @@ The project aims to replace the need for `kicad-cli` and KiCad's incomplete API 
 - Library usage pages remain the human contract for primitives.
 - The agent surface keeps its own tool catalog and skill text, pointing at usage pages.
 
-## Consequences (if accepted later)
+## Consequences
 
 - Map work stays on ADR 0006 implementation until 1.0 unless the owner opens a deliberate spike.
 - The first implementation ticket must: list tools against shipped surfaces; forbid private imports; implement §2 version 1 (per-call lifecycle, batch, preview); implement §3 lock refusal; show one composite's step list; state isolation behavior.
 - The recipes module still appears only when a real caller needs it. The agent surface can be that caller and must say so then.
-- No change to the public Python API is authorized by this proposal.
+- No change to the public Python API is authorized by this ADR.
 
 ## Open questions (for owner grilling when the agent surface is scheduled)
 
@@ -223,8 +223,8 @@ The project aims to replace the need for `kicad-cli` and KiCad's incomplete API 
 5. How far may the agent surface go with `pcbnew` and KiCad IPC while the library stays free of them?
 6. Which capability moves to a native backend first, and which trigger fires (§9)?
 
-## What "done" means for this proposal document
+## Scope of this acceptance
 
-- The anchor exists and is indexed.
-- Status remains **Proposed** until the owner accepts, revises, or rejects it.
-- Implementation waits for an explicit owner decision and a post-1.0 (or explicitly reopened) ticket.
+- The anchor is accepted and indexed. Its rules bind any future agent surface built on this package.
+- Acceptance does not schedule work. Implementation waits for a post-1.0 (or explicitly reopened) ticket.
+- The open questions above stay open until that ticket grills them.
