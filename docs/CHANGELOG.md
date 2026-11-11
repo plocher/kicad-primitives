@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Propose ADR 0010 from the #78 grilling (`docs/adr/0010-load-save-locks-and-three-levels.md`): load and save for data, open and close only for locks, a new model on every load, a bare `save()` with separate check calls, and three levels (building blocks, required to be like KiCad, convenience choices). Not accepted. No code or public API change. If accepted, it replaces parts of ADR 0008, 0009, and 0011.
+
 - Capture HITL research as adversarial map input and a post-1.0 MCP anchor: `docs/review/hitl-comparison-2026-11-10.md` and proposed ADR 0012 (`docs/adr/0012-future-mcp-tool-surface.md`). Not accepted; not a 1.0 gate; no public API change.
 - Add a Structured-B survey of four more KiCad-agent projects (kicad-happy, Seeed kicad-mcp-server, KiCad-AI-Assistant, KiCadAI) and a synthesis with a claim matrix, ranked cracks, and owner decisions (`docs/review/external-survey-synthesis-2026-11-11.md`).
 - Amend ADR 0003 (accepted by the owner, 2026-11-11): the write contract is schema-correct output, no corruption outside the operation's scope, and operation-defined scope. Byte preservation measures the second part and is proven by functional and unit tests, not runtime checks. No code change; save paths had no runtime byte checks. AGENTS updated.
