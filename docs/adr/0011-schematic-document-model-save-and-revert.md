@@ -3,6 +3,7 @@
 Date: 2026-10-30
 
 Status: Accepted by the owner on 2026-10-31. Decisions grilled with the owner on [#75](https://github.com/plocher/kicad-primitives/issues/75) on 2026-10-30.
+Amended by [ADR 0010](0010-load-save-locks-and-three-levels.md) on 2026-11-11. ADR 0010 keeps the nouns (D1), the project reference (D2), the write set (D3), `backup()` (D7), `save_as()` (D8), the netlist equality (D9), and D10. It replaces the conflict class and the retry of D4, all of D5 (`on_close` and who ends things), and the `discard()` half of D6. Revert is deferred. The layers become the levels of ADR 0010. Its section "Relationship to earlier ADRs" is the record.
 
 Related: [ADR 0008](0008-artifact-objects-and-explicit-persistence.md), [ADR 0009](0009-primitives-not-an-executive.md), [#78](https://github.com/plocher/kicad-primitives/issues/78) (KiCad and Project scopes), [#79](https://github.com/plocher/kicad-primitives/issues/79) (sheet model and per-instance data).
 

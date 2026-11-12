@@ -3,6 +3,7 @@
 Date: 2026-10-29
 
 Status: Accepted by the owner on 2026-10-29.
+Amended by [ADR 0010](0010-load-save-locks-and-three-levels.md) on 2026-11-11. ADR 0010 keeps the primitive test and policy above primitives. It replaces the lifecycle "open, read, modify, validate, write, close" with load, read, modify, and save. It moves "no silent overwrite", the `overwrite=True` argument, the validity check, and the native backup out of `save()` into separate calls. It withdraws the process-wide open registry and the `on_close` choice of `FootprintLibrary`. The package can now take and release a lock, and no write consults a lock. Its section "Relationship to earlier ADRs" is the record.
 
 Related: [ADR 0003](0003-source-preserving-parser-and-writes.md), [ADR 0008](0008-artifact-objects-and-explicit-persistence.md), footprint libraries [#39](https://github.com/plocher/kicad-primitives/issues/39).
 

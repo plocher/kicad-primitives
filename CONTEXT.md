@@ -2,41 +2,41 @@
 
 ## KiCad data and operations
 
+ADR 0010 sets the words load, save, open, and close. The code moves to them with the implementation tickets.
+
 **Artifact**:
 A KiCad project, document, library, table, drawing sheet, or other supported KiCad data object with its own content and context.
 
 **Pending changes**:
 In-memory changes to an artifact or its owned content that the client has not saved.
 
+**Model**:
+The in-memory content of one file, or of an association of files. A model carries the methods that read and change it.
+
+**Load**:
+Read one file into a new, independent model. Nothing is held after the read.
+
 **Save**:
-Explicit persistence of an artifact's pending changes to its current storage location.
+Write a model to its file. Save checks nothing: the "changed on disk" check, the validity check, and the backup are separate calls.
 
 **Save as**:
 Explicit persistence to a new destination, with artifact rebinding only after success.
 
-**Discard**:
-Terminal artifact exit without writing. Invalidate owned editable handles.
-This is not rollback, reload, or a reset that permits continued editing.
+**Open**:
+Take a lock. Open fails when another session holds it. Open does nothing else.
 
 **Close**:
-Artifact exit that persists pending changes.
-A clean artifact closes without writing. A dirty artifact saves first.
-If that save fails, the artifact stays open with its pending changes.
-Close after exit is idempotent. A `with` block discards instead of closing when an exception exits it.
-A scope applies its `on_close` choice (`save`, `discard`, or `raise`) to its unsaved artifacts instead (ADR 0011).
+Release a lock. Close does nothing else. A model has no close.
 
 **Revert**:
-Drop the unsaved edits of an artifact or item and reload it from disk. The object stays open and keeps its identity.
-Revert reads the disk, so it can fail. Discard cannot fail, so error paths use discard.
+Drop the unsaved edits of an artifact or item and reload it from disk. The object keeps its identity.
+Revert reads the disk, so it can fail. At level 0, a new load does the same job. Further revert work is deferred (ADR 0010).
 
-**Scope**:
-A layer-1 owner of artifacts that drives their lifecycle. Today: `Project`. Later: `KiCad` (#78).
-
-**Layer 0 / Layer 1 / Layer 2**:
-Files (one file, data limited to that file) / the joined-up view (scopes and cross-file documents) / policy (plain functions built from layers 0 and 1).
+**Level 0 / Level 1 / Level 2**:
+Building blocks (one file, one model, one job per call) / required to be like KiCad (the in-memory model that a client works in) / convenience choices (functions built only from the levels below).
 
 **Schematic**:
-The project's set of sheet trees, opened, saved, and reverted as one document. KiCad `SCHEMATIC`.
+The project's set of sheet trees, loaded and saved as one document. KiCad `SCHEMATIC`.
 KiCad 10 lists peer top-level sheets in `schematic.top_level_sheets`. There is no single root.
 
 **Sheet file**:

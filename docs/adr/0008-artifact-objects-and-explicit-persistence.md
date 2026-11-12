@@ -4,6 +4,7 @@ Date: 2026-10-26
 
 Status: Architectural direction and independent-artifact lifecycle accepted by the owner on 2026-10-26.
 Close and context-manager semantics amended by the owner on 2026-10-29 (see [Amendment: close persists pending changes](#amendment-2026-10-29-close-persists-pending-changes)).
+Amended by [ADR 0010](0010-load-save-locks-and-three-levels.md) on 2026-11-11. ADR 0010 replaces the independent-artifact lifecycle of `close()`, `discard()`, and `with`, and the 2026-10-29 close amendment. It keeps artifact-owned objects, edits in memory, explicit save, the `set_attribute` meaning, and save to a new path. Its section "Relationship to earlier ADRs" is the record.
 
 Related work: [Schematic symbol attribute editing](https://github.com/plocher/kicad-primitives/issues/36).
 Alignment: [Editable library and table nouns with explicit lifecycle](https://github.com/plocher/kicad-primitives/issues/54).
