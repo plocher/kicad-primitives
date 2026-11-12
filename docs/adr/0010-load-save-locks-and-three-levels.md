@@ -343,7 +343,7 @@ A possible order for the implementation tickets:
 7. Move `Project` to `begin` and `load`, with the explicit add to the root, and with `open` and `close` as its lock.
 8. Add a level-2 function when a client needs one.
 
-ADR 0006 scope does not change. The shipped surfaces of Projects, Schematics, Symbol libraries, Footprint libraries, and Tables change, so their usage pages change with each ticket.
+ADR 0006 scope does not change. The rework is a 1.0 blocker (owner, 2026-11-11): 1.0 does not ship the earlier lifecycle. The shipped surfaces of Projects, Schematics, Symbol libraries, Footprint libraries, and Tables change, so their usage pages change with each ticket.
 
 ## Glossary changes (CONTEXT.md)
 

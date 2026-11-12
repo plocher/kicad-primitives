@@ -49,7 +49,7 @@ contract; older versions are supported read-only when possible.
 ### Load and save, locks, and three levels (locked)
 
 Canonical decision: [ADR 0010](docs/adr/0010-load-save-locks-and-three-levels.md). It replaces parts of ADR 0008, ADR 0009, and ADR 0011. Where another line in this file conflicts with it, ADR 0010 wins.
-Transition: the code still has the earlier lifecycle (`open`, `close`, `discard`, `on_close`, the registry, and the checks inside `save()`). Implementation tickets move it. New work follows ADR 0010. Do not extend the earlier lifecycle. The usage pages describe the code, so each page changes with its ticket.
+Transition: the code still has the earlier lifecycle (`open`, `close`, `discard`, `on_close`, the registry, and the checks inside `save()`). The rework is a 1.0 blocker (owner, 2026-11-11; #68). Implementation tickets move the code. New work follows ADR 0010. Do not extend the earlier lifecycle. The usage pages describe the code, so each page changes with its ticket.
 Load and save move data and hold nothing. Open and close take and release a lock, and do nothing else.
 Every load makes a new, independent model. No registry, no shared copy, and no close on a model. A model that a client drops loses its unsaved edits.
 `save()` writes the file and checks nothing. It replaces the file whole. The "changed on disk" check, the validity check, and the backup are separate calls.
